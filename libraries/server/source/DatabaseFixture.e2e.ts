@@ -1,6 +1,10 @@
 import { Graph } from 'basis/server'
+import type { WithDatabaseOptions } from 'basis/testing'
 import { withDatabase } from 'basis/testing'
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
+import { randomUUID } from 'node:crypto'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
+import { installBasis } from './Schema'
 
 const owner = '00000000-0000-4000-8000-000000000201'
 const viewer = '00000000-0000-4000-8000-000000000202'
@@ -81,4 +85,140 @@ test('asOwner swaps role and exposes the same fixture context', async () => {
     `
     expect(restored[0]?.role).toBe('basis_app')
   }, options)
+})
+
+describe('Public database fixture isolation', () => {
+  test('does not expose committed-write or owner-proof options to consumers', () => {
+    const accept = (candidate: WithDatabaseOptions): WithDatabaseOptions => candidate
+    expect(accept({ graph })).toBeDefined()
+    // @ts-expect-error commit is an internal proof option.
+    accept({ commit: true })
+    // @ts-expect-error owner is an internal proof option.
+    accept({ owner: true })
+    // @ts-expect-error fresh is an internal proof option.
+    accept({ fresh: true })
+    // @ts-expect-error entities is an internal proof option.
+    accept({ entities: {} })
+  })
+
+  test('always rolls back a consumer withDatabase transaction', async () => {
+    const title = `public-rollback-${randomUUID()}`
+    await withDatabase('public-rollback-write', null, async database => {
+      await database.create('Owner', { label: title, name: title })
+      expect(await database.query('Owner', { fields: ['id'], where: { label: title } }))
+        .toHaveLength(1)
+    })
+    await withDatabase('public-rollback-read', null, async database => {
+      expect(await database.query('Owner', { fields: ['id'], where: { label: title } }))
+        .toHaveLength(0)
+    })
+
+    const forcedTitle = `${title}-forced`
+    await withDatabase('public-rollback-forced-write', null, async database => {
+      await database.create('Owner', { label: forcedTitle, name: forcedTitle })
+    }, { commit: true } as never)
+    await withDatabase('public-rollback-forced-read', null, async database => {
+      expect(await database.query('Owner', { fields: ['id'], where: { label: forcedTitle } }))
+        .toHaveLength(0)
+    })
+  })
+})
+
+describe('Basis substrate installation', () => {
+  test('preserves unrelated application-owned triggers', async () => {
+    await withLifecycleDatabase('substrate-preserve-trigger', async database => {
+      await database.sql`
+        CREATE TABLE "Invoice" ("id" text PRIMARY KEY, "status" text)
+      `
+      await database.sql.unsafe(`
+        CREATE FUNCTION "resolve_invoice_status"() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          NEW."status" := 'resolved';
+          RETURN NEW;
+        END $$;
+      `).simple()
+      await database.sql`
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION
+          "resolve_invoice_status"()
+      `
+      await installBasis(database.sql)
+      await database.sql`
+        INSERT INTO "Invoice" ("id")
+        VALUES ('invoice-1')
+      `
+      expect(await database.sql<{ status: string }[]>`
+        SELECT "status"
+        FROM "Invoice"
+      `)
+        .toEqual([{ status: 'resolved' }])
+      expect(await database.sql<{ present: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
+          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
+          namespace.nspname = current_schema() AND relation.relname = 'Invoice' AND trigger.tgname =
+          'resolve_invoice_status' ) AS present
+      `).toEqual([{ present: true }])
+    })
+  })
+
+  test('removes only explicitly identified legacy Basis identity objects', async () => {
+    await withLifecycleDatabase('substrate-remove-legacy', async database => {
+      await database.sql`
+        CREATE TABLE "Invoice" ("id" text PRIMARY KEY, "status" text)
+      `
+      await database.sql.unsafe(`
+        CREATE FUNCTION "resolve_invoice_status"() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          NEW."status" := 'resolved';
+          RETURN NEW;
+        END $$;
+      `).simple()
+      await database.sql`
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION
+          "resolve_invoice_status"()
+      `
+      await database.sql.unsafe(`
+        CREATE OR REPLACE FUNCTION basis.enroll_identity(
+          provider_name text,
+          provider_subject text,
+          display_name text,
+          email_address text
+        ) RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
+      `).simple()
+      await database.sql.unsafe(`
+        CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)
+        RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
+      `).simple()
+      await database.sql.unsafe(`
+        CREATE OR REPLACE FUNCTION basis.has_role(role_id text)
+        RETURNS boolean LANGUAGE sql AS $$ SELECT FALSE $$;
+      `).simple()
+      await installBasis(database.sql)
+      expect(await database.sql<{
+        enroll: boolean,
+        resolve: boolean,
+        role: boolean,
+        triggerFunction: boolean,
+      }[]>`
+        SELECT to_regprocedure('basis.enroll_identity(text,text,text,text)') IS NULL AS "enroll",
+          to_regprocedure('basis.resolve_identity(text)') IS NULL AS "resolve",
+          to_regprocedure('basis.has_role(text)') IS NULL AS "role",
+          to_regprocedure('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
+      `).toEqual([{ enroll: true, resolve: true, role: true, triggerFunction: true }])
+      expect(await database.sql<{ present: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
+          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
+          namespace.nspname = current_schema() AND relation.relname = 'Invoice' AND trigger.tgname =
+          'resolve_invoice_status' ) AS present
+      `).toEqual([{ present: true }])
+      await database.sql`
+        INSERT INTO "Invoice" ("id")
+        VALUES ('invoice-2')
+      `
+      expect(await database.sql<{ status: string }[]>`
+        SELECT "status"
+        FROM "Invoice"
+      `)
+        .toEqual([{ status: 'resolved' }])
+    })
+  })
 })
