@@ -534,3 +534,51 @@ const query = sql\`(
     expect(lint(code).fixed).toBe(false)
   })
 })
+
+describe('parser-backed formatting', () => {
+  test('formats LIKE, IN, and BETWEEN predicates', () => {
+    expect(formatSQL(`
+      select * from widgets where name like 'a%' and id in (1, 2) and id between 1 and 3
+    `)).toMatchSql(`
+      SELECT *
+      FROM widgets
+      WHERE name LIKE 'a%'
+        AND id IN (1, 2)
+        AND id BETWEEN 1 AND 3
+    `)
+  })
+
+  test('emits CROSS JOIN when a join has no condition', () => {
+    expect(formatSQL('select * from widgets w cross join other o')).toMatchSql(`
+      SELECT *
+      FROM widgets w
+      CROSS JOIN other o
+    `)
+  })
+
+  test('keeps ON CONFLICT and RETURNING clauses', () => {
+    expect(formatSQL(`
+      insert into widgets (id, name)
+      values (1, 'a')
+      on conflict (id) do update set name = excluded.name
+      returning id, name
+    `)).toMatchSql(`
+      INSERT INTO widgets (id, name)
+      VALUES
+        (1, 'a')
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name
+      RETURNING id, name
+    `)
+  })
+
+  test('keeps fallback clauses intact', () => {
+    expect(formatSQL('select distinct id from widgets')).toMatchSql(`
+      SELECT DISTINCT id
+      FROM widgets
+    `)
+    expect(formatSQL('select * from public.widgets')).toMatchSql(`
+      SELECT *
+      FROM public.widgets
+    `)
+  })
+})

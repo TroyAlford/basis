@@ -1128,7 +1128,7 @@ export async function withDatabase<T>(
       await options.setup?.(context())
       await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
-        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+        SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
       `
       return callback(context())
     },
@@ -1184,7 +1184,7 @@ export async function withCommittedDatabase<T>(
     }
     await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
     await sql`
-      SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+      SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
     `
     return callback({
       create: (entity, values) => sql.create(entity, values),
@@ -1217,10 +1217,11 @@ async function ensureSchema(
   if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
     await sql`
-      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS
+        present
     `
     if (present[0]?.present) return
 
@@ -1259,10 +1260,11 @@ async function ensureGraphSchema(database: Database): Promise<string> {
   await ensureApplicationRole(database)
   await database.tx(async sql => {
     await sql`
-      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS
+        present
     `
     let complete = Boolean(present[0]?.present)
     if (complete) {
@@ -1281,8 +1283,10 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     }
     if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
-          ${fixtureRows.alice}) AS seeded
+        SELECT EXISTS(
+  SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
+    ${fixtureRows.alice}
+) AS seeded
       `
       complete = Boolean(seeded?.seeded)
     }

@@ -423,7 +423,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   const schemaRows = await sql<{ name: string }[]>`
     SELECT nspname AS name
     FROM pg_namespace
-    WHERE nspname IN ('public', 'basis', current_schema())
+    WHERE nspname IN ('public', 'basis', CURRENT_SCHEMA())
     ORDER BY nspname
   `
   const tableRows = await sql<{
@@ -440,7 +440,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind = 'r'
-      AND n.nspname IN (current_schema(), 'basis')
+      AND n.nspname IN (CURRENT_SCHEMA(), 'basis')
     ORDER BY n.nspname, c.relname
   `
   const columnRows = await sql<{
@@ -510,11 +510,11 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       n.nspname AS schema,
       c.relname AS TABLE,
       con.conname AS CONSTRAINT,
-      pg_get_constraintdef(con.oid) AS definition
+      PG_GET_CONSTRAINTDEF(con.oid) AS definition
     FROM pg_constraint con
     JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname IN (current_schema(), 'basis')
+    WHERE n.nspname IN (CURRENT_SCHEMA(), 'basis')
       AND con.contype = 'f'
     ORDER BY n.nspname, c.relname, con.conname
   `
@@ -553,11 +553,11 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       n.nspname AS schema,
       c.relname AS TABLE,
       con.conname AS CONSTRAINT,
-      pg_get_constraintdef(con.oid) AS definition
+      PG_GET_CONSTRAINTDEF(con.oid) AS definition
     FROM pg_constraint con
     JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname IN (current_schema(), 'basis')
+    WHERE n.nspname IN (CURRENT_SCHEMA(), 'basis')
       AND con.contype = 'c'
     ORDER BY n.nspname, c.relname, con.conname
   `
@@ -751,7 +751,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       END AS function
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname IN (current_schema(), 'basis')
+    WHERE n.nspname IN (CURRENT_SCHEMA(), 'basis')
       AND p.proacl IS NULL
   `
   for (const row of defaultFunctionRows) {
@@ -812,7 +812,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   })
   let roles: PhysicalRole[] = []
   const [roleTable] = await sql<{ present: boolean }[]>`
-    SELECT to_regclass('"Role"') IS NOT NULL AS present
+    SELECT TO_REGCLASS('"Role"') IS NOT NULL AS present
   `
   if (roleTable?.present) {
     roles = await sql<{ description: string, id: string, name: string }[]>`

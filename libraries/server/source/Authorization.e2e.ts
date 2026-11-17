@@ -260,13 +260,13 @@ describe('Authorization RLS', () => {
 
       const actorSetting = await asActor(user, () => server.db.tx(async sql => (
         sql<{ actor: string | null }[]>`
-          SELECT current_setting('actor.id', TRUE) AS actor
+          SELECT CURRENT_SETTING('actor.id', TRUE) AS actor
         `
       )))
       expect(actorSetting[0]?.actor).toBe(user)
       const anonymousSetting = await asActor(null, () => server.db.tx(async sql => (
         sql<{ actor: string | null }[]>`
-          SELECT current_setting('actor.id', TRUE) AS actor
+          SELECT CURRENT_SETTING('actor.id', TRUE) AS actor
         `
       )))
       expect(anonymousSetting[0]?.actor ?? '').toBe('')

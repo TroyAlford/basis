@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- AST printer boundary over PostgreSQL nodes. */
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
+import { parse as parsePostgres } from 'postgresql-eslint-parser'
 
 /** Token kinds produced by the SQL tokenizer. */
 type TokenKind =
@@ -228,7 +230,7 @@ function token(kind: TokenKind, text: string): Token {
  * @param indent - Prefix for every formatted line.
  * @returns Formatted SQL text.
  */
-export function formatSQL(sql: string, indent = ''): string {
+function formatLegacySQL(sql: string, indent = ''): string {
   const statements = splitStatements(tokenize(sql))
   if (statements.length === 0) return ''
   const blocks = statements.map(statement => wrapLongLines(formatStatement(statement, indent)))
@@ -1104,6 +1106,691 @@ function findTopLevel(tokens: readonly Token[], predicate: (candidate: Token) =>
  */
 function startsWith(tokens: readonly Token[], words: readonly string[]): boolean {
   return words.every((word, index) => tokens[index]?.upper === word)
+}
+
+/**
+ * Format one SQL template body through the PostgreSQL AST.
+ * Falls back to the legacy formatter for comments, DDL, and unsupported nodes.
+ * @param sql - SQL text with expression placeholders.
+ * @param indent - Prefix for every formatted line.
+ * @returns Formatted SQL text.
+ */
+export function formatSQL(sql: string, indent = ''): string {
+  const placeholders = new Map<string, string>()
+  let safeSql = ''
+  for (let index = 0; index < sql.length;) {
+    if (sql[index] === '\u0001') {
+      const close = sql.indexOf('\u0001', index + 1)
+      const digits = sql.slice(index + 1, close)
+      if (close !== -1 && /^\d+$/u.test(digits)) {
+        let end = close + 1
+        while (sql[end] === '\u0002') end += 1
+        const original = sql.slice(index, end)
+        const safe = `__basis_p${digits}_${'_'.repeat(end - close - 1)}__`
+        placeholders.set(safe, original)
+        safeSql += safe
+        index = end
+        continue
+      }
+    }
+    safeSql += sql[index]
+    index += 1
+  }
+  try {
+    const ast = parsePostgres(safeSql) as any
+    if ((ast.comments?.length ?? 0) > 0) return formatLegacySQL(sql, indent)
+    if (!ast.body?.length) return ''
+    const printer = new AstPrinter(safeSql, ast.tokens ?? [])
+    let formatted = ast.body.map((node: any) => printer.statement(node, indent)).join(';\n\n')
+    for (const [safe, original] of placeholders) {
+      formatted = formatted.replace(new RegExp(safe, 'giu'), original)
+    }
+    if (formatted.split('\n').some(line => line.length > 100)) return formatLegacySQL(sql, indent)
+    return formatted
+  } catch {
+    return formatLegacySQL(sql, indent)
+  }
+}
+
+/** Prints PostgreSQL AST nodes in the canonical Basis layout. */
+class AstPrinter {
+  constructor(private readonly source: string, private readonly tokens: readonly any[]) {}
+
+  /**
+   * Print one statement.
+   * @param node - Statement node.
+   * @param indent - Prefix for this statement.
+   * @returns Formatted SQL.
+   */
+  statement(node: any, indent: string): string {
+    if (!this.supported(node, new Set())) {
+      return formatLegacySQL(this.text(node) || this.source, indent)
+    }
+    return this.lines(node, '')
+      .flatMap(line => line.split('\n'))
+      .map(line => `${indent}${line}`)
+      .join('\n')
+  }
+
+  /**
+   * Check whether every node in a statement is safe for this printer.
+   * @param node - Candidate node or value.
+   * @param seen - Nodes already visited.
+   * @returns Whether the printer supports the subtree.
+   */
+  supported(node: any, seen: Set<object>): boolean {
+    if (!node || typeof node !== 'object') return true
+    if (seen.has(node)) return true
+    seen.add(node)
+    if (Array.isArray(node)) return node.every(item => this.supported(item, seen))
+    if (typeof node.type !== 'string') return true
+    if (!this.supportedType(node)) return false
+    return Object.entries(node).every(([key, value]) => (
+      ['parent', 'loc', 'range', 'type'].includes(key) || this.supported(value, seen)
+    ))
+  }
+
+  /**
+   * Check whether one node type is supported.
+   * @param node - Candidate node.
+   * @returns Whether this node's own fields are supported.
+   */
+  supportedType(node: any): boolean {
+    switch (node.type) {
+      case 'SelectStmt':
+        return !node.distinctClause?.length
+          && !node.intoClause
+          && !node.windowClause?.length
+          && !node.lockingClause?.length
+          && !node.sampleClause
+          && (!node.limitOption || node.limitOption === 'LIMIT_OPTION_DEFAULT')
+      case 'InsertStmt':
+        return !node.withClause
+          && !node.relation?.alias
+          && !node.relation?.schemaname
+          && !node.relation?.catalogname
+          && (!node.override || node.override === 'OVERRIDING_NOT_SET')
+          && (!node.onConflictClause || !node.onConflictClause.constraint)
+          && (!node.onConflictClause?.indexElems || node.onConflictClause.indexElems.every((elem: any) => (
+            elem?.type === 'IndexElem' && Boolean(elem.name) && !elem.expr && !elem.collation && !elem.opclass
+            && (!elem.ordering || elem.ordering === 'SORTBY_DEFAULT')
+            && (!elem.nulls_ordering || elem.nulls_ordering === 'SORTBY_NULLS_DEFAULT')
+          )))
+      case 'ViewStmt':
+        return !node.aliases?.length
+          && !node.options?.length
+          && !node.withCheckOption
+          && !node.view?.schemaname
+          && !node.view?.catalogname
+      case 'RangeVar':
+        return !node.schemaname
+          && !node.catalogname
+          && !node.alias?.colnames?.length
+      case 'JoinExpr':
+        return !node.usingClause?.length && !node.isNatural && !node.alias
+      case 'ResTarget':
+        return !node.indirection?.length
+      case 'ColumnRef':
+        return !node.indirection?.length
+          && (node.fields ?? []).every((field: any) => field?.type === 'String' || field?.type === 'A_Star')
+      case 'A_Expr': {
+        const kinds = [
+          'AEXPR_OP', 'AEXPR_OP_ANY', 'AEXPR_OP_ALL', 'AEXPR_LIKE', 'AEXPR_ILIKE',
+          'AEXPR_IN', 'AEXPR_BETWEEN', 'AEXPR_NOT_BETWEEN', 'AEXPR_BETWEEN_SYM',
+          'AEXPR_NOT_BETWEEN_SYM', 'AEXPR_DISTINCT', 'AEXPR_NOT_DISTINCT', 'AEXPR_NULLIF',
+        ]
+        return kinds.includes(node.kind)
+          && Boolean(node.lexpr && node.rexpr)
+          && Boolean(node.name?.length)
+          && node.lexpr?.type !== 'A_Expr'
+          && node.rexpr?.type !== 'A_Expr'
+      }
+      case 'BoolExpr':
+        return ['AND_EXPR', 'OR_EXPR', 'NOT_EXPR'].includes(node.boolop)
+      case 'FuncCall':
+        return !node.over
+          && !node.agg_order?.length
+          && !node.agg_filter
+          && !node.func_variadic
+          && !node.agg_within_group
+          && Boolean(node.funcname?.length)
+      case 'SortBy':
+        return node.sortby_dir !== 'SORTBY_USING'
+      case 'TypeCast':
+        return Boolean(node.typeName?.range)
+      case 'BooleanTest':
+        return ['IS_TRUE', 'IS_NOT_TRUE', 'IS_FALSE', 'IS_NOT_FALSE'].includes(node.booltesttype)
+      case 'CommonTableExpr':
+        return (!node.ctematerialized || node.ctematerialized === 'CTEMaterializeDefault')
+          && !node.aliascolnames?.length
+          && !node.search_clause
+          && !node.cycle_clause
+      case 'A_Const':
+      case 'ParamRef':
+      case 'CoalesceExpr':
+      case 'NullTest':
+      case 'CaseExpr':
+      case 'CaseWhen':
+      case 'Alias':
+      case 'List':
+      case 'ctes':
+      case 'targetList':
+      case 'names':
+      case 'infer':
+      case 'IndexElem':
+      case 'String':
+      case 'A_Star':
+        return true
+      default:
+        return false
+    }
+  }
+
+  /**
+   * Slice the original source for one node.
+   * @param node - AST node.
+   * @returns Source text.
+   */
+  text(node: any): string {
+    if (!node?.range) return ''
+    return this.source.slice(node.range[0], node.range[1])
+  }
+
+  /**
+   * Format one statement or select node.
+   * @param node - AST node.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  lines(node: any, indent: string): string[] {
+    const normalized = this.normalizeSelect(node)
+    switch (normalized?.type) {
+      case 'SelectStmt': return this.select(normalized, indent)
+      case 'InsertStmt': return this.insert(normalized, indent)
+      case 'ViewStmt': return this.view(normalized, indent)
+      default: return formatLegacySQL(this.text(normalized) || this.source, indent).split('\n')
+    }
+  }
+
+  /**
+   * Repair the parser's flattened set-operation branches.
+   * @param node - Candidate select node.
+   * @returns A normal SelectStmt-shaped node.
+   */
+  normalizeSelect(node: any): any {
+    if (node?.type !== 'targetList') return node
+    const targetList = Object.keys(node)
+      .filter(key => /^\d+$/u.test(key))
+      .map(key => node[key])
+    return { ...node, targetList, type: 'SelectStmt' }
+  }
+
+  /**
+   * Find the boundary after a target list entry.
+   * @param node - SelectStmt.
+   * @param targets - Target-list nodes.
+   * @param index - Target index.
+   * @returns Byte offset where the target's clause ends.
+   */
+  targetBoundary(node: any, targets: readonly any[], index: number): number {
+    if (index < targets.length - 1) return targets[index + 1].range?.[0] ?? Number.MAX_SAFE_INTEGER
+    const starts = [
+      node.fromClause?.[0],
+      node.whereClause,
+      node.groupClause?.[0],
+      node.havingClause,
+      node.sortClause?.[0],
+      node.limitCount,
+      node.limitOffset,
+    ].map(item => item?.range?.[0]).filter((value: number | undefined): value is number => value !== undefined)
+    return Math.min(...starts, node.range?.[1] ?? Number.MAX_SAFE_INTEGER)
+  }
+
+  /**
+   * Format a SELECT statement.
+   * @param node - SelectStmt.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  select(node: any, indent: string): string[] {
+    if (node.withClause) return this.withSelect(node, indent)
+    if (node.op && node.op !== 'SETOP_NONE') return this.setOperation(node, indent)
+    if (node.valuesLists) return this.values(node.valuesLists, indent)
+    const targetNodes = node.targetList ?? []
+    const targets = targetNodes.map((target: any, index: number) => (
+      this.target(target, this.targetBoundary(node, targetNodes, index))
+    ))
+    const targetText = targets.map((target: string[]) => target.join(' ')).join(', ')
+    const multiline = targets.some((target: string[]) => target.length > 1)
+      || (`${indent}SELECT ${targetText}`.length > 100)
+    const lines: string[] = []
+    if (multiline) {
+      lines.push(`${indent}SELECT`)
+      targets.forEach((target: string[], index: number) => {
+        const copy = target.map(line => `${indent}  ${line}`)
+        if (index < targets.length - 1 && copy.length > 0) copy[copy.length - 1] = `${copy[copy.length - 1]},`
+        lines.push(...copy)
+      })
+    } else {
+      lines.push(`${indent}SELECT ${targetText}`)
+    }
+    if (node.fromClause?.length) lines.push(...this.from(node.fromClause, indent))
+    if (node.whereClause) lines.push(...this.condition(node.whereClause, indent, 'WHERE'))
+    if (node.groupClause?.length) {
+      lines.push(`${indent}GROUP BY ${node.groupClause.map((item: any) => this.expr(item)).join(', ')}`)
+    }
+    if (node.havingClause) lines.push(...this.condition(node.havingClause, indent, 'HAVING'))
+    if (node.sortClause?.length) {
+      lines.push(`${indent}ORDER BY ${node.sortClause.map((item: any) => this.sort(item)).join(', ')}`)
+    }
+    if (node.limitCount) lines.push(`${indent}LIMIT ${this.expr(node.limitCount)}`)
+    if (node.limitOffset) lines.push(`${indent}OFFSET ${this.expr(node.limitOffset)}`)
+    return lines
+  }
+
+  /**
+   * Format a target-list entry.
+   * @param node - ResTarget.
+   * @param boundary - Byte offset where the target's clause ends.
+   * @returns Target lines without the outer indentation.
+   */
+  target(node: any, boundary: number): string[] {
+    const alias = this.alias(node, boundary)
+    if (node.val?.type === 'CaseExpr') return this.caseExpression(node.val, alias)
+    return [`${this.expr(node.val)}${alias}`]
+  }
+
+  /**
+   * Resolve an alias from the tokens after a target expression.
+   * @param node - ResTarget.
+   * @param boundary - Byte offset where the target's clause ends.
+   * @returns ` AS alias`, or empty.
+   */
+  alias(node: any, boundary: number): string {
+    if (!node?.name) return ''
+    const tokens = this.tokens.filter((candidate: any) => (
+      node.range && candidate.range[1] <= boundary && candidate.range[0] >= (node.range?.[1] ?? 0)
+    )).filter((candidate: any) => candidate.value !== ',')
+    const asIndex = tokens.findIndex((candidate: any) => candidate.value.toLowerCase() === 'as')
+    const alias = asIndex >= 0 ? tokens[asIndex + 1] : tokens[tokens.length - 1]
+    return alias ? ` AS ${alias.value}` : ` AS ${node.name}`
+  }
+
+  /**
+   * Format FROM entries.
+   * @param items - From-clause nodes.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  from(items: readonly any[], indent: string): string[] {
+    const [first, ...rest] = items
+    const firstText = this.fromItem(first).replace(/\n/gu, `\n${indent}`)
+    const lines = [`${indent}FROM ${firstText}`]
+    for (const item of rest) {
+      lines.push(`${indent}, ${this.fromItem(item).replace(/\n/gu, `\n${indent}`)}`)
+    }
+    return lines
+  }
+
+  /**
+   * Format one FROM item.
+   * @param node - RangeVar or JoinExpr.
+   * @returns Inline text.
+   */
+  fromItem(node: any): string {
+    if (node?.type !== 'JoinExpr') {
+      const base = this.expr(node)
+      if (!node?.alias) return base
+      const between = node.range && node.alias.range
+        ? this.source.slice(node.range[1], node.alias.range[0])
+        : ''
+      const as = /\bas\b/iu.test(between) ? ' AS' : ''
+      return `${base}${as} ${this.text(node.alias)}`
+    }
+    const cross = !node.quals && !node.usingClause?.length && !node.isNatural
+    const join = cross ? 'CROSS JOIN' : this.joinName(node.jointype)
+    const left = this.fromItem(node.larg)
+    const right = this.fromItem(node.rarg)
+    const on = node.quals ? ` ON ${this.expr(node.quals)}` : ''
+    return `${left}\n${join} ${right}${on}`
+  }
+
+  /**
+   * Map a JoinType to SQL.
+   * @param jointype - JoinType enum.
+   * @returns Join keyword.
+   */
+  joinName(jointype: string): string {
+    switch (jointype) {
+      case 'JOIN_LEFT': return 'LEFT JOIN'
+      case 'JOIN_RIGHT': return 'RIGHT JOIN'
+      case 'JOIN_FULL': return 'FULL JOIN'
+      case 'JOIN_CROSS': return 'CROSS JOIN'
+      case 'JOIN_INNER': return 'JOIN'
+      default: return 'JOIN'
+    }
+  }
+
+  /**
+   * Format a WHERE/HAVING condition, splitting top-level booleans.
+   * @param node - Condition node.
+   * @param indent - Prefix for this block.
+   * @param keyword - WHERE or HAVING.
+   * @returns Formatted lines.
+   */
+  condition(node: any, indent: string, keyword: string): string[] {
+    if (node?.type !== 'BoolExpr' || (node.boolop !== 'AND_EXPR' && node.boolop !== 'OR_EXPR')) {
+      return [`${indent}${keyword} ${this.expr(node)}`]
+    }
+    const operator = node.boolop === 'AND_EXPR' ? 'AND' : 'OR'
+    const [first, ...rest] = node.args ?? []
+    const lines = [`${indent}${keyword} ${this.expr(first)}`]
+    for (const arg of rest) lines.push(`${indent}  ${operator} ${this.expr(arg)}`)
+    return lines
+  }
+
+  /**
+   * Format a WITH query.
+   * @param node - SelectStmt with withClause.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  withSelect(node: any, indent: string): string[] {
+    const withClause = node.withClause
+    const ctes = Object.keys(withClause)
+      .filter(key => /^\d+$/u.test(key))
+      .map(key => withClause[key])
+      .filter((cte: any) => cte?.type === 'CommonTableExpr')
+    const lines: string[] = []
+    const prefix = withClause.recursive ? 'WITH RECURSIVE' : 'WITH'
+    ctes.forEach((cte: any, index: number) => {
+      const name = this.text(cte) || cte.ctename
+      const lead = index === 0 ? `${indent}${prefix}` : indent
+      lines.push(`${lead} ${name} AS (`)
+      lines.push(...this.lines(cte.ctequery, `${indent}  `))
+      lines.push(`${indent})${index < ctes.length - 1 ? ',' : ''}`)
+    })
+    const rest = { ...node, withClause: undefined }
+    lines.push(...this.select(rest, indent))
+    return lines
+  }
+
+  /**
+   * Format a set operation.
+   * @param node - SelectStmt with larg/rarg.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  setOperation(node: any, indent: string): string[] {
+    const operator = node.op === 'SETOP_INTERSECT'
+      ? 'INTERSECT'
+      : node.op === 'SETOP_EXCEPT' ? 'EXCEPT' : 'UNION'
+    const keyword = node.all ? `${operator} ALL` : operator
+    return [
+      ...this.lines(this.normalizeSelect(node.larg), indent),
+      '',
+      `${indent}${keyword}`,
+      '',
+      ...this.lines(this.normalizeSelect(node.rarg), indent),
+    ]
+  }
+
+  /**
+   * Format a VALUES query.
+   * @param rows - valuesLists nodes.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  values(rows: readonly any[], indent: string): string[] {
+    const lines = [`${indent}VALUES`]
+    rows.forEach((row: any, index: number) => {
+      const items = (row.items ?? []).map((item: any) => this.expr(item)).join(', ')
+      lines.push(`${indent}  (${items})${index < rows.length - 1 ? ',' : ''}`)
+    })
+    return lines
+  }
+
+  /**
+   * Format a CREATE VIEW statement.
+   * @param node - ViewStmt.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  view(node: any, indent: string): string[] {
+    const name = this.expr(node.view)
+    const replace = node.replace ? 'OR REPLACE ' : ''
+    return [
+      `${indent}CREATE ${replace}VIEW ${name} AS (`,
+      ...this.lines(node.query, `${indent}  `),
+      `${indent})`,
+    ]
+  }
+
+  /**
+   * Format an INSERT statement.
+   * @param node - InsertStmt.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  insert(node: any, indent: string): string[] {
+    const select = node.selectStmt
+    if (!select?.valuesLists) return formatLegacySQL(this.text(node), indent).split('\n')
+    const relation = this.expr(node.relation)
+    const columns = (node.cols ?? []).map((column: any) => this.text(column) || column.name)
+    const header = columns.length > 0
+      ? `${indent}INSERT INTO ${relation} (${columns.join(', ')})`
+      : `${indent}INSERT INTO ${relation}`
+    const lines = [header, ...this.values(select.valuesLists, indent)]
+    if (node.onConflictClause) lines.push(...this.onConflict(node.onConflictClause, indent))
+    if (node.returningList?.length) {
+      const returning = node.returningList.map((target: any, index: number) => (
+        this.target(target, this.listBoundary(node.returningList, index, node.range?.[1]))
+      )).map((target: string[]) => target.join(' ')).join(', ')
+      lines.push(`${indent}RETURNING ${returning}`)
+    }
+    return lines
+  }
+
+  /**
+   * Format an ON CONFLICT clause.
+   * @param node - OnConflictClause node.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  onConflict(node: any, indent: string): string[] {
+    const target = node.indexElems?.length
+      ? ` (${node.indexElems.map((elem: any) => elem.name).join(', ')})`
+      : ''
+    const action = node.action === 'ONCONFLICT_NOTHING' ? 'DO NOTHING' : 'DO UPDATE'
+    const updates = node.targetList ?? []
+    if (updates.length === 0) return [`${indent}ON CONFLICT${target} ${action}`]
+    if (updates.length === 1) {
+      const update = updates[0]
+      const name = this.text(update) || update.name
+      return [`${indent}ON CONFLICT${target} ${action} SET ${name} = ${this.expr(update.val)}`]
+    }
+    const lines = [`${indent}ON CONFLICT${target} ${action} SET`]
+    updates.forEach((update: any, index: number) => {
+      const name = this.text(update) || update.name
+      lines.push(`${indent}  ${name} = ${this.expr(update.val)}${index < updates.length - 1 ? ',' : ''}`)
+    })
+    return lines
+  }
+
+  /**
+   * Find the boundary after an item in a target list.
+   * @param items - Target nodes.
+   * @param index - Item index.
+   * @param end - End of the enclosing statement.
+   * @returns Byte offset where the item ends.
+   */
+  listBoundary(items: readonly any[], index: number, end = Number.MAX_SAFE_INTEGER): number {
+    return index < items.length - 1 ? items[index + 1].range?.[0] ?? end : end
+  }
+
+  /**
+   * Format a CASE expression.
+   * @param node - CaseExpr.
+   * @param alias - Alias suffix.
+   * @returns Formatted lines.
+   */
+  caseExpression(node: any, alias: string): string[] {
+    const lines = [`CASE${node.arg ? ` ${this.expr(node.arg)}` : ''}`]
+    for (const when of node.args ?? []) {
+      lines.push(`  WHEN ${this.expr(when.expr)} THEN ${this.expr(when.result)}`)
+    }
+    if (node.defresult) lines.push(`  ELSE ${this.expr(node.defresult)}`)
+    lines.push(`END${alias}`)
+    return lines
+  }
+
+  /**
+   * Format a sort item.
+   * @param node - SortBy.
+   * @returns Inline text.
+   */
+  sort(node: any): string {
+    const direction = node.sortby_dir === 'SORTBY_DESC' ? ' DESC'
+      : node.sortby_dir === 'SORTBY_ASC' ? ' ASC'
+        : node.sortby_dir === 'SORTBY_USING' ? ` USING ${node.useOp}` : ''
+    const nulls = node.sortby_nulls === 'SORTBY_NULLS_FIRST' ? ' NULLS FIRST'
+      : node.sortby_nulls === 'SORTBY_NULLS_LAST' ? ' NULLS LAST' : ''
+    return `${this.expr(node.node)}${direction}${nulls}`
+  }
+
+  /**
+   * Format an expression inline.
+   * @param node - Expression node.
+   * @returns Inline SQL.
+   */
+  expr(node: any): string {
+    if (!node) return ''
+    switch (node.type) {
+      case 'ColumnRef':
+        return this.columnRef(node)
+      case 'ParamRef':
+        return this.text(node)
+      case 'A_Const':
+        return this.text(node) || this.constant(node)
+      case 'A_Expr': {
+        const operator = node.name?.[0]?.sval ?? ''
+        if (!operator) return this.text(node)
+        const left = this.group(node.lexpr)
+        const right = this.group(node.rexpr)
+        if (node.kind === 'AEXPR_OP_ANY') return `${left} ${operator} ANY (${right})`
+        if (node.kind === 'AEXPR_OP_ALL') return `${left} ${operator} ALL (${right})`
+        if (node.kind === 'AEXPR_LIKE') return `${left} ${operator === '!~~' ? 'NOT LIKE' : 'LIKE'} ${right}`
+        if (node.kind === 'AEXPR_ILIKE') return `${left} ${operator === '!~~*' ? 'NOT ILIKE' : 'ILIKE'} ${right}`
+        if (node.kind === 'AEXPR_IN') {
+          const items = (node.rexpr?.items ?? []).map((item: any) => this.expr(item)).join(', ')
+          return `${left} ${operator === '<>' ? 'NOT IN' : 'IN'} (${items})`
+        }
+        if (node.kind === 'AEXPR_BETWEEN' || node.kind === 'AEXPR_NOT_BETWEEN'
+          || node.kind === 'AEXPR_BETWEEN_SYM' || node.kind === 'AEXPR_NOT_BETWEEN_SYM') {
+          const items = (node.rexpr?.items ?? []).map((item: any) => this.expr(item))
+          const keyword = node.kind === 'AEXPR_BETWEEN' ? 'BETWEEN'
+            : node.kind === 'AEXPR_NOT_BETWEEN' ? 'NOT BETWEEN'
+              : node.kind === 'AEXPR_BETWEEN_SYM' ? 'BETWEEN SYMMETRIC' : 'NOT BETWEEN SYMMETRIC'
+          return `${left} ${keyword} ${items[0]} AND ${items[1]}`
+        }
+        if (node.kind === 'AEXPR_DISTINCT') return `${left} IS DISTINCT FROM ${right}`
+        if (node.kind === 'AEXPR_NOT_DISTINCT') return `${left} IS NOT DISTINCT FROM ${right}`
+        if (node.kind === 'AEXPR_NULLIF') return `NULLIF(${left}, ${right})`
+        return `${left} ${operator} ${right}`
+      }
+      case 'BoolExpr': {
+        if (node.boolop === 'NOT_EXPR') return `NOT (${this.expr(node.args?.[0])})`
+        const operator = node.boolop === 'AND_EXPR' ? 'AND' : 'OR'
+        return `(${(node.args ?? []).map((arg: any) => this.expr(arg)).join(` ${operator} `)})`
+      }
+      case 'NullTest':
+        return `${this.group(node.arg)} IS ${node.nulltesttype === 'IS_NOT_NULL' ? 'NOT ' : ''}NULL`
+      case 'BooleanTest': {
+        const negated = node.booltesttype === 'IS_NOT_TRUE' || node.booltesttype === 'IS_NOT_FALSE'
+        const expected = node.booltesttype?.includes('FALSE') ? 'FALSE' : 'TRUE'
+        return `${this.group(node.arg)} IS ${negated ? 'NOT ' : ''}${expected}`
+      }
+      case 'TypeCast':
+        return `${this.group(node.arg)}::${this.text(node.typeName)}`
+      case 'FuncCall': {
+        const parts = (node.funcname ?? []).map((part: any) => part.sval ?? part.String?.sval ?? '')
+        const name = parts.join('.').toUpperCase()
+        const distinct = node.agg_distinct ? 'DISTINCT ' : ''
+        const args = node.agg_star ? '*' : (node.args ?? []).map((arg: any) => this.expr(arg)).join(', ')
+        return `${name}(${distinct}${args})`
+      }
+      case 'CoalesceExpr':
+        return `COALESCE(${(node.args ?? []).map((arg: any) => this.expr(arg)).join(', ')})`
+      case 'CaseExpr': {
+        const head = `CASE${node.arg ? ` ${this.expr(node.arg)}` : ''}`
+        const whens = (node.args ?? []).map((when: any) => (
+          `WHEN ${this.expr(when.expr)} THEN ${this.expr(when.result)}`
+        ))
+        const otherwise = node.defresult ? ` ELSE ${this.expr(node.defresult)}` : ''
+        return `${head} ${whens.join(' ')}${otherwise} END`
+      }
+      case 'A_ArrayExpr':
+      case 'RowExpr':
+      case 'SubLink':
+        return this.text(node)
+      default:
+        return this.text(node)
+    }
+  }
+
+  /**
+   * Parenthesize an operand when SQL precedence would otherwise change.
+   * @param node - Operand node.
+   * @returns Grouped inline SQL.
+   */
+  group(node: any): string {
+    const text = this.expr(node)
+    return node?.type === 'A_Expr' || node?.type === 'BoolExpr' ? `(${text})` : text
+  }
+
+  /**
+   * Reconstruct a column reference from its tokens because the parser's field ranges overlap.
+   * @param node - ColumnRef.
+   * @returns Inline column reference.
+   */
+  columnRef(node: any): string {
+    const fields = node.fields ?? []
+    if (fields.length === 0) return this.text(node)
+    const start = node.range?.[0] ?? fields[0]?.range?.[0] ?? 0
+    const tokens = this.tokens.filter((candidate: any) => candidate.range?.[0] >= start)
+    const result: string[] = []
+    let cursor = start
+    for (const field of fields) {
+      if (field.type === 'A_Star') {
+        result.push('*')
+        continue
+      }
+      const current = tokens.find((candidate: any) => (
+        candidate.range?.[0] >= cursor && candidate.value !== '.' && candidate.value !== ','
+      ))
+      if (!current) {
+        result.push(field.sval)
+        continue
+      }
+      result.push(current.value)
+      cursor = (current.range?.[1] ?? cursor) + 1
+    }
+    return result.join('.')
+  }
+
+  /**
+   * Format a literal without source range.
+   * @param node - A_Const.
+   * @returns Inline literal.
+   */
+  constant(node: any): string {
+    if (node.ival) return String(node.ival.ival)
+    if (node.fval) return String(node.fval.fval)
+    if (node.sval) return `'${node.sval.sval}'`
+    if (node.boolval) return node.boolval.boolval ? 'true' : 'false'
+    if (node.isnull) return 'NULL'
+    return ''
+  }
 }
 
 export const sqlTemplateFormat: Rule.RuleModule = {

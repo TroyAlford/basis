@@ -102,7 +102,8 @@ describe('Server database lifecycle', () => {
     const result = await database.tx(async sql => {
       await sql`
         INSERT INTO tx_probe
-        VALUES ('committed')
+        VALUES
+          ('committed')
       `
       return 'callback-result'
     })
@@ -122,7 +123,8 @@ describe('Server database lifecycle', () => {
     await expect(database.tx(async sql => {
       await sql`
         INSERT INTO tx_probe
-        VALUES ('thrown')
+        VALUES
+          ('thrown')
       `
       throw new Error('rollback')
     })).rejects.toThrow('rollback')
@@ -131,7 +133,8 @@ describe('Server database lifecycle', () => {
     await expect(database.tx(async sql => {
       await sql`
         INSERT INTO tx_probe
-        VALUES ('failed')
+        VALUES
+          ('failed')
       `
       await sql`
         SELECT *
@@ -786,9 +789,9 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"
       FROM pg_indexes
-      WHERE schemaname = current_schema()
+      WHERE schemaname = CURRENT_SCHEMA()
         AND tablename = 'Entity'
-        AND indexname like 'Entity_name%'
+        AND indexname LIKE 'Entity_name%'
       ORDER BY indexname
     `).toEqual([
       { indexName: 'Entity_name_id_idx' },
@@ -913,13 +916,13 @@ describe('Server database lifecycle', () => {
       { columnName: 'favorites', dataType: 'text', isNullable: 'NO' },
     ])
     expect(await database.sql<{ definition: string }[]>`
-      SELECT pg_get_constraintdef(oid) AS definition
+      SELECT PG_GET_CONSTRAINTDEF(oid) AS definition
       FROM pg_constraint
       WHERE conrelid = '"Membership"'::regclass
         AND contype = 'p'
     `).toEqual([{ definition: 'PRIMARY KEY ("user.id", "campaign.id")' }])
     expect(await database.sql<{ definition: string }[]>`
-      SELECT pg_get_constraintdef(oid) AS definition
+      SELECT PG_GET_CONSTRAINTDEF(oid) AS definition
       FROM pg_constraint
       WHERE conrelid = '"Membership"'::regclass
         AND contype = 'f'
@@ -931,7 +934,7 @@ describe('Server database lifecycle', () => {
     expect((await database.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"
       FROM pg_indexes
-      WHERE schemaname = current_schema()
+      WHERE schemaname = CURRENT_SCHEMA()
         AND tablename = 'Membership'
       ORDER BY indexname
     `).map(row => row.indexName)).toEqual([
@@ -2626,11 +2629,11 @@ describe('Server database lifecycle', () => {
     await database.sql`
       INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
       VALUES
-        (gen_random_uuid(), NULL, ${7}, 1, NULL, NULL),
-        (gen_random_uuid(), TRUE, NULL, 2, 0, ''),
-        (gen_random_uuid(), FALSE, NULL, 3, 5, '   '),
-        (gen_random_uuid(), TRUE, NULL, 4, 10, 'alpha'),
-        (gen_random_uuid(), FALSE, ${7}, 5, NULL, 'beta')
+        (GEN_RANDOM_UUID(), NULL, ${7}, 1, NULL, NULL),
+        (GEN_RANDOM_UUID(), TRUE, NULL, 2, 0, ''),
+        (GEN_RANDOM_UUID(), FALSE, NULL, 3, 5, '   '),
+        (GEN_RANDOM_UUID(), TRUE, NULL, 4, 10, 'alpha'),
+        (GEN_RANDOM_UUID(), FALSE, ${7}, 5, NULL, 'beta')
     `
 
     type Where = Filter | Readonly<Record<string, unknown>> | string
@@ -2781,7 +2784,7 @@ describe('Server database lifecycle', () => {
       await database.sql`
         INSERT INTO "NumberRow" ("id", "value")
         VALUES
-          (gen_random_uuid(), ${1.5})
+          (GEN_RANDOM_UUID(), ${1.5})
       `
       expect(await database.query<{ value: number }>('NumberRow', {
         fields: ['value'],
@@ -2791,7 +2794,7 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('rollback-success-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT to_regclass(${`"${schema}"."NumberRow"`}) IS NOT NULL AS present
+      SELECT TO_REGCLASS(${`"${schema}"."NumberRow"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
   })
 
@@ -2809,7 +2812,7 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('rollback-failure-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT to_regclass(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS present
+      SELECT TO_REGCLASS(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
   })
 
@@ -2825,7 +2828,7 @@ describe('Server database lifecycle', () => {
         await database.sql`
           INSERT INTO "NumberRow" ("id", "value")
           VALUES
-            (gen_random_uuid(), ${1})
+            (GEN_RANDOM_UUID(), ${1})
         `
         expect(await database.query<{ value: number }>('NumberRow', {
           fields: ['value'],
@@ -2843,7 +2846,7 @@ describe('Server database lifecycle', () => {
         await database.sql`
           INSERT INTO "NumberRow" ("id", "value")
           VALUES
-            (gen_random_uuid(), ${2})
+            (GEN_RANDOM_UUID(), ${2})
         `
         expect(await database.query<{ value: number }>('NumberRow', {
           fields: ['value'],
@@ -2878,7 +2881,8 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('durable-failure-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS
+        present
     `).toEqual([{ present: false }])
   })
 

@@ -141,7 +141,8 @@ test('supports independent installs, durable restart, and same-install reconnect
       `
       await a.db.sql`
         INSERT INTO install_probe
-        VALUES ('A')
+        VALUES
+          ('A')
       `
       await b.db.sql`
         CREATE TABLE install_probe (
@@ -150,7 +151,8 @@ test('supports independent installs, durable restart, and same-install reconnect
       `
       await b.db.sql`
         INSERT INTO install_probe
-        VALUES ('B')
+        VALUES
+          ('B')
       `
 
       const secret = await credentials(aId)

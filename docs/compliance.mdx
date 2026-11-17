@@ -18,19 +18,19 @@ Compliance extends the existing compliance surface. It does not introduce anothe
 
 Compliance covers:
 
-| Rule | Prohibits | Canonical replacement |
-| --- | --- | --- |
-| `@basis/component-architecture` | React function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source | Classes extending the Basis `Component` or `Editor` hierarchy |
-| `@basis/no-direct-process-spawn` | `Bun.spawn`, `Bun.spawnSync`, Node `child_process` spawn/exec variants, and common wrappers that duplicate one-shot process execution | `run`, `runAsync` from `basis/utilities` |
-| `@basis/no-custom-test-server` | Direct `Bun.serve`, `http.createServer`, and manual server subprocess setup in test infrastructure | `useApplication` |
-| `@basis/no-custom-database-fixture` | Consumer-owned PostgreSQL containers, test DB provisioning, and homemade database fixtures | `useDatabaseFixture` |
-| `@basis/no-test-database-isolation-framework` | Custom schemas, independent test databases, and alternative per-test database managers | The single Basis fixture and its prescribed test data/seeding API |
-| `@basis/no-direct-browser-lifecycle` | `chromium.launch`, `firefox.launch`, `chromium.connect`, Playwright run-server, and manual browser/context ownership | Basis-managed browser via `useApplication().visit()` |
-| `@basis/no-alternative-test-renderer` | `@testing-library/react`, `react-test-renderer`, Enzyme, and equivalent custom mounted-render utilities | `render`, `Simulate`, `waitFor` from `basis/testing` |
-| `@basis/no-alternative-screenshots` | `page.screenshot()`, `locator.screenshot()`, custom PNG/baseline comparators, and Playwright screenshot assertions | `matchScreenshot` |
-| `@basis/no-custom-test-lifecycle` | Manual start/stop orchestration for shared app, browser, and DB fixtures | `basis/testing/bun` |
-| `@basis/no-custom-test-temp-root` | Manual run-wide temporary-directory setup/cleanup | Basis-managed temporary root and `tempDirectory` |
-| `@basis/no-direct-testing-internals` | Imports of Basis's private testing implementation files | Public `basis/testing` and `basis/testing/bun` exports |
+| Rule                                          | Prohibits                                                                                                                             | Canonical replacement                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `@basis/component-architecture`               | React function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source                     | Classes extending the Basis `Component` or `Editor` hierarchy     |
+| `@basis/no-direct-process-spawn`              | `Bun.spawn`, `Bun.spawnSync`, Node `child_process` spawn/exec variants, and common wrappers that duplicate one-shot process execution | `run`, `runAsync` from `basis/utilities`                          |
+| `@basis/no-custom-test-server`                | Direct `Bun.serve`, `http.createServer`, and manual server subprocess setup in test infrastructure                                    | `useApplication`                                                  |
+| `@basis/no-custom-database-fixture`           | Consumer-owned PostgreSQL containers, test DB provisioning, and homemade database fixtures                                            | `useDatabaseFixture`                                              |
+| `@basis/no-test-database-isolation-framework` | Custom schemas, independent test databases, and alternative per-test database managers                                                | The single Basis fixture and its prescribed test data/seeding API |
+| `@basis/no-direct-browser-lifecycle`          | `chromium.launch`, `firefox.launch`, `chromium.connect`, Playwright run-server, and manual browser/context ownership                  | Basis-managed browser via `useApplication().visit()`              |
+| `@basis/no-alternative-test-renderer`         | `@testing-library/react`, `react-test-renderer`, Enzyme, and equivalent custom mounted-render utilities                               | `render`, `Simulate`, `waitFor` from `basis/testing`              |
+| `@basis/no-alternative-screenshots`           | `page.screenshot()`, `locator.screenshot()`, custom PNG/baseline comparators, and Playwright screenshot assertions                    | `matchScreenshot`                                                 |
+| `@basis/no-custom-test-lifecycle`             | Manual start/stop orchestration for shared app, browser, and DB fixtures                                                              | `basis/testing/bun`                                               |
+| `@basis/no-custom-test-temp-root`             | Manual run-wide temporary-directory setup/cleanup                                                                                     | Basis-managed temporary root and `tempDirectory`                  |
+| `@basis/no-direct-testing-internals`          | Imports of Basis's private testing implementation files                                                                               | Public `basis/testing` and `basis/testing/bun` exports            |
 
 ## Resolution, not text matching
 

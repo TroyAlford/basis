@@ -136,8 +136,10 @@ async function seed(database: IsolatedDatabase): Promise<void> {
     VALUES
       (${ada}, 'Ada', ${null}, ARRAY [1, 2, 2], ARRAY ['urgent', 'important'],
         '{"kind":"note","meta":{"active":true}}'::jsonb),
-      (${grace}, 'Grace', ${ada}, ARRAY [3], ARRAY ['urgent'], '{"kind":"other"}'::jsonb),
-      (${linus}, 'Linus', ${ada}, ARRAY []::double PRECISION[], ARRAY []::text[], '{}'::jsonb)
+      (${grace}, 'Grace', ${ada}, ARRAY [3], ARRAY ['urgent'],
+        '{"kind":"other"}'::jsonb),
+      (${linus}, 'Linus', ${ada}, ARRAY []::double PRECISION[], ARRAY []::text[],
+        '{}'::jsonb)
   `
   await database.sql`
     INSERT INTO "SystemUser" ("id", "permissions")
