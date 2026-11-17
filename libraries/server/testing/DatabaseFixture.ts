@@ -1189,15 +1189,34 @@ function fixtureSchemaName(entities: EntityDefinitions, appRole?: string, graph?
   return `basis_fixture_${hash}`
 }
 
+/** Roles already created or normalized by this fixture process. */
+const ensuredApplicationRoles = new Map<string, Promise<void>>()
+
 /**
- * Ensure the restricted role used by the fixture graph exists.
+ * Ensure the restricted role used by the fixture graph exists once.
  * @param database - Connected fixture pool.
  * @param roleName - Application role to create or normalize.
+ * @returns A promise that settles once the role is ready.
  */
-async function ensureApplicationRole(
+function ensureApplicationRole(
   database: Database,
   roleName = FIXTURE_APP_ROLE,
 ): Promise<void> {
+  let pending = ensuredApplicationRoles.get(roleName)
+  if (!pending) {
+    pending = createApplicationRole(database, roleName)
+    ensuredApplicationRoles.set(roleName, pending)
+    void pending.catch(() => ensuredApplicationRoles.delete(roleName))
+  }
+  return pending
+}
+
+/**
+ * Create or normalize one application role.
+ * @param database - Connected fixture pool.
+ * @param roleName - Application role to create or normalize.
+ */
+async function createApplicationRole(database: Database, roleName: string): Promise<void> {
   const role = quoteIdentifier(roleName)
   await database.sql.unsafe(`
     DO $$
@@ -1699,9 +1718,7 @@ async function ensureSchema(
  */
 async function ensureGraphSchema(database: Database): Promise<string> {
   const schema = FIXTURE_SCHEMA
-  await ensureApplicationRole(database)
   await database.tx(async sql => {
-    await installBasis(sql)
     await sql`
       SELECT pg_advisory_xact_lock(hashtext(${schema}))
     `
