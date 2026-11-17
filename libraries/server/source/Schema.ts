@@ -584,11 +584,11 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     securityDefiner: boolean,
     signature: string,
   }[]>`
+    SELECT
       CASE
         WHEN n.nspname = 'basis' THEN 'basis.' || p.proname
         ELSE p.proname
       END AS name,
-    SELECT
       p.prosrc AS body,
       pg_get_functiondef(p.oid) AS definition,
       p.prosecdef AS "securityDefiner",
@@ -706,6 +706,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     grantee: string,
     privilege: string,
   }[]>`
+    SELECT
       CASE
         WHEN n.nspname = 'basis' THEN 'basis.' || p.proname
         ELSE p.proname
@@ -714,7 +715,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
         WHEN a.grantee = 0 THEN 'PUBLIC'
         ELSE pg_get_userbyid(a.grantee)
       END AS grantee,
-    SELECT a.privilege_type AS privilege
+      a.privilege_type AS privilege
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace, aclexplode(p.proacl) a
     WHERE n.nspname IN (current_schema(), 'basis')
@@ -743,6 +744,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     })
   }
   const defaultFunctionRows = await sql<{ function: string }[]>`
+    SELECT
       CASE
         WHEN n.nspname = 'basis' THEN 'basis.' || p.proname
         ELSE p.proname

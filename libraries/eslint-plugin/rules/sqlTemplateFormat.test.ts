@@ -307,6 +307,20 @@ describe('formatSQL', () => {
   })
 
   describe('case', () => {
+    test('emits SELECT before a leading CASE item', () => {
+      expect(formatSQL(`
+        select case when status = 'a' then 1 else 0 end as rank, name from widgets
+      `)).toMatchSql(`
+        SELECT
+          CASE
+            WHEN status = 'a' THEN 1
+            ELSE 0
+          END AS rank,
+          name
+        FROM widgets
+      `)
+    })
+
     test('formats a case expression in a select list', () => {
       expect(formatSQL(`
         select id,

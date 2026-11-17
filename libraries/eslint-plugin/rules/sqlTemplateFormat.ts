@@ -938,8 +938,15 @@ function formatQuery(tokens: readonly Token[], indent: string): string[] {
         continue
       }
       if (currentToken.upper === 'case') {
-        if (selectMode) flushSelect(false)
-        else flush()
+        if (selectMode) {
+          if (selectTokens.length > 0) flushSelect(false)
+          if (selectNeedsHeader) {
+            lines.push(`${indent}SELECT`)
+            selectNeedsHeader = false
+          }
+        } else {
+          flush()
+        }
         const result = formatCase(tokens, index, selectMode ? selectIndent : `${indent}  `)
         lines.push(...result.lines)
         index = result.nextIndex - 1
