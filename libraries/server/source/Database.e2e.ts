@@ -2289,6 +2289,138 @@ describe('Server database lifecycle', () => {
     expect(sameRecord[0]?.largeEntries.$total).toBe(3)
   })
 
+  isolatedTest('honors via default and query collection ordering consistently', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]',
+            },
+            {
+              field: 'orderedEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$orderBy:-quantity}',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Card' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    await database.use(entities)
+    const deckA = '00000000-0000-4000-8000-000000000f01'
+    const deckB = '00000000-0000-4000-8000-000000000f02'
+    const cards = ['f11', 'f12', 'f13', 'f14', 'f15', 'f16', 'f17', 'f18']
+      .map(value => `00000000-0000-4000-8000-000000000${value}`)
+    const printings = ['f21', 'f22', 'f23', 'f24', 'f25', 'f26', 'f27', 'f28']
+      .map(value => `00000000-0000-4000-8000-000000000${value}`)
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${deckA}, 'Deck A', 'Deck'),
+        (${deckB}, 'Deck B', 'Deck'),
+        (${cards[0]}, 'Card A0', 'Card'),
+        (${cards[1]}, 'Card A1', 'Card'),
+        (${cards[2]}, 'Card A2', 'Card'),
+        (${cards[3]}, 'Card A5', 'Card'),
+        (${cards[4]}, 'Card A10', 'Card'),
+        (${cards[5]}, 'Card B5a', 'Card'),
+        (${cards[6]}, 'Card B5b', 'Card'),
+        (${cards[7]}, 'Card B1', 'Card'),
+        (${printings[0]}, 'Printing A0', 'Printing'),
+        (${printings[1]}, 'Printing A1', 'Printing'),
+        (${printings[2]}, 'Printing A2', 'Printing'),
+        (${printings[3]}, 'Printing A5', 'Printing'),
+        (${printings[4]}, 'Printing A10', 'Printing'),
+        (${printings[5]}, 'Printing B5a', 'Printing'),
+        (${printings[6]}, 'Printing B5b', 'Printing'),
+        (${printings[7]}, 'Printing B1', 'Printing')
+    `
+    await database.sql`
+      INSERT INTO "Deck" ("id")
+      VALUES
+        (${deckA}),
+        (${deckB})
+    `
+    for (const [index, card] of cards.entries()) {
+      await database.sql`
+        INSERT INTO "Card" ("id")
+        VALUES
+          (${card})
+      `
+      await database.sql`
+        INSERT INTO "Printing" ("id")
+        VALUES
+          (${printings[index]})
+      `
+    }
+    const rows = [
+      [deckA, cards[0], printings[0], 0],
+      [deckA, cards[1], printings[1], 1],
+      [deckA, cards[2], printings[2], 2],
+      [deckA, cards[3], printings[3], 5],
+      [deckA, cards[4], printings[4], 10],
+      [deckB, cards[5], printings[5], 5],
+      [deckB, cards[6], printings[6], 5],
+      [deckB, cards[7], printings[7], 1],
+    ] as const
+    for (const [deck, card, printing, quantity] of rows) {
+      await database.sql`
+        INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+        VALUES
+          (${deck}, ${card}, ${printing}, ${quantity})
+      `
+    }
+    const read = (deck: string, path: string) => queryEntity<Record<string, {
+      $matched: number,
+      $total: number,
+      items: { card: { id: string }, quantity: number }[],
+    }>>(database.sql, entities, 'Deck', {
+      fields: ['id', path],
+      where: { id: deck },
+    })
+    const quantities = (path: string, deck = deckA) => read(deck, path).then(result => (
+      result[0]?.[path.split('[')[0]?.split('{')[0] ?? '']?.items.map(item => item.quantity)
+    ))
+    expect(await quantities('entries{$orderBy:-quantity,$limit:null}')).toEqual([10, 5, 2, 1, 0])
+    expect(await quantities('orderedEntries{$limit:null}')).toEqual([10, 5, 2, 1, 0])
+    expect(await quantities('orderedEntries{$limit:2}')).toEqual([10, 5])
+    expect(await quantities('orderedEntries{$limit:2,$offset:2}')).toEqual([2, 1])
+    expect(await quantities('entries{$orderBy:-quantity,$limit:2}')).toEqual([10, 5])
+    expect(await quantities('entries{$orderBy:-quantity,$limit:2,$offset:2}')).toEqual([2, 1])
+    const filtered = await read(deckA, 'entries[quantity > 1]{$orderBy:-quantity,$limit:2}')
+    expect(filtered[0]?.entries.$matched).toBe(3)
+    expect(filtered[0]?.entries.$total).toBe(5)
+    expect(filtered[0]?.entries.items.map(item => item.quantity)).toEqual([10, 5])
+    expect(await quantities('orderedEntries{$orderBy:quantity,$limit:2}')).toEqual([0, 1])
+    expect(await quantities('entries{$limit:2}')).toEqual(await quantities('entries{$limit:2}'))
+    expect((await read(deckA, 'entries{$orderBy:-quantity,$limit:2}'))[0]?.entries.items)
+      .toEqual((await read(deckA, 'entries{$orderBy:-quantity,$limit:2}'))[0]?.entries.items)
+    await expect(read(deckA, 'entries{$orderBy:missing}')).rejects.toThrow(/unknown relationship record order/i)
+    const tied = await read(deckB, 'orderedEntries{$limit:null}')
+    expect(tied[0]?.orderedEntries.items.map(item => item.quantity)).toEqual([5, 5, 1])
+    expect(tied[0]?.orderedEntries.items.slice(0, 2).map(item => item.card.id)).toEqual([
+      cards[5],
+      cards[6],
+    ])
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

@@ -1562,11 +1562,16 @@ class QueryProjection {
     const relationship = collection.relationship
     const target = this.#entities.relationshipRecord(relationship.name)
     if (!target) throw new Error(`Unknown relationship "${relationship.name}"`)
-    const limit = spec.limit === undefined ? 3 : spec.limit
-    const offset = spec.offset ?? 0
+    const limit = spec.limit === undefined
+      ? collection.viaLimit === undefined ? 3 : collection.viaLimit
+      : spec.limit
+    const offset = spec.offset ?? collection.viaOffset ?? 0
     const endpoint = collection.ownerEndpoint
     const childAlias = this.#nextAlias('cr')
-    const orderings = this.#recordOrderings(relationship, spec.orderBy)
+    const orderings = this.#recordOrderings(
+      relationship,
+      spec.orderBy === undefined ? collection.viaOrderBy : spec.orderBy,
+    )
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields: [...new Set([
