@@ -2158,6 +2158,137 @@ describe('Server database lifecycle', () => {
     expect(filtered[0]?.hugePrintings.items).toHaveLength(2)
   })
 
+  isolatedTest('applies canonical via filters without cross-parent leakage', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]',
+            },
+            {
+              field: 'largeEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 1]',
+            },
+            {
+              field: 'largePrintings',
+              target: 'Printing',
+              type: 'Collection',
+              via: 'largeEntries.printing',
+            },
+            {
+              field: 'specialEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and (quantity = 0 $or quantity = 10)]',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Card' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    await database.use(entities)
+    const decks = [
+      '00000000-0000-4000-8000-000000000e01',
+      '00000000-0000-4000-8000-000000000e02',
+    ]
+    const cardIds = ['e11', 'e12', 'e13', 'e14', 'e15'].map(value => `00000000-0000-4000-8000-000000000${value}`)
+    const printingIds = ['e21', 'e22', 'e23', 'e24', 'e25'].map(value => `00000000-0000-4000-8000-000000000${value}`)
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${decks[0]}, 'Deck A', 'Deck'),
+        (${decks[1]}, 'Deck B', 'Deck'),
+        (${cardIds[0]}, 'Card A0', 'Card'),
+        (${cardIds[1]}, 'Card A1', 'Card'),
+        (${cardIds[2]}, 'Card A2', 'Card'),
+        (${cardIds[3]}, 'Card A5', 'Card'),
+        (${cardIds[4]}, 'Card A10', 'Card'),
+        (${printingIds[0]}, 'Printing A0', 'Printing'),
+        (${printingIds[1]}, 'Printing A1', 'Printing'),
+        (${printingIds[2]}, 'Printing A2', 'Printing'),
+        (${printingIds[3]}, 'Printing A5', 'Printing'),
+        (${printingIds[4]}, 'Printing A10', 'Printing')
+    `
+    for (const deck of decks) {
+      await database.sql`
+        INSERT INTO "Deck" ("id")
+        VALUES
+          (${deck})
+      `
+    }
+    for (const [index, card] of cardIds.entries()) {
+      await database.sql`
+        INSERT INTO "Card" ("id")
+        VALUES
+          (${card})
+      `
+      await database.sql`
+        INSERT INTO "Printing" ("id")
+        VALUES
+          (${printingIds[index]})
+      `
+    }
+    const quantities = [0, 1, 2, 5, 10]
+    for (const [index, quantity] of quantities.entries()) {
+      for (const [deckIndex, deck] of decks.entries()) {
+        await database.sql`
+          INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+          VALUES
+            (${deck}, ${cardIds[index]}, ${printingIds[index]}, ${quantity + deckIndex})
+        `
+      }
+    }
+    const read = (path: string) => queryEntity<Record<string, {
+      $matched: number,
+      $total: number,
+      items: Record<string, unknown>[],
+    }>>(database.sql, entities, 'Deck', {
+      fields: ['id', path],
+      where: { id: decks[0] },
+    })
+    const entries = await read('entries{$limit:null}')
+    expect(entries[0]?.entries.$matched).toBe(5)
+    expect(entries[0]?.entries.items.map(item => item.quantity)).toEqual([0, 1, 2, 5, 10])
+    const large = await read('largeEntries')
+    expect(large[0]?.largeEntries.$matched).toBe(3)
+    expect(large[0]?.largeEntries.items.map(item => item.quantity)).toEqual([2, 5, 10])
+    const largePrintings = await read('largePrintings')
+    expect(largePrintings[0]?.largePrintings.$matched).toBe(3)
+    expect(largePrintings[0]?.largePrintings.items.map(item => item.id)).toEqual([
+      printingIds[2],
+      printingIds[3],
+      printingIds[4],
+    ])
+    const special = await read('specialEntries')
+    expect(special[0]?.specialEntries.items.map(item => item.quantity)).toEqual([0, 10])
+    const combined = await read('largeEntries[quantity > 5]')
+    expect(combined[0]?.largeEntries.items.map(item => item.quantity)).toEqual([10])
+    expect(combined[0]?.largeEntries.$matched).toBe(1)
+    expect(combined[0]?.largeEntries.$total).toBe(3)
+    const sameRecord = await read('largeEntries[quantity > 1 $and quantity < 5]')
+    expect(sameRecord[0]?.largeEntries.items.map(item => item.quantity)).toEqual([2])
+    expect(sameRecord[0]?.largeEntries.$matched).toBe(1)
+    expect(sameRecord[0]?.largeEntries.$total).toBe(3)
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
