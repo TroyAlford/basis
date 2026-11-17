@@ -2592,6 +2592,16 @@ describe('Server database lifecycle', () => {
     )
     expect(override[0]?.pagedCards.items.map(item => item.id))
       .toEqual(cardIds.slice(0, 3))
+    const orderOverride = await query<{ sortedCards: { items: { name: string }[] } }>(
+      'sortedCards{$orderBy:name,$limit:null}',
+    )
+    expect(orderOverride[0]?.sortedCards.items.map(item => item.name)).toEqual([
+      'Alpha',
+      'Bravo',
+      'Echo',
+      'Mike',
+      'Zulu',
+    ])
     const counts = await query<{ pagedCards: { $matched: number, $total: number } }>('pagedCards')
     expect(counts[0]?.pagedCards).toMatchObject({ $matched: 5, $total: 5 })
     const filtered = await query<{

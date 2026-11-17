@@ -82,6 +82,37 @@ describe('Derived Collection contract', () => {
   test('query-time directives override authored defaults', () => {
     equivalent('cards{$limit:4,$offset:0}', 'cards{$offset:0,$limit:4}')
     expect(compile('cards{$limit:4,$offset:0}').sql).not.toBe(compile('cards').sql)
+    expect(compile('sortedCards').sql).toContain('"__item"."name" DESC')
+    expect(compile('sortedCards{$orderBy:name}').sql).toContain('"__item"."name" ASC')
+  })
+
+  test('rejects relationship-only ordering on a projected Entity', () => {
+    const invalid = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [{
+            field: 'cards',
+            target: 'Card',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @]{$orderBy:card}.card',
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    expect(() => compileEntityQuery(invalid, 'Deck', { fields: ['cards'] }))
+      .toThrow(/ambiguous/)
   })
 
   test('relationship records retain composite identity', () => {
