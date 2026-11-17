@@ -3053,7 +3053,11 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('durable-failure-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM "pg_catalog"."pg_namespace" WHERE "nspname" = ${schema}) AS "present"
+      SELECT EXISTS (
+        SELECT 1
+        FROM "pg_catalog"."pg_namespace"
+        WHERE "nspname" = ${schema}
+      ) AS "present"
     `).toEqual([{ present: false }])
   })
 

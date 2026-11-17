@@ -389,7 +389,10 @@ describe('formatSQL', () => {
       expect(formatSQL(`
         create trigger trg before insert on widgets for each row execute function fn()
       `)).toMatchIndented(`
-        CREATE TRIGGER "trg" BEFORE INSERT ON "widgets" FOR EACH ROW EXECUTE FUNCTION "fn"()
+        CREATE TRIGGER "trg"
+        BEFORE INSERT ON "widgets"
+        FOR EACH ROW
+          EXECUTE FUNCTION fn()
       `)
       expect(formatSQL('set search_path to test_schema')).toMatchIndented(`
         SET search_path TO "test_schema"

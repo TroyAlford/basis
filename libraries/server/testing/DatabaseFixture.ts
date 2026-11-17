@@ -1523,7 +1523,7 @@ export async function withDatabase<T>(
       await options.setup?.(context())
       await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
-        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+        SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
       `
       return callback(context())
     },
@@ -1609,10 +1609,14 @@ async function ensureSchema(
   if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
     await sql`
-      SELECT pg_advisory_xact_lock(HASHTEXT(${schema}))
+      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM "pg_catalog"."pg_namespace" WHERE "nspname" = ${schema}) AS "present"
+      SELECT EXISTS (
+        SELECT 1
+        FROM "pg_catalog"."pg_namespace"
+        WHERE "nspname" = ${schema}
+      ) AS "present"
     `
     if (present[0]?.present) return
 
@@ -1650,10 +1654,14 @@ async function ensureGraphSchema(database: Database): Promise<string> {
   const schema = FIXTURE_SCHEMA
   await database.tx(async sql => {
     await sql`
-      SELECT pg_advisory_xact_lock(HASHTEXT(${schema}))
+      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM "pg_catalog"."pg_namespace" WHERE "nspname" = ${schema}) AS "present"
+      SELECT EXISTS (
+        SELECT 1
+        FROM "pg_catalog"."pg_namespace"
+        WHERE "nspname" = ${schema}
+      ) AS "present"
     `
     let complete = Boolean(present[0]?.present)
     if (complete) {
@@ -1673,10 +1681,14 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     if (complete) {
       for (const trigger of fixtureGraph.physicalSchema(FIXTURE_APP_ROLE, true).triggers) {
         const [found] = await sql<{ present: boolean }[]>`
-          SELECT EXISTS (SELECT 1 FROM "pg_trigger" "TRIGGER"
-          JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
-          JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace" WHERE "namespace"."nspname"
-            = ${schema}   AND "TRIGGER"."tgname" = ${trigger.name}) AS "present"
+          SELECT EXISTS (
+            SELECT 1
+            FROM "pg_trigger" "TRIGGER"
+            JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
+            JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace"
+            WHERE "namespace"."nspname" = ${schema}
+              AND "TRIGGER"."tgname" = ${trigger.name}
+          ) AS "present"
         `
         if (!found?.present) {
           complete = false
@@ -1686,18 +1698,24 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     }
     if (complete) {
       const [legacy] = await sql<{ present: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM "pg_trigger" "TRIGGER"
-        JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
-        JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace" WHERE "namespace"."nspname" =
-          ${schema}   AND ("TRIGGER"."tgname" ILIKE '%enroll%' OR pg_get_triggerdef("TRIGGER"."oid") ILIKE
-          '%enroll_identity%')) AS "present"
+        SELECT EXISTS (
+          SELECT 1
+          FROM "pg_trigger" "TRIGGER"
+          JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
+          JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace"
+          WHERE "namespace"."nspname" = ${schema}
+            AND ("TRIGGER"."tgname" ILIKE '%enroll%' OR PG_GET_TRIGGERDEF("TRIGGER"."oid") ILIKE '%enroll_identity%')
+        ) AS "present"
       `
       if (legacy?.present) complete = false
     }
     if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
-          ${fixtureRows.alice}) AS "seeded"
+        SELECT EXISTS (
+          SELECT 1
+          FROM ${sql(schema)}.${sql('Entity')}
+          WHERE "id" = ${fixtureRows.alice}
+        ) AS "seeded"
       `
       complete = Boolean(seeded?.seeded)
     }

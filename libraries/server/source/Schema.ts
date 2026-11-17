@@ -482,15 +482,21 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       "i"."indisunique" AS "unique",
       "i"."indisvalid" AS "valid",
       PG_GET_INDEXDEF("i"."indexrelid") AS "definition",
-      (SELECT ARRAY_AGG("opc"."opcname" ORDER BY "u"."ordinality") FROM UNNEST("i"."indclass") WITH ORDINALITY "u"
-        ("opcoid", "ordinality")
-    JOIN "pg_opclass" "opc" ON "opc"."oid" = "u"."opcoid") AS "operatorClasses",
-      (SELECT ARRAY_AGG("opc"."opcdefault" ORDER BY "u"."ordinality") FROM UNNEST("i"."indclass") WITH ORDINALITY "u"
-        ("opcoid", "ordinality")
-    JOIN "pg_opclass" "opc" ON "opc"."oid" = "u"."opcoid") AS "operatorClassDefaults",
-      (SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality") FROM UNNEST("i"."indkey") WITH ORDINALITY "u"
-        ("attnum", "ordinality")
-    JOIN "pg_attribute" "a" ON ("a"."attrelid" = "i"."indrelid" AND "a"."attnum" = "u"."attnum")) AS "columns"
+      (
+        SELECT ARRAY_AGG("opc"."opcname" ORDER BY "u"."ordinality")
+        FROM UNNEST("i"."indclass") WITH ORDINALITY "u" ("opcoid", "ordinality")
+        JOIN "pg_opclass" "opc" ON "opc"."oid" = "u"."opcoid"
+      ) AS "operatorClasses",
+      (
+        SELECT ARRAY_AGG("opc"."opcdefault" ORDER BY "u"."ordinality")
+        FROM UNNEST("i"."indclass") WITH ORDINALITY "u" ("opcoid", "ordinality")
+        JOIN "pg_opclass" "opc" ON "opc"."oid" = "u"."opcoid"
+      ) AS "operatorClassDefaults",
+      (
+        SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality")
+        FROM UNNEST("i"."indkey") WITH ORDINALITY "u" ("attnum", "ordinality")
+        JOIN "pg_attribute" "a" ON ("a"."attrelid" = "i"."indrelid" AND "a"."attnum" = "u"."attnum")
+      ) AS "columns"
     FROM "pg_index" "i"
     JOIN "pg_class" "c" ON "c"."oid" = "i"."indexrelid"
     JOIN "pg_class" "t" ON "t"."oid" = "i"."indrelid"
@@ -597,8 +603,13 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     FROM "pg_proc" "p"
     JOIN "pg_namespace" "n" ON "n"."oid" = "p"."pronamespace"
     WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
-      AND NOT (EXISTS (SELECT 1 FROM "pg_depend" "d" WHERE "d"."classid" = 'pg_proc'::regclass   AND "d"."objid" =
-        "p"."oid"   AND "d"."deptype" = 'e'))
+      AND NOT (EXISTS (
+      SELECT 1
+      FROM "pg_depend" "d"
+      WHERE "d"."classid" = 'pg_proc'::regclass
+        AND "d"."objid" = "p"."oid"
+        AND "d"."deptype" = 'e'
+    ))
     ORDER BY "n"."nspname", "p"."proname"
   `
   const triggerRows = await sql<{
@@ -622,9 +633,11 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       "t"."tginitdeferred" AS "initDeferred",
       "t"."tgconstraint" AS "constraint",
       "p"."proname" AS "functionName",
-      (SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality") FROM UNNEST("t"."tgattr"::smallint[]) WITH ORDINALITY
-        "u" ("attnum", "ordinality")
-    JOIN "pg_attribute" "a" ON ("a"."attrelid" = "t"."tgrelid" AND "a"."attnum" = "u"."attnum")) AS "columns"
+      (
+        SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality")
+        FROM UNNEST("t"."tgattr"::smallint[]) WITH ORDINALITY "u" ("attnum", "ordinality")
+        JOIN "pg_attribute" "a" ON ("a"."attrelid" = "t"."tgrelid" AND "a"."attnum" = "u"."attnum")
+      ) AS "columns"
     FROM "pg_trigger" "t"
     JOIN "pg_class" "c" ON "c"."oid" = "t"."tgrelid"
     JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
@@ -701,7 +714,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       END AS "grantee",
       "a"."privilege_type" AS "privilege"
     FROM "pg_namespace" "n"
-    , aclexplode("n"."nspacl") "a"
+    , ACLEXPLODE("n"."nspacl") "a"
     WHERE "n"."nspname" IN ('public', 'basis', CURRENT_SCHEMA())
     ORDER BY "n"."nspname", "grantee", "privilege"
   `
@@ -722,7 +735,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       "a"."privilege_type" AS "privilege"
     FROM "pg_proc" "p"
     JOIN "pg_namespace" "n" ON "n"."oid" = "p"."pronamespace"
-    , aclexplode("p"."proacl") "a"
+    , ACLEXPLODE("p"."proacl") "a"
     WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
     ORDER BY "function", "grantee", "privilege"
   `

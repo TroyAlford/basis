@@ -70,6 +70,14 @@ function wrapLongLines(sql: string): string {
         }
       }
       if (split <= indent.length) split = current.indexOf(' ', 120)
+      while (split > indent.length && /^AS\b/u.test(current.slice(split + 1).trimStart())) {
+        const previous = current.lastIndexOf(' ', split - 1)
+        if (previous <= indent.length) {
+          split = -1
+          break
+        }
+        split = previous
+      }
       if (split <= 0) break
       lines.push(current.slice(0, split))
       current = `${indent}  ${current.slice(split + 1)}`
@@ -138,16 +146,17 @@ interface SqlComment {
 }
 
 const BUILTIN_FUNCTIONS = new Set([
-  'abs', 'array_agg', 'array_length', 'array_position', 'array_remove', 'array_to_string',
-  'avg', 'cardinality', 'cast', 'chr', 'coalesce', 'count', 'current_database',
+  'abs', 'aclexplode', 'array_agg', 'array_length', 'array_position', 'array_remove', 'array_to_string',
+  'avg', 'cardinality', 'cast', 'chr', 'coalesce', 'concat', 'count', 'current_database',
   'current_schema', 'current_schemas', 'current_setting', 'current_user', 'date_part',
   'date_trunc', 'extract', 'format', 'generate_series', 'gen_random_uuid', 'greatest',
-  'hashtext', 'json_agg', 'json_build_object', 'jsonb_agg', 'jsonb_build_object',
+  'has_schema_privilege', 'hashtext', 'json_agg', 'json_build_object', 'jsonb_agg', 'jsonb_build_object',
   'jsonb_set', 'least', 'length', 'lower', 'make_interval', 'max', 'md5', 'min', 'now',
   'nullif', 'pg_get_constraintdef', 'pg_get_function_identity_arguments', 'pg_get_functiondef',
-  'pg_get_indexdef', 'pg_get_userbyid', 'position', 'random', 'regexp_replace', 'round',
-  'row_to_json', 'session_user', 'setweight', 'split_part', 'string_agg', 'string_to_array',
-  'substring', 'sum', 'to_char', 'to_date', 'to_json', 'to_jsonb', 'to_regclass',
+  'pg_advisory_xact_lock', 'pg_get_indexdef', 'pg_get_triggerdef', 'pg_get_userbyid', 'position',
+  'random', 'regexp_replace', 'round',
+  'row_to_json', 'session_user', 'set_config', 'setweight', 'split_part', 'string_agg', 'string_to_array',
+  'substring', 'sum', 'to_char', 'to_date', 'to_json', 'to_jsonb', 'to_regclass', 'to_regprocedure',
   'to_timestamp', 'to_tsvector', 'transaction_timestamp', 'trim', 'unaccent', 'unnest',
   'upper', 'user',
 ])
@@ -536,7 +545,8 @@ class LibpgPrinter {
       if (lines.length === 1) lines[0] = `${lines[0]}${alias}`
       else lines[lines.length - 1] = `${lines[lines.length - 1]}${alias}`
     } else {
-      lines = [`${this.expr(body.val)}${alias}`]
+      lines = this.expr(body.val).split('\n')
+      lines[lines.length - 1] = `${lines[lines.length - 1]}${alias}`
     }
     const full: string[] = []
     for (const comment of this.comments) {
@@ -1383,13 +1393,22 @@ class LibpgPrinter {
   }
 
   /**
+   * Format a non-built-in function reference.
+   * @param parts - String name parts.
+   * @returns Lowercase unquoted function name.
+   */
+  functionReference(parts: readonly any[]): string {
+    return (parts ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.').toLowerCase()
+  }
+
+  /**
    * Format a CREATE TRIGGER statement.
    * @param body - CreateTrigStmt body.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
   createTrigger(body: any, indent: string): string[] {
-    const timing = body.timing === 2 ? 'BEFORE ' : body.timing === 4 ? 'AFTER ' : 'INSTEAD OF '
+    const timing = body.timing === 2 ? 'BEFORE' : body.timing === 4 ? 'AFTER' : 'INSTEAD OF'
     const eventBits = body.events ?? 0
     const events = [
       eventBits & 4 ? 'INSERT' : '',
@@ -1397,13 +1416,11 @@ class LibpgPrinter {
       eventBits & 16 ? 'UPDATE' : '',
       eventBits & 32 ? 'TRUNCATE' : '',
     ].filter(Boolean).join(' OR ')
-    const func = (body.funcname ?? [])
-      .map((part: any) => this.quoteIdentifier(this.tag(part)?.[1]?.sval ?? ''))
-      .join('.')
     return [
-      `${indent}CREATE TRIGGER ${this.quoteIdentifier(body.trigname)} ${timing}${events}` +
-        ` ON ${this.relationName(body.relation)}` +
-        ` FOR EACH ${body.row ? 'ROW' : 'STATEMENT'} EXECUTE FUNCTION ${func}()`,
+      `${indent}CREATE TRIGGER ${this.quoteIdentifier(body.trigname)}`,
+      `${indent}${timing} ${events} ON ${this.relationName(body.relation)}`,
+      `${indent}FOR EACH ${body.row ? 'ROW' : 'STATEMENT'}`,
+      `${indent}  EXECUTE FUNCTION ${this.functionReference(body.funcname)}()`,
     ]
   }
 
@@ -1561,10 +1578,15 @@ class LibpgPrinter {
       case 'SubLink': {
         const subselect = body.subselect?.SelectStmt
         if (!subselect) throw new Error('Unsupported SubLink')
-        const inner = this.select(subselect, '').join(' ')
-        if (body.subLinkType === 'EXISTS_SUBLINK') return `EXISTS (${inner})`
-        if (body.subLinkType === 'EXPR_SUBLINK') return `(${inner})`
-        if (body.subLinkType === 'ARRAY_SUBLINK') return `ARRAY(${inner})`
+        const inner = this.select(subselect, '  ')
+        const inline = inner.map((line: string) => line.trim()).join(' ')
+        const prefix = body.subLinkType === 'EXISTS_SUBLINK'
+          ? 'EXISTS '
+          : body.subLinkType === 'ARRAY_SUBLINK' ? 'ARRAY' : ''
+        if (inline.length + prefix.length + 2 <= 80) return `${prefix}(${inline})`
+        if (body.subLinkType === 'EXISTS_SUBLINK') return `EXISTS (\n${inner.join('\n')}\n)`
+        if (body.subLinkType === 'EXPR_SUBLINK') return `(\n${inner.join('\n')}\n)`
+        if (body.subLinkType === 'ARRAY_SUBLINK') return `ARRAY(\n${inner.join('\n')}\n)`
         throw new Error(`Unsupported SubLink type: ${body.subLinkType}`)
       }
       case 'CaseExpr': return this.caseInline(body)
