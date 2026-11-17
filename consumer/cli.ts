@@ -54,6 +54,7 @@ const logger = new Logger({ colors: false })
 /** The closed CLI command vocabulary. */
 enum Command {
   Compliance = 'compliance',
+  Database = 'db',
   Docs = 'docs',
   Doctor = 'doctor',
   Emit = 'emit',
@@ -341,8 +342,8 @@ const doctor = (): number => {
  */
 const usage = (): void => {
   logger.info([
-    'usage: basis <compliance|docs build [--out <dir>] [--base <path>]',
-    '|docs check|doctor|emit|format|lint|typecheck>',
+    'usage: basis <compliance|db <plan|release|backup|restore|upgrade|rollback>',
+    '|docs build [--out <dir>] [--base <path>]|docs check|doctor|emit|format|lint|typecheck>',
   ].join(''))
 }
 
@@ -361,6 +362,11 @@ const main = async (): Promise<void> => {
   if (command === Command.Typecheck) {
     const emitCode = await runEmit()
     process.exit(emitCode === 0 ? runTypecheck() : emitCode)
+  }
+
+  if (command === Command.Database) {
+    const { runDatabase } = await import('./database')
+    process.exit(await runDatabase(args))
   }
 
   if (command === Command.Docs) {
