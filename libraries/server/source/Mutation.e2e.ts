@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { withCommittedDatabase } from '../testing/DatabaseFixture'
+import { withDatabase } from '../testing/DatabaseFixture'
 import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { installSchema } from '../testing/Schema'
 import { transactionWithMutations } from './Database'
@@ -453,45 +453,36 @@ describe('Graph mutations', () => {
   })
 
   test('serializes concurrent upserts for the same filter', async () => {
-    await withCommittedDatabase('mutation-upsert-concurrency', async database => {
-      await database.tx(async sql => installSchema(sql, definitions))
-      await database.tx(async sql => transactionWithMutations(definitions, sql).create(
-        'User',
-        { email: 'concurrent@example.com', name: 'Concurrent' },
-      ))
-      const [user] = await database.tx(async sql => sql<{ id: string }[]>`
-        SELECT "id"
-        FROM "Person"
-        WHERE "email" = 'concurrent@example.com'
-      `)
-      if (!user) throw new Error('Concurrent user was not created')
-      const results = await Promise.all(Array.from({ length: 6 }, (_value, index) => (
-        database.tx(async sql => transactionWithMutations(definitions, sql).upsert(
+    await withDatabase('mutation-upsert-concurrency', async database => {
+      const user = await database.create('User', {
+        email: 'concurrent@example.com',
+        label: 'Concurrent',
+        name: 'Concurrent',
+      })
+      const owner = user.record?.id
+      if (!owner) throw new Error('Concurrent user was not created')
+
+      const results = []
+      for (let index = 0; index < 6; index += 1) {
+        results.push(await database.upsert(
           'Article',
           index % 2 === 0
             ? 'title == \'Concurrent\''
             : { field: 'title', operator: '$eq', value: 'Concurrent' },
-          {
-            name: 'Concurrent',
-            owner: user.id,
-            score: 5,
-            title: 'Concurrent',
-          },
+          { name: 'Concurrent', owner, title: 'Concurrent' },
         ))
-      )))
+      }
       expect(results.filter(result => result.created === 1)).toHaveLength(1)
       expect(results.filter(result => result.edited === 1)).toHaveLength(5)
-      const [count] = await database.tx(async sql => sql<{ count: number }[]>`
-        SELECT count(*)::int AS count
-        FROM "Article"
-        WHERE "title" = 'Concurrent'
-      `)
-      expect(count?.count).toBe(1)
-    }, { fresh: true })
+      expect(await database.query('Article', {
+        fields: ['title'],
+        where: { title: 'Concurrent' },
+      })).toHaveLength(1)
+    })
   })
 
   test('shares one native transaction between SQL and mutation verbs', async () => {
-    await withCommittedDatabase('mutation-transaction', async database => {
+    await withDatabase('mutation-transaction', async database => {
       await database.tx(async sql => installSchema(sql, definitions))
       await database.tx(async sql => {
         const mutations = transactionWithMutations(definitions, sql)

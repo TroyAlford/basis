@@ -253,6 +253,14 @@ export class Graph {
   }
 
   /**
+   * The physical schema this Graph installs into.
+   * @returns The schema name.
+   */
+  get schema(): string {
+    return this.#schema
+  }
+
+  /**
    * Resolve one role by canonical id, authored alias, or name.
    * @param role - Role id or name.
    * @returns The role, or undefined.
@@ -290,28 +298,16 @@ export class Graph {
       rowSecurity: true,
     }))
     const policies = this.#policies(appRole)
-    const hasRoleDdl = this.#hasRoleFunction()
-    const hasRole: PhysicalFunction = {
-      body: /\$\$([\s\S]*?)\$\$/u.exec(hasRoleDdl)?.[1]?.trim() ?? '',
-      lifecycle: false,
-      name: 'basis.has_role',
-      required: ['basis.has_role'],
-      searchPath: this.#searchPath(),
-      securityDefiner: true,
-      signature: 'role_id text',
-      sql: hasRoleDdl,
-    }
+    const functions = [
+      ...base.functions,
+      ...this.#policyFunctions(),
+      ...this.#validationFunctions(),
+      ...this.#createHelperFunctions(),
+    ]
     return {
       ...base,
       extensions: ['pg_trgm'],
-      functions: [
-        ...base.functions,
-        hasRole,
-        ...this.#policyFunctions(),
-        ...this.#validationFunctions(),
-        ...this.#createHelperFunctions(),
-        ...this.#identityFunctions(),
-      ],
+      functions,
       grants: this.#grants(appRole),
       policies,
       roles: this.roles
@@ -321,7 +317,7 @@ export class Graph {
           id: role.id,
           name: role.name,
         })),
-      schemas: ['basis'],
+      schemas: [],
       tables,
     }
   }
@@ -409,7 +405,7 @@ export class Graph {
       const actionMatches = grant.action === action
         || (MANAGED_ENTITIES.has(target) && grant.action === Action.Manage)
       if (!actionMatches) continue
-      const role = roleCondition(grant.role)
+      const role = roleCondition(grant.role, this.#schema)
       const predicate = grant.predicate
         ? this.#compilePredicateForRow(grant, row)
         : 'TRUE'
@@ -1010,6 +1006,7 @@ export class Graph {
     const read = this.#createConditions(leaf, virtual, Action.Read)
     if (create.length === 0 || read.length === 0) return null
     const name = this.#createHelperName(leaf)
+    const qualified = this.#qualified(name)
     const fields = entity.effectiveFields.map(field => {
       const column = field.type === FieldType.Entity ? field.column : field.name
       const key = literal(column)
@@ -1050,7 +1047,7 @@ export class Graph {
       securityDefiner: true,
       signature: 'root_id text, proposed jsonb',
       sql: `
-        CREATE OR REPLACE FUNCTION ${name}(root_id text, proposed jsonb)
+        CREATE OR REPLACE FUNCTION ${qualified}(root_id text, proposed jsonb)
         RETURNS boolean
         LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
           ${body}
@@ -1061,11 +1058,11 @@ export class Graph {
 
   #createPolicyExpression(leaf: string, alias: string): string | null {
     if (!this.#createHelper(leaf)) return null
-    return `${this.#createHelperName(leaf)}(${alias}.${quoteIdentifier('id')}, to_jsonb(${alias}.*))`
+    return `${this.#qualified(this.#createHelperName(leaf))}(${alias}.${quoteIdentifier('id')}, to_jsonb(${alias}.*))`
   }
 
   #createHelperName(leaf: string): string {
-    return `basis.policy_create_${createHash('sha256').update(leaf).digest('hex').slice(0, 16)}`
+    return `policy_create_${createHash('sha256').update(leaf).digest('hex').slice(0, 16)}`
   }
 
   #virtualEntity(entity: EntityDefinition): EntityDefinition {
@@ -1086,7 +1083,7 @@ export class Graph {
       const predicate = grant.predicate
         ? this.#compileDirectPredicate(grant, '__row', leaf, true, virtual)
         : 'TRUE'
-      conditions.push(`(${roleCondition(grant.role)} AND ${predicate})`)
+      conditions.push(`(${roleCondition(grant.role, this.#schema)} AND ${predicate})`)
     }
     return conditions
   }
@@ -1245,7 +1242,7 @@ export class Graph {
       const actionMatches = grant.action === action
         || (MANAGED_ENTITIES.has(leaf) && grant.action === Action.Manage)
       if (!actionMatches) continue
-      const role = roleCondition(grant.role)
+      const role = roleCondition(grant.role, this.#schema)
       let predicate = 'TRUE'
       if (!roleOnly && grant.predicate && createTarget !== undefined && grant.target !== createTarget) {
         predicate = 'TRUE'
@@ -1264,7 +1261,7 @@ export class Graph {
       return this.#compileDirectPredicate(grant, alias, table, true)
     }
     if (this.#requiresHelper(grant, table)) {
-      return `${this.#helperName(grant)}(${alias}.${quoteIdentifier('id')})`
+      return `${this.#qualified(this.#helperName(grant))}(${alias}.${quoteIdentifier('id')})`
     }
     return this.#compileDirectPredicate(grant, alias, table, false)
   }
@@ -1289,7 +1286,7 @@ export class Graph {
       .update(JSON.stringify({ predicate: grant.predicate, target: grant.target }))
       .digest('hex')
       .slice(0, 16)
-    return `basis.policy_${hash}`
+    return `policy_${hash}`
   }
 
   #compileDirectPredicate(
@@ -1348,121 +1345,8 @@ export class Graph {
       : `${this.#schema}, public, basis, pg_temp`
   }
 
-  #identityFunctions(): PhysicalFunction[] {
-    const userLeaves = this.definitions.concreteDescendants('User')
-    const userFields = this.definitions.entity('User')?.effectiveFields ?? []
-    const email = userFields.some(field => field.name === 'email')
-    const functions: PhysicalFunction[] = []
-    const resolveSql = `
-      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)
-      RETURNS text
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-        SELECT u."id"
-        FROM "User" u
-        WHERE u."id" = candidate
-          AND EXISTS (
-            SELECT 1
-            FROM "ExternalIdentity" e
-            WHERE e."user.id" = u."id" AND e."revoked" = false
-          )
-      $$;
-    `
-    functions.push({
-      body: /\$\$([\s\S]*?)\$\$/u.exec(resolveSql)?.[1]?.trim() ?? '',
-      lifecycle: false,
-      name: 'basis.resolve_identity',
-      required: ['basis.resolve_identity'],
-      searchPath: this.#searchPath(),
-      securityDefiner: true,
-      signature: 'candidate text',
-      sql: resolveSql,
-    })
-    const userEntity = userLeaves.length === 1 ? userLeaves[0].name : null
-    const enrollSql = this.#enrollSql(
-      userEntity,
-      email,
-      userLeaves.map(entity => entity.name),
-    )
-    functions.push({
-      body: /\$\$([\s\S]*?)\$\$/u.exec(enrollSql)?.[1]?.trim() ?? '',
-      lifecycle: false,
-      name: 'basis.enroll_identity',
-      required: ['basis.enroll_identity'],
-      searchPath: this.#searchPath(),
-      securityDefiner: true,
-      signature: 'provider_name text, provider_subject text, display_name text, email_address text',
-      sql: enrollSql,
-    })
-    return functions
-  }
-
-  #enrollSql(
-    userEntity: string | null,
-    email: boolean,
-    userLeaves: readonly string[],
-  ): string {
-    const ancestry = userEntity === null ? [] : this.definitions.ancestry(userEntity)
-    const userInserts = ancestry
-      .filter(name => name !== 'Entity')
-      .reverse()
-      .map(name => {
-        if (name === 'User' && email) {
-          return 'INSERT INTO "User" ("id", "email") VALUES (user_id, email_address);'
-        }
-        return `INSERT INTO ${quoteIdentifier(name)} ("id") VALUES (user_id);`
-      })
-      .join('\n        ')
-    const detail = userLeaves.length === 0
-      ? 'no concrete User descendants'
-      : `multiple concrete User descendants: ${userLeaves.join(', ')}`
-    const creation = userEntity === null
-      ? `RAISE EXCEPTION ${literal(`Basis identity enrollment is ambiguous: ${detail}`)};`
-      : `INSERT INTO "Entity" ("id", "name", "entity") VALUES (user_id, user_name, ${literal(userEntity)});
-        ${userInserts}`
-    return `
-      CREATE OR REPLACE FUNCTION basis.enroll_identity(
-        provider_name text,
-        provider_subject text,
-        display_name text,
-        email_address text
-      )
-      RETURNS text
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-      DECLARE
-        existing_revoked boolean;
-        existing_user text;
-        user_id text;
-        identity_id text;
-        user_name text;
-      BEGIN
-        IF provider_name IS NULL OR provider_name = ''
-          OR provider_subject IS NULL OR provider_subject = '' THEN
-          RETURN NULL;
-        END IF;
-        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));
-        SELECT e."revoked", e."user.id" INTO existing_revoked, existing_user
-        FROM "ExternalIdentity" e
-        WHERE e."provider" = provider_name AND e."subject" = provider_subject
-        FOR UPDATE;
-        IF FOUND THEN
-          IF existing_revoked THEN RETURN NULL; END IF;
-          RETURN existing_user;
-        END IF;
-        user_id := gen_random_uuid()::text;
-        user_name := coalesce(
-          nullif(display_name, ''),
-          nullif(email_address, ''),
-          provider_name || ':' || provider_subject
-        );
-        ${creation}
-        identity_id := gen_random_uuid()::text;
-        INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');
-        INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
-          VALUES (identity_id, provider_name, provider_subject, false, user_id);
-        RETURN user_id;
-      END $$;
-    `
+  #qualified(name: string): string {
+    return name.includes('.') ? name : `${this.#schema}.${name}`
   }
 
   #policyFunctions(): PhysicalFunction[] {
@@ -1477,9 +1361,10 @@ export class Graph {
       const name = this.#helperName(grant)
       if (seen.has(name)) continue
       seen.add(name)
+      const qualified = this.#qualified(name)
       const predicate = this.#compileDirectPredicate(grant, '__row', grant.target, true)
       const sql = `
-        CREATE OR REPLACE FUNCTION ${name}(root_id text)
+        CREATE OR REPLACE FUNCTION ${qualified}(root_id text)
         RETURNS boolean
         LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
           SELECT EXISTS (
@@ -1531,8 +1416,10 @@ export class Graph {
         target: constraint.owner,
       }
       const predicate = this.#compileDirectPredicate(grant, '__row', constraint.owner, true)
+      const name = constraint.validator.replace(/^basis\./u, '')
+      const qualified = this.#qualified(name)
       const sql = `
-        CREATE OR REPLACE FUNCTION ${constraint.validator}(root_id text)
+        CREATE OR REPLACE FUNCTION ${qualified}(root_id text)
         RETURNS boolean
         LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
           SELECT EXISTS (
@@ -1552,8 +1439,8 @@ export class Graph {
       functions.push({
         body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
         lifecycle: false,
-        name: constraint.validator,
-        required: [constraint.validator],
+        name,
+        required: [name],
         searchPath: this.#searchPath(),
         securityDefiner: true,
         signature: 'root_id text',
@@ -1567,7 +1454,7 @@ export class Graph {
     const targets = new Set([...this.#ancestry(target), target])
     const conditions = this.grants
       .filter(grant => grant.action === Action.Manage && targets.has(grant.target))
-      .map(grant => roleCondition(grant.role))
+      .map(grant => roleCondition(grant.role, this.#schema))
     return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
   }
 
@@ -1688,7 +1575,7 @@ export class Graph {
       name: functionGrant,
       object: 'function',
       privilege: 'EXECUTE',
-      sql: `GRANT EXECUTE ON FUNCTION basis.has_role(text) TO ${role}`,
+      sql: `GRANT EXECUTE ON FUNCTION basis.has_role(text, text) TO ${role}`,
     })
     const publicFunctionGrant = functionGrant.replace(`grant:${appRole}:`, 'grant:PUBLIC:')
     grants.push({
@@ -1699,7 +1586,7 @@ export class Graph {
       name: `revoke:${publicFunctionGrant}`,
       object: 'function',
       privilege: 'EXECUTE',
-      sql: 'REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC',
+      sql: 'REVOKE ALL ON FUNCTION basis.has_role(text, text) FROM PUBLIC',
     })
     for (const fn of [
       ...this.#policyFunctions(),
@@ -1715,7 +1602,7 @@ export class Graph {
         name: helperGrant,
         object: 'function',
         privilege: 'EXECUTE',
-        sql: `GRANT EXECUTE ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) TO ${role}`,
+        sql: `GRANT EXECUTE ON FUNCTION ${this.#qualified(fn.name)}(${fn.signature ?? 'text'}) TO ${role}`,
       })
       const publicHelperGrant = helperGrant.replace(`grant:${appRole}:`, 'grant:PUBLIC:')
       grants.push({
@@ -1726,31 +1613,7 @@ export class Graph {
         name: `revoke:${publicHelperGrant}`,
         object: 'function',
         privilege: 'EXECUTE',
-        sql: `REVOKE ALL ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) FROM PUBLIC`,
-      })
-    }
-    for (const fn of this.#identityFunctions()) {
-      const identityGrant = `grant:${appRole}:function:${fn.name}:EXECUTE`
-      grants.push({
-        function: fn.name,
-        grantName: identityGrant,
-        grantee: appRole,
-        kind: 'grant',
-        name: identityGrant,
-        object: 'function',
-        privilege: 'EXECUTE',
-        sql: `GRANT EXECUTE ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) TO ${role}`,
-      })
-      const publicIdentityGrant = identityGrant.replace(`grant:${appRole}:`, 'grant:PUBLIC:')
-      grants.push({
-        function: fn.name,
-        grantName: publicIdentityGrant,
-        grantee: 'PUBLIC',
-        kind: 'revoke',
-        name: `revoke:${publicIdentityGrant}`,
-        object: 'function',
-        privilege: 'EXECUTE',
-        sql: `REVOKE ALL ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) FROM PUBLIC`,
+        sql: `REVOKE ALL ON FUNCTION ${this.#qualified(fn.name)}(${fn.signature ?? 'text'}) FROM PUBLIC`,
       })
     }
     grants.push({
@@ -1776,20 +1639,6 @@ export class Graph {
     return grants
   }
 
-  #hasRoleFunction(): string {
-    return `
-      CREATE OR REPLACE FUNCTION basis.has_role(role_id text)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "UserRole" ur
-          WHERE ur."role.id" = role_id
-            AND ur."user.id" = nullif(current_setting('actor.id', true), '')
-        )
-      $$;
-    `
-  }
 }
 
 /**
@@ -2030,11 +1879,12 @@ function assertPolicySafe(filter: Filter): void {
 /**
  * Compile one role-membership condition.
  * @param role - Canonical role id.
+ * @param schema - Target Graph schema.
  * @returns SQL boolean expression.
  */
-function roleCondition(role: string): string {
+function roleCondition(role: string, schema: string): string {
   if (role === PUBLIC_ROLE_ID) return 'TRUE'
-  return `basis.has_role(${literal(role)})`
+  return `basis.has_role(${literal(schema)}, ${literal(role)})`
 }
 
 /**

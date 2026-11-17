@@ -55,12 +55,6 @@ describe('Reviewed schema evolution', () => {
       const readiness = await DDL.readiness(database.sql, artifact)
       expect(readiness.ready).toBe(true)
       expect(readiness.discrepancies).toEqual([])
-      await database.sql.unsafe(
-        'DROP FUNCTION IF EXISTS basis.has_role(text) CASCADE; ' +
-        'DROP FUNCTION IF EXISTS basis.resolve_identity(text) CASCADE; ' +
-        'DROP FUNCTION IF EXISTS basis.enroll_identity(text, text, text, text) CASCADE',
-      ).simple()
-
       const [afterApply] = await database.sql<{ present: boolean }[]>`
         SELECT to_regclass(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
       `

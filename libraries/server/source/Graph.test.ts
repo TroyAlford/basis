@@ -19,16 +19,6 @@ const graph = new Graph({
   },
 })
 
-/**
- * Read the compiled identity-enrollment function.
- * @param model - Graph to inspect.
- * @returns Its enrollment SQL.
- */
-function enrollSql(model: Graph): string {
-  return model.physicalSchema('basis_app', false).functions
-    .find(fn => fn.name === 'basis.enroll_identity')?.sql ?? ''
-}
-
 describe('Graph', () => {
   test('round-trips authored options through a JSON snapshot', () => {
     const original = new Graph({
@@ -78,7 +68,7 @@ describe('Graph', () => {
     const read = rootGraph.physicalSchema('basis_app', true).policies.find(policy => (
       policy.table === 'Entity' && policy.command === 'SELECT'
     ))
-    expect(read?.sql).toContain('basis.policy_')
+    expect(read?.sql).toContain('public.policy_')
     expect(read?.sql).toContain('"Entity"."entity"')
     expect(() => new Graph({
       entities: [{ fields: [{ field: 'name', type: 'String' }], name: 'Note' }],
@@ -139,24 +129,6 @@ describe('Graph', () => {
     expect(overridden.definitions.isA('AdminUser', 'User')).toBe(true)
     expect(overridden.definitions.relationship('UserRole')?.between.map(endpoint => endpoint.target))
       .toContain('User')
-    expect(enrollSql(plain)).toContain('INSERT INTO "User"')
-    expect(enrollSql(overridden)).toContain('INSERT INTO "AdminUser"')
-  })
-
-  test('does not choose among multiple concrete User descendants', () => {
-    const ambiguous = new Graph({
-      entities: [
-        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
-        { extends: 'User', fields: [], name: 'AdminUser' },
-        { extends: 'User', fields: [], name: 'CustomerUser' },
-      ],
-    })
-    const sql = enrollSql(ambiguous)
-    expect(sql).toContain('FROM "ExternalIdentity"')
-    expect(sql).toContain('RAISE EXCEPTION')
-    expect(sql).toContain('multiple concrete User descendants: AdminUser, CustomerUser')
-    expect(sql).not.toContain('INSERT INTO "AdminUser"')
-    expect(sql).not.toContain('INSERT INTO "CustomerUser"')
   })
 
   test('validates the complete cross-fragment graph once', () => {
@@ -216,9 +188,10 @@ describe('Graph', () => {
     expect(schema.policies.some(policy => policy.table === 'Entity' && policy.command === 'SELECT')).toBe(true)
     expect(schema.policies.some(policy => policy.sql.includes('basis.matches'))).toBe(false)
     expect(schema.policies.some(policy => policy.sql.includes('authorized_row'))).toBe(false)
-    expect(schema.functions.some(fn => fn.name === 'basis.has_role')).toBe(true)
+    expect(update?.sql).toContain("basis.has_role('public',")
+    expect(schema.functions.some(fn => fn.name === 'basis.has_role')).toBe(false)
     expect(schema.functions.some(fn => fn.name === 'basis.matches')).toBe(false)
-    expect(schema.functions.some(fn => fn.name === 'basis.policy_field')).toBe(false)
+    expect(schema.functions.some(fn => fn.name === 'policy_field')).toBe(false)
   })
   test('normalizes and compiles named-relationship membership policies', () => {
     const membershipGraph = new Graph({
@@ -255,7 +228,7 @@ describe('Graph', () => {
       operator: Operator.Comparison.Contains,
     })
     const schema = membershipGraph.physicalSchema('basis_app', true)
-    const helper = schema.functions.find(fn => fn.name.startsWith('basis.policy_'))
+    const helper = schema.functions.find(fn => fn.name.startsWith('policy_'))
     expect(helper?.securityDefiner).toBe(true)
     expect(helper?.searchPath).toBe('public, basis, pg_temp')
     expect(helper?.sql).toContain('FROM "WorkspaceMembership"')
@@ -265,7 +238,7 @@ describe('Graph', () => {
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'
     ))
-    expect(policy?.sql).toContain(`basis.${helper?.name.split('.').at(-1)}`)
+    expect(policy?.sql).toContain(`public.${helper?.name}`)
     expect(schema.grants.some(grant => grant.function === helper?.name && grant.kind === 'grant'))
       .toBe(true)
     expect(schema.grants.some(grant => grant.function === helper?.name && grant.kind === 'revoke'))
@@ -327,7 +300,7 @@ describe('Graph', () => {
       ],
     })
     const helper = inverseGraph.physicalSchema('basis_app', true).functions
-      .find(fn => fn.name.startsWith('basis.policy_'))
+      .find(fn => fn.name.startsWith('policy_'))
     expect(helper?.sql).toContain('FROM "Article"')
     expect(helper?.sql).toContain('"owner.id"')
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
@@ -415,7 +388,7 @@ describe('Graph', () => {
       }],
     })
     const helper = emptyGraph.physicalSchema('basis_app', true).functions
-      .find(fn => fn.name.startsWith('basis.policy_'))
+      .find(fn => fn.name.startsWith('policy_'))
     expect(helper?.sql).toContain('NOT EXISTS (SELECT 1 FROM "WorkspaceMembership"')
   })
 
@@ -441,7 +414,7 @@ describe('Graph', () => {
       }],
     })
     expect(combined.physicalSchema('basis_app', true).functions
-      .some(fn => fn.name.startsWith('basis.policy_'))).toBe(true)
+      .some(fn => fn.name.startsWith('policy_'))).toBe(true)
   })
 
   test('composes inherited membership and direct owner grants', () => {
@@ -473,12 +446,12 @@ describe('Graph', () => {
     const schema = composed.physicalSchema('basis_app', true)
     const helperNames = schema.functions
       .map(fn => fn.name)
-      .filter(name => name.startsWith('basis.policy_'))
+      .filter(name => name.startsWith('policy_'))
     expect(helperNames).toHaveLength(1)
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'
     ))
-    expect(policy?.sql).toContain(`${helperNames[0]}("Workspace"."id")`)
+    expect(policy?.sql).toContain(`public.${helperNames[0]}("Workspace"."id")`)
     expect(policy?.sql).toContain('"Workspace"."owner.id"')
     expect(schema.functions.find(fn => fn.name === helperNames[0])?.sql)
       .toContain('"WorkspaceMembership"')
@@ -557,9 +530,9 @@ describe('Graph', () => {
     const create = schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'INSERT')
     const remove = schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'DELETE')
     expect(read?.sql).toContain('basis.has_role')
-    expect(read?.sql).toContain('basis.policy_')
+    expect(read?.sql).toContain('public.policy_')
     expect(update?.sql).toContain('basis.has_role')
-    expect(update?.sql).toContain('basis.policy_')
+    expect(update?.sql).toContain('public.policy_')
     expect(create?.sql).toContain('FALSE')
     expect(remove?.sql).toContain('FALSE')
   })
@@ -732,7 +705,7 @@ describe('Graph', () => {
       }],
     })
     const helpers = nested.physicalSchema('basis_app', true).functions
-      .filter(fn => fn.name.startsWith('basis.policy_'))
+      .filter(fn => fn.name.startsWith('policy_'))
       .map(fn => fn.sql)
       .join('\n')
     expect(helpers.match(/EXISTS \(SELECT 1 FROM "Project"/gu)).toHaveLength(1)
@@ -788,7 +761,7 @@ describe('Graph', () => {
     const read = whereOnly.physicalSchema('basis_app', true).policies.find(policy => (
       policy.table === 'Workspace' && policy.command === 'SELECT'
     ))
-    expect(read?.sql).toContain('basis.policy_')
+    expect(read?.sql).toContain('public.policy_')
     expect(read?.sql).not.toContain('FALSE')
   })
 

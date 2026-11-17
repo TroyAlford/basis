@@ -507,6 +507,27 @@ describe('Server graph configuration', () => {
     expect(() => server.database({ url: 'postgresql://127.0.0.1:1/basis' } as never))
       .toThrow('unsupported database option')
   })
+
+  test('rejects external PostgreSQL configuration', () => {
+    expect(() => new Server().database({
+      url: 'postgres://basis:basis@127.0.0.1:1/basis',
+    } as never)).toThrow('unsupported database option')
+  })
+
+  test('uses a null capability when no database is configured', async () => {
+    const server = new Server()
+      .start({ development: true, hostname: '127.0.0.1', logger: new Logger({ silent: true }), port: 0 })
+
+    try {
+      await expect(server.db.connect()).rejects.toThrow('No database is configured for this server')
+      await expect(server.db.tx(async sql => { void sql })).rejects.toThrow('No database is configured for this server')
+      expect(() => server.db.sql).toThrow('No database is configured for this server')
+    } finally {
+      await server.shutdown()
+    }
+
+    expect(server.db.closed).toBe(true)
+  })
 })
 
 describe('Server logging', () => {

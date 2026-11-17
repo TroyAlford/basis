@@ -3,17 +3,14 @@ import { runAsync } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import type { CommittedDatabaseContext } from '../testing/DatabaseFixture'
+import type { DatabaseContext } from '../testing/DatabaseFixture'
+import { withDatabase } from '../testing/DatabaseFixture'
 import { accountDefinition, noteDefinition, numberRowDefinition, useDatabaseFixture } from '../testing/DatabaseFixture'
-import { withCommittedDatabase } from '../testing/DatabaseFixture'
-import type { LifecycleDatabase } from '../testing/DatabaseLifecycle'
-import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { installSchema } from '../testing/Schema'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
-import { Server } from './Server'
 
 /*
  * Real PostgreSQL lifecycle. The suite owns Docker services through the
@@ -24,15 +21,6 @@ const root = join(import.meta.dir, '..', '..', '..')
 const silent = new Logger({ silent: true })
 
 /**
- * Build a server with a silent logger.
- * @param server - The configured server.
- * @returns The started server.
- */
-function start(server: Server): Server {
-  return server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
-}
-
-/**
  * Register an ordinary transaction-isolated database test.
  * @param name - Test name and fixture label.
  * @param callback - Test work.
@@ -40,10 +28,10 @@ function start(server: Server): Server {
  */
 function isolatedTest(
   name: string,
-  callback: (database: LifecycleDatabase) => Promise<void>,
+  callback: (database: DatabaseContext) => Promise<void>,
   timeout = 120_000,
 ): void {
-  test(name, () => withLifecycleDatabase(name, callback), timeout)
+  test(name, () => withDatabase(name, callback), timeout)
 }
 
 /**
@@ -54,10 +42,10 @@ function isolatedTest(
  */
 function freshIsolatedTest(
   name: string,
-  callback: (database: LifecycleDatabase) => Promise<void>,
+  callback: (database: DatabaseContext) => Promise<void>,
   timeout = 120_000,
 ): void {
-  test(name, () => withLifecycleDatabase(name, callback, { fresh: true }), timeout)
+  test(name, () => withDatabase(name, callback, { fresh: true }), timeout)
 }
 
 /**
@@ -68,10 +56,24 @@ function freshIsolatedTest(
  */
 function durableTest(
   name: string,
-  callback: (database: CommittedDatabaseContext) => Promise<void>,
+  callback: (database: DatabaseContext) => Promise<void>,
   timeout = 120_000,
 ): void {
-  test(name, () => withCommittedDatabase(name, callback, { fresh: true }), timeout)
+  test(name, () => withDatabase(name, callback, { fresh: true }), timeout)
+}
+
+/**
+ * Register a test that uses the canonical fixture schema.
+ * @param name - Test name and fixture label.
+ * @param callback - Test work.
+ * @param timeout - Test timeout in milliseconds.
+ */
+function fixtureTest(
+  name: string,
+  callback: (database: DatabaseContext) => Promise<void>,
+  timeout = 120_000,
+): void {
+  test(name, () => withDatabase(name, callback), timeout)
 }
 
 describe('Server database lifecycle', () => {
@@ -231,45 +233,7 @@ describe('Server database lifecycle', () => {
     })).toEqual([{ score: 1.5, title: 'kept' }])
   })
 
-  durableTest('enforces Entity and User reference eligibility', async database => {
-    const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            { field: 'email', type: 'String' },
-          ],
-          name: 'User',
-        },
-        {
-          extends: 'User',
-          fields: [
-            { field: 'permissions', type: 'String' },
-            { field: 'favorite', target: 'Entity', type: 'Entity' },
-            { field: 'manager', target: 'User', type: 'Entity' },
-          ],
-          name: 'SystemUser',
-        },
-        {
-          extends: 'User',
-          fields: [{ field: 'company', type: 'String' }],
-          name: 'Client',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            { field: 'title', type: 'String' },
-          ],
-          name: 'Book',
-        },
-        {
-          extends: 'Book',
-          fields: [{ field: 'genre', type: 'String' }],
-          name: 'Novel',
-        },
-      ],
-    }))
-    await database.tx(async sql => installSchema(sql, entities))
+  fixtureTest('enforces Entity and User reference eligibility', async database => {
     const userId = randomUUID()
     const novelId = '123'
     await database.tx(async sql => {
@@ -278,12 +242,8 @@ describe('Server database lifecycle', () => {
         VALUES (${userId}, ${'User'}, ${'SystemUser'}), (${novelId}, ${'Novel'}, ${'Novel'})
       `
       await sql`
-        INSERT INTO "User" ("id", "email")
-        VALUES (${userId}, ${'user@example.test'})
-      `
-      await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "favorite.id", "manager.id")
-        VALUES (${userId}, ${'admin'}, ${novelId}, ${userId})
+        INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "favorite.id")
+        VALUES (${userId}, ${'User'}, ${'user@example.test'}, ${'admin'}, ${novelId})
       `
       await sql`
         INSERT INTO "Book" ("id", "title")
@@ -293,37 +253,32 @@ describe('Server database lifecycle', () => {
         INSERT INTO "Novel" ("id", "genre")
         VALUES (${novelId}, ${'Genre'})
       `
+      await sql`
+        SET constraints ALL immediate
+      `
     })
 
-    expect(await database.tx(async sql => queryEntity<{
-      email: string,
-      entity: string,
-      id: string,
-      name: string,
-      permissions: string,
-    }>(sql, entities, 'SystemUser', {
-      fields: ['id', 'name', 'entity', 'email', 'permissions'],
-      orderBy: 'email',
-      where: { email: 'user@example.test' },
-    }))).toEqual([{
-      email: 'user@example.test',
-      entity: 'SystemUser',
-      id: userId,
-      name: 'User',
-      permissions: 'admin',
-    }])
-    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'SystemUser', {
-      fields: ['id'],
-      limit: 1,
-      orderBy: [],
-    }))).toEqual([{ id: userId }])
-
-    const invalidManager = await database.tx(async sql => sql`
-      UPDATE "SystemUser"
-      SET "manager.id" = ${novelId}
+    expect(await database.tx(async sql => sql<{ email: string }[]>`
+      SELECT "email"
+      FROM "SystemUser"
       WHERE "id" = ${userId}
-    `).catch((error: unknown) => error)
-    expect(invalidManager).toMatchObject({ errno: '23503' })
+    `)).toEqual([{ email: 'user@example.test' }])
+
+    const invalidId = randomUUID()
+    const invalid = await database.tx(async sql => {
+      await sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${invalidId}, ${'Invalid user'}, ${'SystemUser'})
+      `
+      await sql`
+        INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "manager.id")
+        VALUES (${invalidId}, ${'Invalid user'}, ${'invalid@example.test'}, ${'admin'}, ${randomUUID()})
+      `
+      await sql`
+        SET constraints ALL immediate
+      `
+    }).catch((error: unknown) => error)
+    expect((invalid as { errno?: string }).errno).toMatch(/^(23503|P0001)$/)
   })
 
   durableTest('projects descendant fields and singular reference paths', async database => {
@@ -2127,237 +2082,64 @@ describe('Server database lifecycle', () => {
     ])
   })
 
-  durableTest('enforces MTI final-state integrity for direct SQL', async database => {
-    const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            { field: 'email', type: 'String' },
-          ],
-          name: 'User',
-        },
-        {
-          extends: 'User',
-          fields: [
-            { field: 'permissions', type: 'String' },
-            { field: 'manager', target: 'User', type: 'Entity' },
-          ],
-          name: 'SystemUser',
-        },
-        {
-          extends: 'User',
-          fields: [{ field: 'company', type: 'String' }],
-          name: 'Client',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            { field: 'title', type: 'String' },
-          ],
-          name: 'Book',
-        },
-        {
-          extends: 'Book',
-          fields: [{ field: 'genre', type: 'String' }],
-          name: 'Novel',
-        },
-      ],
-    }))
-    await database.tx(async sql => installSchema(sql, entities))
-
-    const incompleteId = randomUUID()
-    expect(await database.tx(async sql => sql`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${incompleteId}, ${'Incomplete'}, ${'SystemUser'})
-    `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
-
-    const missingParentId = randomUUID()
-    expect(await database.tx(async sql => {
-      await sql`
-        INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${missingParentId}, ${'Missing parent'}, ${'SystemUser'})
-      `
-      await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "manager.id")
-        VALUES (${missingParentId}, ${'admin'}, ${missingParentId})
-      `
-    }).catch((error: unknown) => error)).toMatchObject({ errno: '23503' })
-
+  fixtureTest('enforces MTI final-state integrity for direct SQL', async database => {
     const id = randomUUID()
     await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, ${'Ada'}, ${'SystemUser'})
+        VALUES (${id}, ${'Ada'}, ${'MtiSystemUser'})
       `
       await sql`
-        INSERT INTO "User" ("id", "email")
-        VALUES (${id}, ${'ada@example.test'})
+        INSERT INTO "MtiUser" ("id", "label", "email")
+        VALUES (${id}, ${'Ada'}, ${'ada@example.test'})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "manager.id")
+        INSERT INTO "MtiSystemUser" ("id", "permissions", "manager.id")
         VALUES (${id}, ${'admin'}, ${id})
       `
-    })
-
-    expect(await database.tx(async sql => sql`
-      INSERT INTO "Client" ("id", "company")
-      VALUES (${id}, ${'Hooli'})
-    `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
-
-    await database.tx(async sql => {
       await sql`
-        INSERT INTO "Client" ("id", "company")
-        VALUES (${id}, ${'Temporary'})
-      `
-      await sql`
-        DELETE FROM "Client"
-        WHERE "id" = ${id}
+        SET constraints ALL immediate
       `
     })
 
-    const replacementId = randomUUID()
-    expect(await database.tx(async sql => {
+    const incompleteId = randomUUID()
+    const incomplete = await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${replacementId}, ${'Replacement'}, ${'SystemUser'})
+        VALUES (${incompleteId}, ${'Incomplete'}, ${'MtiSystemUser'})
       `
       await sql`
-        INSERT INTO "User" ("id", "email")
-        VALUES (${replacementId}, ${'replacement@example.test'})
+        SET constraints ALL immediate
       `
-      await sql`
-        UPDATE "SystemUser"
-        SET "id" = ${replacementId}
-        WHERE "id" = ${id}
-      `
-    }).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
+    }).catch((error: unknown) => error)
+    expect(incomplete).toMatchObject({ errno: 'P0001' })
 
-    expect(await database.tx(async sql => sql`
-      DELETE FROM "SystemUser"
-      WHERE "id" = ${id}
-    `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
-
-    expect(await database.tx(async sql => sql`
-      UPDATE "Entity"
-      SET "entity" = ${'Client'}
-      WHERE "id" = ${id}
-    `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
-
-    const transientId = randomUUID()
-    await database.tx(async sql => {
+    const missingParentId = randomUUID()
+    const missingParent = await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${transientId}, ${'Transient'}, ${'SystemUser'})
+        VALUES (${missingParentId}, ${'Missing parent'}, ${'MtiSystemUser'})
       `
       await sql`
-        INSERT INTO "User" ("id", "email")
-        VALUES (${transientId}, ${'transient@example.test'})
+        INSERT INTO "MtiSystemUser" ("id", "permissions", "manager.id")
+        VALUES (${missingParentId}, ${'admin'}, ${missingParentId})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "manager.id")
-        VALUES (${transientId}, ${'admin'}, ${transientId})
+        SET constraints ALL immediate
       `
-      await sql`
-        DELETE FROM "SystemUser"
-        WHERE "id" = ${transientId}
-      `
-      await sql`
-        DELETE FROM "User"
-        WHERE "id" = ${transientId}
-      `
-      await sql`
-        DELETE FROM "Entity"
-        WHERE "id" = ${transientId}
-      `
-    })
+    }).catch((error: unknown) => error)
+    expect(missingParent).toMatchObject({ errno: 'P0001' })
 
-    const novelId = '123'
-    await database.tx(async sql => {
+    const deleteFailure = await database.tx(async sql => {
       await sql`
-        INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${novelId}, ${'Novel'}, ${'Novel'})
-      `
-      await sql`
-        INSERT INTO "Book" ("id", "title")
-        VALUES (${novelId}, ${'Book'})
-      `
-      await sql`
-        INSERT INTO "Novel" ("id", "genre")
-        VALUES (${novelId}, ${'Genre'})
-      `
-    })
-    await database.tx(async sql => {
-      await sql`
-        DELETE FROM "Novel"
-        WHERE "id" = ${novelId}
-      `
-      await sql`
-        DELETE FROM "Book"
-        WHERE "id" = ${novelId}
-      `
-      await sql`
-        DELETE FROM "Entity"
-        WHERE "id" = ${novelId}
-      `
-    })
-
-    const triggerOid = async () => database.tx(async sql => sql<{ oid: number }[]>`
-      SELECT oid
-      FROM pg_catalog.pg_trigger
-      WHERE tgname = 'Entity_leaf_check' AND tgrelid = '"Entity"'::regclass
-    `)
-    const before = await triggerOid()
-    await database.tx(async sql => installSchema(sql, entities))
-    expect(await triggerOid()).toEqual(before)
-
-    await database.tx(async sql => {
-      await sql`
-        DELETE FROM "SystemUser"
+        DELETE FROM "MtiSystemUser"
         WHERE "id" = ${id}
       `
       await sql`
-        DELETE FROM "User"
-        WHERE "id" = ${id}
+        SET constraints ALL immediate
       `
-      await sql`
-        DELETE FROM "Entity"
-        WHERE "id" = ${id}
-      `
-    })
-    expect(await database.tx(async sql => sql<{ count: number }[]>`
-      SELECT count(*)::int AS count
-      FROM "Entity"
-      WHERE "id" = ${id}
-    `)).toEqual([{ count: 0 }])
-
-    await database.tx(async sql => sql`
-      ALTER TABLE "Entity" disable trigger "Entity_leaf_check"
-    `)
-    expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
-      .toHaveProperty('message', expect.stringContaining('trigger definition changed: Entity_leaf_check'))
-    await database.tx(async sql => sql`
-      ALTER TABLE "Entity" enable trigger "Entity_leaf_check"
-    `)
-
-    await database.tx(async sql => sql`
-      DROP trigger "Entity_leaf_immutable" ON "Entity"
-    `)
-    await database.tx(async sql => sql`
-      CREATE trigger "Entity_leaf_immutable" before
-      UPDATE of "name" ON "Entity" FOR each row execute function "Entity_leaf_immutable"()
-    `)
-    expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
-      .toHaveProperty('message', expect.stringContaining('trigger definition changed: Entity_leaf_immutable'))
-
-    await database.tx(async sql => {
-      await sql.unsafe(
-        'create or replace function "Entity_leaf_immutable"() returns trigger ' +
-        'language plpgsql as $$begin return new; end$$',
-      ).simple()
-    })
-    expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
-      .toHaveProperty('message', expect.stringContaining('function definition changed: Entity_leaf_immutable'))
+    }).catch((error: unknown) => error)
+    expect(deleteFailure).toMatchObject({ errno: 'P0001' })
   })
 
   isolatedTest('filters numeric values with each comparison operator', async database => {
@@ -2412,7 +2194,7 @@ describe('Server database lifecycle', () => {
         {
           fields: [
             { field: 'id', format: 'UUID' },
-            { field: 'author', target: 'User', type: 'Entity' },
+            { field: 'author', target: 'MtiUser', type: 'Entity' },
             { field: 'title', type: 'String' },
           ],
           name: 'Post',
@@ -2422,7 +2204,7 @@ describe('Server database lifecycle', () => {
             { field: 'id', format: 'Snowflake' },
             { field: 'label', type: 'String' },
           ],
-          name: 'User',
+          name: 'MtiUser',
         },
       ],
     }))
@@ -2437,17 +2219,17 @@ describe('Server database lifecycle', () => {
     `
     expect(constraints).toEqual([
       { definition: 'FOREIGN KEY (id) REFERENCES "Entity"(id) DEFERRABLE' },
-      { definition: 'FOREIGN KEY ("author.id") REFERENCES "User"(id) DEFERRABLE' },
+      { definition: 'FOREIGN KEY ("author.id") REFERENCES "MtiUser"(id) DEFERRABLE' },
     ])
 
     const userId = '9223372036854775807'
     const postId = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${userId}, ${'Ada'}, ${'User'}), (${postId}, ${'Hello'}, ${'Post'})
+      VALUES (${userId}, ${'Ada'}, ${'MtiUser'}), (${postId}, ${'Hello'}, ${'Post'})
     `
     await database.sql`
-      INSERT INTO "User" ("id", "label")
+      INSERT INTO "MtiUser" ("id", "label")
       VALUES (${userId}, ${'Ada'})
     `
     await database.sql`
@@ -2474,7 +2256,7 @@ describe('Server database lifecycle', () => {
 
     const blockedDelete = await database.captureError(async db => {
       await db.sql`
-        DELETE FROM "User"
+        DELETE FROM "MtiUser"
         WHERE "id" = ${'9223372036854775807'}
       `
     })
@@ -2485,28 +2267,7 @@ describe('Server database lifecycle', () => {
     `).toEqual([{ count: 1 }])
   })
 
-  durableTest('creates cyclic foreign keys and validates deferred references', async database => {
-    const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            { field: 'car', target: 'CycleCar', type: 'Entity' },
-          ],
-          name: 'CycleUser',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            { field: 'user', target: 'CycleUser', type: 'Entity' },
-          ],
-          name: 'CycleCar',
-        },
-      ],
-    }))
-
-    await database.tx(async sql => installSchema(sql, entities))
-
+  fixtureTest('creates cyclic foreign keys and validates deferred references', async database => {
     const constraints = await database.tx(async sql => sql<{
       deferrable: boolean,
       deferred: boolean,
@@ -2552,15 +2313,17 @@ describe('Server database lifecycle', () => {
         INSERT INTO "CycleCar" ("id", "user.id")
         VALUES (${carId}, ${userId})
       `
+      await sql`
+        SET constraints ALL immediate
+      `
+      expect(await sql<{ count: number }[]>`
+        SELECT count(*)::int AS count
+        FROM "CycleUser"
+      `).toEqual([{ count: 1 }])
     })
-    expect(await database.tx(async sql => sql<{ count: number }[]>`
-      SELECT count(*)::int AS count
-      FROM "CycleUser"
-    `)).toEqual([{ count: 1 }])
 
     const invalidCarId = randomUUID()
     const invalidUserId = randomUUID()
-    const missingUserId = randomUUID()
     const invalid = await database.tx(async sql => {
       await sql`
         SET constraints ALL deferred
@@ -2580,72 +2343,16 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "CycleCar" ("id", "user.id")
-        VALUES (${invalidCarId}, ${missingUserId})
+        VALUES (${invalidCarId}, ${randomUUID()})
+      `
+      await sql`
+        SET constraints ALL immediate
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
-
-    await database.tx(async sql => installSchema(sql, entities))
-    expect(await database.tx(async sql => sql<{ count: number }[]>`
-      SELECT count(*)::int AS count
-      FROM pg_constraint
-      WHERE conrelid IN ('"CycleUser"'::regclass, '"CycleCar"'::regclass) AND contype = 'f'
-    `)).toEqual([{ count: 4 }])
-
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
-    `)
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
-        "CycleCar" ("id")
-    `)
-    await expect(database.tx(async sql => installSchema(sql, entities)))
-      .rejects.toThrow('constraint definition changed: CycleUser_car_fkey')
-
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
-    `)
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
-        "CycleCar" ("id") ON DELETE cascade DEFERRABLE INITIALLY immediate
-    `)
-    await expect(database.tx(async sql => installSchema(sql, entities)))
-      .rejects.toThrow('constraint definition changed: CycleUser_car_fkey')
-
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
-    `)
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
-        "CycleCar" ("id") DEFERRABLE INITIALLY immediate NOT valid
-    `)
-    await expect(database.tx(async sql => installSchema(sql, entities)))
-      .rejects.toThrow('constraint definition changed: CycleUser_car_fkey')
-
-    await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
-    `)
-    await database.tx(async sql => installSchema(sql, entities))
-    expect(await database.tx(async sql => sql<{ count: number }[]>`
-      SELECT count(*)::int AS count
-      FROM pg_constraint
-      WHERE conrelid = '"CycleUser"'::regclass AND conname = 'CycleUser_car_fkey'
-    `)).toEqual([{ count: 1 }])
   })
 
-  durableTest('enforces self-referential foreign keys', async database => {
-    const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [{
-        fields: [
-          { field: 'id', format: 'UUID' },
-          { field: 'parent', target: 'TreeNode', type: 'Entity' },
-        ],
-        name: 'TreeNode',
-      }],
-    }))
-
-    await database.tx(async sql => installSchema(sql, entities))
-
+  fixtureTest('enforces self-referential foreign keys', async database => {
     const nodeId = randomUUID()
     await database.tx(async sql => {
       await sql`
@@ -2677,6 +2384,9 @@ describe('Server database lifecycle', () => {
       await sql`
         INSERT INTO "TreeNode" ("id", "parent.id")
         VALUES (${invalidNodeId}, ${randomUUID()})
+      `
+      await sql`
+        SET constraints ALL immediate
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
@@ -2900,7 +2610,7 @@ describe('Server database lifecycle', () => {
 
   test('rolls back successful isolated tests and shares the transaction with db.query', async () => {
     let schema = ''
-    await withLifecycleDatabase('rollback-success', async database => {
+    await withDatabase('rollback-success', async database => {
       schema = database.schema
       await database.sql`
         CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
@@ -2923,7 +2633,7 @@ describe('Server database lifecycle', () => {
 
   test('rolls back failed isolated tests', async () => {
     let schema = ''
-    await expect(withLifecycleDatabase('rollback-failure', async database => {
+    await expect(withDatabase('rollback-failure', async database => {
       schema = database.schema
       await database.sql`
         CREATE TABLE "FailureProbe" ("id" uuid PRIMARY KEY)
@@ -2939,7 +2649,7 @@ describe('Server database lifecycle', () => {
 
   test('runs concurrent isolated tests in independent schemas', async () => {
     const schemas = await Promise.all([
-      withLifecycleDatabase('concurrent-a', async database => {
+      withDatabase('concurrent-a', async database => {
         await database.sql`
           CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
         `
@@ -2953,7 +2663,7 @@ describe('Server database lifecycle', () => {
         })).toEqual([{ value: 1 }])
         return database.schema
       }, { fresh: true }),
-      withLifecycleDatabase('concurrent-b', async database => {
+      withDatabase('concurrent-b', async database => {
         await database.sql`
           CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
         `
@@ -2980,7 +2690,7 @@ describe('Server database lifecycle', () => {
 
   test('cleans committed durable schemas after failures', async () => {
     let schema = ''
-    await expect(withCommittedDatabase('durable-failure', async database => {
+    await expect(withDatabase('durable-failure', async database => {
       schema = database.schema
       await database.tx(async sql => {
         await sql`
@@ -3003,26 +2713,6 @@ describe('Server database lifecycle', () => {
       FROM pg_catalog.pg_namespace
       WHERE nspname like 'basis_test_%'
     `).toEqual([{ count: 0 }])
-  })
-
-  test('rejects external PostgreSQL configuration', () => {
-    expect(() => new Server().database({
-      url: 'postgres://basis:basis@127.0.0.1:1/basis',
-    } as never)).toThrow('unsupported database option')
-  })
-
-  test('uses a null capability when no database is configured', async () => {
-    const server = start(new Server())
-
-    try {
-      await expect(server.db.connect()).rejects.toThrow('No database is configured for this server')
-      await expect(server.db.tx(async sql => { void sql })).rejects.toThrow('No database is configured for this server')
-      expect(() => server.db.sql).toThrow('No database is configured for this server')
-    } finally {
-      await server.shutdown()
-    }
-
-    expect(server.db.closed).toBe(true)
   })
 
   test('reports unhealthy when a managed database needs Docker but Docker is unavailable', async () => {

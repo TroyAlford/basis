@@ -115,7 +115,7 @@ describe('Graph authoring types', () => {
     })
     expect(graph.definitions.validationConstraints('Person')).toHaveLength(1)
     expect(graph.physicalSchema('basis_app', false).functions.some(fn => (
-      fn.name.startsWith('basis.validate_')
+      fn.name.startsWith('validate_')
     ))).toBe(true)
   })
 

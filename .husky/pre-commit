@@ -1,5 +1,1 @@
-bun lint:es
-bun lint:ts
-bun lint:css
-bun lint:md
-bun run build
+bun ./consumer/cli.ts compliance

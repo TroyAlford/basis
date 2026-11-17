@@ -1,6 +1,6 @@
 {
   "appRole": "basis_app",
-  "checksum": "0640116119d83bb19750dfaf41daa0f4a574c3db238e431861b211c45c8f1772",
+  "checksum": "5429714da11fb4440d8c7ee0f6f39862f9fc9c4d51860562e64ee4ec411875a2",
   "expected": {
     "constraints": [
       {
@@ -121,30 +121,6 @@
         "securityDefiner": true,
         "signature": "role_id text",
         "sql": "\n      CREATE OR REPLACE FUNCTION basis.has_role(role_id text)\n      RETURNS boolean\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT EXISTS (\n          SELECT 1\n          FROM \"UserRole\" ur\n          WHERE ur.\"role.id\" = role_id\n            AND ur.\"user.id\" = nullif(current_setting('actor.id', true), '')\n        )\n      $$;\n    "
-      },
-      {
-        "body": "SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )",
-        "lifecycle": false,
-        "name": "basis.resolve_identity",
-        "required": [
-          "basis.resolve_identity"
-        ],
-        "searchPath": "public, basis, pg_temp",
-        "securityDefiner": true,
-        "signature": "candidate text",
-        "sql": "\n      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)\n      RETURNS text\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )\n      $$;\n    "
-      },
-      {
-        "body": "DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END",
-        "lifecycle": false,
-        "name": "basis.enroll_identity",
-        "required": [
-          "basis.enroll_identity"
-        ],
-        "searchPath": "public, basis, pg_temp",
-        "securityDefiner": true,
-        "signature": "provider_name text, provider_subject text, display_name text, email_address text",
-        "sql": "\n      CREATE OR REPLACE FUNCTION basis.enroll_identity(\n        provider_name text,\n        provider_subject text,\n        display_name text,\n        email_address text\n      )\n      RETURNS text\n      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n      DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END $$;\n    "
       }
     ],
     "policies": [
@@ -1037,46 +1013,6 @@
         "sql": "REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC"
       },
       {
-        "function": "basis.resolve_identity",
-        "grantName": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
-        "grantee": "basis_app",
-        "kind": "grant",
-        "name": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
-        "object": "function",
-        "privilege": "EXECUTE",
-        "sql": "GRANT EXECUTE ON FUNCTION basis.resolve_identity(candidate text) TO \"basis_app\""
-      },
-      {
-        "function": "basis.resolve_identity",
-        "grantName": "grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
-        "grantee": "PUBLIC",
-        "kind": "revoke",
-        "name": "revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
-        "object": "function",
-        "privilege": "EXECUTE",
-        "sql": "REVOKE ALL ON FUNCTION basis.resolve_identity(candidate text) FROM PUBLIC"
-      },
-      {
-        "function": "basis.enroll_identity",
-        "grantName": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
-        "grantee": "basis_app",
-        "kind": "grant",
-        "name": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
-        "object": "function",
-        "privilege": "EXECUTE",
-        "sql": "GRANT EXECUTE ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) TO \"basis_app\""
-      },
-      {
-        "function": "basis.enroll_identity",
-        "grantName": "grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
-        "grantee": "PUBLIC",
-        "kind": "revoke",
-        "name": "revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
-        "object": "function",
-        "privilege": "EXECUTE",
-        "sql": "REVOKE ALL ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) FROM PUBLIC"
-      },
-      {
         "grantName": "grant:basis_app:schema:public:CREATE",
         "grantee": "basis_app",
         "kind": "revoke",
@@ -1243,8 +1179,8 @@
   ],
   "planHash": "9093c8f6bb9211a48831f8b11e8b6e446ca16bcaab8ebb60e515ed9f15889225",
   "schema": "public",
-  "sourceHash": "0274688f4544a7d01a9fb847d38dc5d2899ea788801c7416a4cd735366da0a52",
+  "sourceHash": "22bfdc16c9e5c1c2b49955e3e24f6a0d38b18c4be539c84b484dedbb70dde5b5",
   "superuser": true,
-  "targetHash": "f99e19fae5a5b2f0f92e0d618617c3a36eb826d1cdde907228b067f72d0b9afb",
+  "targetHash": "a4f2c6c27849e1a059dbe89845152d8ee3d0a37c993370083a25133fcd695c1a",
   "version": "0003-release"
 }

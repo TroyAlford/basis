@@ -1100,7 +1100,7 @@ describe('DDL schema planning', () => {
       previous,
       previousPhysical: previous.physicalSchema('basis_app', false),
     })
-    const drops = plan.operations.filter(operation => operation.id.startsWith('drop-function:basis.policy_'))
+    const drops = plan.operations.filter(operation => operation.id.startsWith('drop-function:policy_'))
     expect(drops).toHaveLength(1)
     expect(drops[0]?.sql).toContain('(root_id text)')
     expect(drops[0]?.sql.endsWith('()')).toBe(false)
@@ -1138,7 +1138,7 @@ describe('DDL schema planning', () => {
         superuser: false,
       })
       const oldHelpers = (previous.physicalSchema(appRole, false).functions ?? [])
-        .filter(fn => fn.name.startsWith('basis.policy_'))
+        .filter(fn => fn.name.startsWith('policy_'))
         .map(fn => fn.name)
       expect(oldHelpers).toHaveLength(1)
       const executable = plan.operations.filter(operation => (
@@ -1222,8 +1222,7 @@ describe('DDL schema planning', () => {
     const revokes = plan.operations.filter(operation => (
       operation.kind === 'grant' && operation.sql.startsWith('REVOKE ALL ON FUNCTION')
     ))
-    expect(revokes.some(operation => operation.sql.includes('basis.has_role'))).toBe(true)
-    expect(revokes.some(operation => operation.sql.includes('basis.policy_'))).toBe(true)
+    expect(revokes.some(operation => operation.sql.includes('public.policy_'))).toBe(true)
     for (const revoke of revokes) {
       const functionTarget = revoke.dependsOn.find(dependency => dependency.startsWith('function:'))
       expect(functionTarget).toBeTruthy()

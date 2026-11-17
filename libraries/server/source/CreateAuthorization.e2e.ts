@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseContext } from '../testing/DatabaseFixture'
-import { fixtureRows, withCommittedDatabase, withDatabase } from '../testing/DatabaseFixture'
+import { fixtureRows, withDatabase } from '../testing/DatabaseFixture'
 import { MutationError } from './Mutation'
 
 const rows = fixtureRows
@@ -52,21 +52,22 @@ describe('resource-scoped create authorization', () => {
   })
 
   test('denies a separate restricted actor from attaching a descendant-only row', async () => {
-    const parent = await withCommittedDatabase('create-valid-parent', rows.alice, async database => {
+    await withDatabase('create-descendant-bob', rows.alice, async database => {
       const created = await database.create('CreateLeaf', {
         name: 'Valid parent chain',
         title: 'Valid parent chain',
         workspace: rows.visibleWorkspace,
       })
-      return created.record?.id
-    })
-    expect(parent).toBeDefined()
-    await expect(withDatabase('create-descendant-bob', rows.bob, database => (
-      database.sql`
+      const parent = created.record?.id
+      expect(parent).toBeDefined()
+      await database.sql`
+        SELECT set_config('actor.id', ${rows.bob}, TRUE)
+      `
+      await expect(database.sql`
         INSERT INTO "CreateSibling" ("id")
         VALUES (${parent})
-      `
-    ))).rejects.toThrow(/row-level security policy/)
+      `).rejects.toThrow(/row-level security policy/)
+    })
   })
 
   test('evaluates array-valued create predicates from proposed values', async () => {
