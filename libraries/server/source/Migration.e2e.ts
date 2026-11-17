@@ -46,7 +46,7 @@ describe('Reviewed schema evolution', () => {
       expect(applied.version).toBe(attemptVersion)
 
       const [ledger] = await database.sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS COUNT
+        SELECT COUNT(*)::int AS count
         FROM basis.schema_migration
         WHERE checksum = ${artifact.checksum}
       `
@@ -279,7 +279,7 @@ describe('Reviewed schema evolution', () => {
       let ledgerCount = 0
       if (ledgerTable?.present) {
         const [ledger] = await database.sql<{ count: number }[]>`
-          SELECT COUNT(*)::int AS COUNT
+          SELECT COUNT(*)::int AS count
           FROM basis.schema_migration
           WHERE checksum = ${artifact.checksum}
         `

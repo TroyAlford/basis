@@ -604,8 +604,9 @@ describe('DDL schema planning', () => {
       const otherCampaignId = randomUUID()
       const insertEntity = async (id: string, name: string, entity: string) => {
         await database.sql`
-          INSERT INTO "Entity"("id", "name", "entity")
-          VALUES (${id}, ${name}, ${entity})
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES
+            (${id}, ${name}, ${entity})
         `
       }
       await insertEntity(userId, 'user@example.com', 'User')
@@ -613,56 +614,66 @@ describe('DDL schema planning', () => {
       await insertEntity(campaignId, 'Campaign', 'Campaign')
       await insertEntity(otherCampaignId, 'Other Campaign', 'Campaign')
       await database.sql`
-        INSERT INTO "User"("id", "email")
-        VALUES (${userId}, 'user@example.com')
+        INSERT INTO "User" ("id", "email")
+        VALUES
+          (${userId}, 'user@example.com')
       `
       await database.sql`
-        INSERT INTO "User"("id", "email")
-        VALUES (${otherUserId}, NULL)
+        INSERT INTO "User" ("id", "email")
+        VALUES
+          (${otherUserId}, NULL)
       `
       const nullEmailId = randomUUID()
       await insertEntity(nullEmailId, 'null@example.com', 'User')
       await database.sql`
-        INSERT INTO "User"("id", "email")
-        VALUES (${nullEmailId}, NULL)
+        INSERT INTO "User" ("id", "email")
+        VALUES
+          (${nullEmailId}, NULL)
       `
       await database.sql`
-        INSERT INTO "Campaign"("id", "title")
-        VALUES (${campaignId}, 'Campaign')
+        INSERT INTO "Campaign" ("id", "title")
+        VALUES
+          (${campaignId}, 'Campaign')
       `
       await database.sql`
-        INSERT INTO "Campaign"("id", "title")
-        VALUES (${otherCampaignId}, 'Other Campaign')
+        INSERT INTO "Campaign" ("id", "title")
+        VALUES
+          (${otherCampaignId}, 'Other Campaign')
       `
       const membership = randomUUID()
       await insertEntity(membership, 'Membership', 'Membership')
       await database.sql`
-        INSERT INTO "Membership"("id", "userId.id", "campaignId.id")
-        VALUES (${membership}, ${userId}, ${campaignId})
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES
+          (${membership}, ${userId}, ${campaignId})
       `
       const duplicateId = randomUUID()
       await insertEntity(duplicateId, 'Duplicate Membership', 'Membership')
       await expect(database.captureError(async () => database.sql`
-        INSERT INTO "Membership"("id", "userId.id", "campaignId.id")
-        VALUES (${duplicateId}, ${userId}, ${campaignId})
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES
+          (${duplicateId}, ${userId}, ${campaignId})
       `)).resolves.toBeInstanceOf(Error)
       const distinctId = randomUUID()
       await insertEntity(distinctId, 'Distinct Membership', 'Membership')
       await database.sql`
-        INSERT INTO "Membership"("id", "userId.id", "campaignId.id")
-        VALUES (${distinctId}, ${otherUserId}, ${campaignId})
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES
+          (${distinctId}, ${otherUserId}, ${campaignId})
       `
       const nullRightId = randomUUID()
       await insertEntity(nullRightId, 'Null Right Membership', 'Membership')
       await expect(database.sql`
-        INSERT INTO "Membership"("id", "userId.id", "campaignId.id")
-        VALUES (${nullRightId}, ${otherUserId}, NULL)
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES
+          (${nullRightId}, ${otherUserId}, NULL)
       `).resolves.toBeDefined()
       const nullLeftId = randomUUID()
       await insertEntity(nullLeftId, 'Null Left Membership', 'Membership')
       await expect(database.sql`
-        INSERT INTO "Membership"("id", "userId.id", "campaignId.id")
-        VALUES (${nullLeftId}, ${userId}, NULL)
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES
+          (${nullLeftId}, ${userId}, NULL)
       `).resolves.toBeDefined()
     }, { fresh: true })
   })

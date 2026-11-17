@@ -63,8 +63,9 @@ describe('resource-scoped create authorization', () => {
     expect(parent).toBeDefined()
     await expect(withDatabase('create-descendant-bob', rows.bob, database => (
       database.sql`
-        INSERT INTO "CreateSibling"("id")
-        VALUES (${parent})
+        INSERT INTO "CreateSibling" ("id")
+        VALUES
+          (${parent})
       `
     ))).rejects.toThrow(/row-level security policy/)
   })
@@ -108,12 +109,14 @@ describe('resource-scoped create authorization', () => {
   test('enforces the same rule for restricted direct SQL', async () => {
     const insert = async (database: DatabaseContext, id: string, workspace: string) => {
       await database.sql`
-        INSERT INTO "Entity"("id", "name", "entity")
-        VALUES (${id}, ${`Direct ${id}`}, 'Resource')
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES
+          (${id}, ${`Direct ${id}`}, 'Resource')
       `
       await database.sql`
-        INSERT INTO "Resource"("id", "title", "workspace.id")
-        VALUES (${id}, ${`Direct ${id}`}, ${workspace})
+        INSERT INTO "Resource" ("id", "title", "workspace.id")
+        VALUES
+          (${id}, ${`Direct ${id}`}, ${workspace})
       `
     }
 

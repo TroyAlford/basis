@@ -54,12 +54,14 @@ test('consumer fixture uses provided entities', async () => {
   await withIsolatedDatabase('consumer-fixture', async database => {
     const id = '00000000-0000-4000-8000-000000000001'
     await database.sql`
-      INSERT INTO "Entity"("id", "name", "entity")
-      VALUES (${id}, 'Consumer', 'ConsumerNote')
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${id}, 'Consumer', 'ConsumerNote')
     `
     await database.sql`
-      INSERT INTO "ConsumerNote"("id", "label")
-      VALUES (${id}, 'isolated')
+      INSERT INTO "ConsumerNote" ("id", "label")
+      VALUES
+        (${id}, 'isolated')
     `
     expect(await database.query('ConsumerNote', { fields: ['id', 'label'] }))
       .toEqual([{ id, label: 'isolated' }])

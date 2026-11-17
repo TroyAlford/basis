@@ -377,6 +377,32 @@ describe('formatSQL', () => {
     })
   })
 
+  describe('aliases', () => {
+    test('preserves alias case and quoted aliases', () => {
+      expect(formatSQL('select count(*)::int as count from widgets')).toMatchSql(`
+        SELECT COUNT(*)::int AS count
+        FROM widgets
+      `)
+      expect(formatSQL('select id as "someKeyword", name as keyword from widgets')).toMatchSql(`
+        SELECT id AS "someKeyword", name AS keyword
+        FROM widgets
+      `)
+    })
+  })
+
+  describe('insert', () => {
+    test('puts one VALUES row per line and keeps the relation spacing', () => {
+      expect(formatSQL(`
+        insert into "Entity" ("id", "name", "entity") values ('1', 'User', 'SystemUser'), ('2', 'Novel', 'Novel')
+      `)).toMatchSql(`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES
+          ('1', 'User', 'SystemUser'),
+          ('2', 'Novel', 'Novel')
+      `)
+    })
+  })
+
   describe('create table', () => {
     test('preserves array types', () => {
       expect(formatSQL(`

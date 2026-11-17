@@ -340,6 +340,7 @@ function formatStatement(tokens: readonly Token[], indent: string): string[] {
   if (startsWith(tokens, ['create', 'table'])) return formatCreateTable(tokens, indent)
   if (startsWith(tokens, ['create']) && dollarIndex !== -1) return formatFunction(tokens, dollarIndex, indent)
   if (startsWith(tokens, ['do']) && dollarIndex !== -1) return formatDo(tokens, dollarIndex, indent)
+  if (startsWith(tokens, ['insert'])) return formatInsert(tokens, indent)
   if (startsWith(tokens, ['with'])) return formatWith(tokens, indent)
   return formatQuery(tokens, indent)
 }
@@ -722,6 +723,30 @@ function formatIf(tokens: readonly Token[], start: number, indent: string): { li
 }
 
 /**
+ * Format an INSERT statement with one row per line.
+ * @param tokens - Statement tokens.
+ * @param indent - Prefix for this block.
+ * @returns Formatted lines.
+ */
+function formatInsert(tokens: readonly Token[], indent: string): string[] {
+  const valuesIndex = tokens.findIndex(candidate => candidate.upper === 'values')
+  if (valuesIndex === -1) return formatQuery(tokens, indent)
+  const headerTokens = tokens.slice(0, valuesIndex)
+  const open = headerTokens.findIndex(candidate => candidate.text === '(')
+  if (open === -1) return formatQuery(tokens, indent)
+  const close = matchingParen(headerTokens, open)
+  if (close === -1) return formatQuery(tokens, indent)
+  const header = formatInline(headerTokens.slice(0, open))
+  const columns = formatInline(headerTokens.slice(open, close + 1))
+  const rows = splitList(tokens.slice(valuesIndex + 1))
+  const lines = [`${indent}${header} ${columns}`, `${indent}VALUES`]
+  rows.forEach((row, index) => {
+    lines.push(`${indent}  ${formatInline(row)}${index < rows.length - 1 ? ',' : ''}`)
+  })
+  return lines
+}
+
+/**
  * Format a `WITH` query containing one or more CTEs.
  * @param tokens - Statement tokens.
  * @param indent - Prefix for this block.
@@ -1003,7 +1028,9 @@ function formatQuery(tokens: readonly Token[], indent: string): string[] {
  * @returns Updated line.
  */
 function append(line: string, next: Token, previous: Token | undefined, indent: string): string {
-  const text = next.kind === 'word' && KEYWORDS.has(next.upper) ? next.text.toUpperCase() : next.text
+  const text = next.kind === 'word' && KEYWORDS.has(next.upper) && previous?.upper !== 'as'
+    ? next.text.toUpperCase()
+    : next.text
   const [first, ...rest] = text.split('\n')
   const rendered = rest.length === 0
     ? first

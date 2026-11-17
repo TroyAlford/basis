@@ -117,46 +117,66 @@ const toyTwo = '00000000-0000-4000-8000-000000000032'
 async function seed(database: IsolatedDatabase): Promise<void> {
   await database.use(definitions)
   await database.sql`
-    INSERT INTO "Entity"("id", "name", "entity")
-    VALUES (${ada}, 'Ada', 'SystemUser'),(${grace}, 'Grace', 'Client'),(${linus}, 'Linus',
-      'SystemUser'),(${petOne}, 'Pet One', 'Pet'),(${petTwo}, 'Pet Two', 'Pet'),(${petThree},
-      'Pet Three', 'Pet'),(${toyOne}, 'Ball', 'Toy'),(${toyTwo}, 'Bone', 'Toy'),(${campaignOne},
-      'Campaign One', 'Campaign'),(${campaignTwo}, 'Campaign Two', 'Campaign'),(${campaignThree},
-      'Campaign Three', 'Campaign')
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES
+      (${ada}, 'Ada', 'SystemUser'),
+      (${grace}, 'Grace', 'Client'),
+      (${linus}, 'Linus', 'SystemUser'),
+      (${petOne}, 'Pet One', 'Pet'),
+      (${petTwo}, 'Pet Two', 'Pet'),
+      (${petThree}, 'Pet Three', 'Pet'),
+      (${toyOne}, 'Ball', 'Toy'),
+      (${toyTwo}, 'Bone', 'Toy'),
+      (${campaignOne}, 'Campaign One', 'Campaign'),
+      (${campaignTwo}, 'Campaign Two', 'Campaign'),
+      (${campaignThree}, 'Campaign Three', 'Campaign')
   `
   await database.sql`
-    INSERT INTO "Person"("id", "title", "manager.id", "scores", "tags", "payload")
-    VALUES (${ada}, 'Ada', ${null}, ARRAY [1, 2, 2], ARRAY ['urgent', 'important'],
-      '{"kind":"note","meta":{"active":true}}'::jsonb),(${grace}, 'Grace', ${ada}, ARRAY [3],
-      ARRAY ['urgent'], '{"kind":"other"}'::jsonb),(${linus}, 'Linus', ${ada},
-      ARRAY []::double PRECISION[], ARRAY []::text[], '{}'::jsonb)
+    INSERT INTO "Person" ("id", "title", "manager.id", "scores", "tags", "payload")
+    VALUES
+      (${ada}, 'Ada', ${null}, ARRAY [1, 2, 2], ARRAY ['urgent', 'important'],
+        '{"kind":"note","meta":{"active":true}}'::jsonb),
+      (${grace}, 'Grace', ${ada}, ARRAY [3], ARRAY ['urgent'], '{"kind":"other"}'::jsonb),
+      (${linus}, 'Linus', ${ada}, ARRAY []::double PRECISION[], ARRAY []::text[], '{}'::jsonb)
   `
   await database.sql`
-    INSERT INTO "SystemUser"("id", "permissions")
-    VALUES (${ada}, 'admin'),(${linus}, 'user')
+    INSERT INTO "SystemUser" ("id", "permissions")
+    VALUES
+      (${ada}, 'admin'),
+      (${linus}, 'user')
   `
   await database.sql`
-    INSERT INTO "Client"("id", "company")
-    VALUES (${grace}, 'Acme')
+    INSERT INTO "Client" ("id", "company")
+    VALUES
+      (${grace}, 'Acme')
   `
   await database.sql`
-    INSERT INTO "Pet"("id", "age", "vaccinated", "owner.id")
-    VALUES (${petOne}, 3, TRUE, ${ada}),(${petTwo}, 8, TRUE, ${ada}),(${petThree}, 12, FALSE,
-      ${grace})
+    INSERT INTO "Pet" ("id", "age", "vaccinated", "owner.id")
+    VALUES
+      (${petOne}, 3, TRUE, ${ada}),
+      (${petTwo}, 8, TRUE, ${ada}),
+      (${petThree}, 12, FALSE, ${grace})
   `
   await database.sql`
-    INSERT INTO "Toy"("id", "title", "pet.id")
-    VALUES (${toyOne}, 'ball', ${petOne}),(${toyTwo}, 'bone', ${petTwo})
+    INSERT INTO "Toy" ("id", "title", "pet.id")
+    VALUES
+      (${toyOne}, 'ball', ${petOne}),
+      (${toyTwo}, 'bone', ${petTwo})
   `
   await database.sql`
-    INSERT INTO "Campaign"("id", "title")
-    VALUES (${campaignOne}, 'Campaign One'),(${campaignTwo}, 'Campaign Two'),(${campaignThree},
-      'Campaign Three')
+    INSERT INTO "Campaign" ("id", "title")
+    VALUES
+      (${campaignOne}, 'Campaign One'),
+      (${campaignTwo}, 'Campaign Two'),
+      (${campaignThree}, 'Campaign Three')
   `
   await database.sql`
-    INSERT INTO "Membership"("person.id", "campaign.id", "role")
-    VALUES (${ada}, ${campaignOne}, 'GM'),(${grace}, ${campaignOne}, 'Player'),(${linus},
-      ${campaignOne}, 'Player'),(${grace}, ${campaignTwo}, 'GM')
+    INSERT INTO "Membership" ("person.id", "campaign.id", "role")
+    VALUES
+      (${ada}, ${campaignOne}, 'GM'),
+      (${grace}, ${campaignOne}, 'Player'),
+      (${linus}, ${campaignOne}, 'Player'),
+      (${grace}, ${campaignTwo}, 'GM')
   `
 }
 

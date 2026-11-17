@@ -481,7 +481,7 @@ describe('Graph mutations', () => {
       expect(results.filter(result => result.created === 1)).toHaveLength(1)
       expect(results.filter(result => result.edited === 1)).toHaveLength(5)
       const [count] = await database.tx(async sql => sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS COUNT
+        SELECT COUNT(*)::int AS count
         FROM "Article"
         WHERE "title" = 'Concurrent'
       `)
@@ -496,17 +496,19 @@ describe('Graph mutations', () => {
         const mutations = transactionWithMutations(definitions, sql)
         await mutations.create('User', { email: 'commit@example.com', name: 'Commit' })
         await sql`
-          INSERT INTO "Entity"("id", "name", "entity")
-          VALUES ('00000000-0000-4000-8000-000000000001', 'SQL', 'Article')
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES
+            ('00000000-0000-4000-8000-000000000001', 'SQL', 'Article')
         `
         await sql`
-          INSERT INTO "Article"("id", "title", "owner.id", "score")
-          VALUES ('00000000-0000-4000-8000-000000000001', 'SQL',
-            (SELECT "id" FROM "Person" WHERE "email" = 'commit@example.com'), 0)
+          INSERT INTO "Article" ("id", "title", "owner.id", "score")
+          VALUES
+            ('00000000-0000-4000-8000-000000000001', 'SQL',
+              (SELECT "id" FROM "Person" WHERE "email" = 'commit@example.com'), 0)
         `
       })
       const committed = await database.tx(async sql => sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS COUNT
+        SELECT COUNT(*)::int AS count
         FROM "Article"
       `)
       expect(committed[0]?.count).toBe(1)
@@ -515,18 +517,20 @@ describe('Graph mutations', () => {
         const mutations = transactionWithMutations(definitions, sql)
         await mutations.create('User', { email: 'rollback@example.com', name: 'Rollback' })
         await sql`
-          INSERT INTO "Entity"("id", "name", "entity")
-          VALUES ('00000000-0000-4000-8000-000000000002', 'Rollback', 'Article')
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES
+            ('00000000-0000-4000-8000-000000000002', 'Rollback', 'Article')
         `
         await sql`
-          INSERT INTO "Article"("id", "title", "owner.id", "score")
-          VALUES ('00000000-0000-4000-8000-000000000002', 'Rollback',
-            (SELECT "id" FROM "Person" WHERE "email" = 'rollback@example.com'), 0)
+          INSERT INTO "Article" ("id", "title", "owner.id", "score")
+          VALUES
+            ('00000000-0000-4000-8000-000000000002', 'Rollback',
+              (SELECT "id" FROM "Person" WHERE "email" = 'rollback@example.com'), 0)
         `
         throw new Error('rollback')
       })).rejects.toThrow('rollback')
       const rolledBack = await database.tx(async sql => sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS COUNT
+        SELECT COUNT(*)::int AS count
         FROM "Person"
         WHERE "email" = 'rollback@example.com'
       `)

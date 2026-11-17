@@ -464,8 +464,9 @@ describe('Graph mutation authorization', () => {
     if (!memberProject || !otherProject) throw new Error('Projects were not created')
     await asActor(administrator, () => server.db.tx(async sql => {
       await sql`
-        INSERT INTO "WorkspaceMembership"("workspace.id", "user.id", "role")
-        VALUES (${memberProject.id}, ${worker}, ${MembershipRole.Owner})
+        INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+        VALUES
+          (${memberProject.id}, ${worker}, ${MembershipRole.Owner})
       `
     }))
 
