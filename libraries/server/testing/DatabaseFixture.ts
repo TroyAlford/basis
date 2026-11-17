@@ -420,15 +420,12 @@ export interface FixtureSchemaOptions {
   readonly graph?: Graph,
 }
 
-/** Fixture setup run as the trusted owner before the app role is selected. */
-export type DatabaseFixtureSetup = (sql: BunSQL) => Promise<void>
-
 /** Options for a custom-Graph actor-aware database fixture. */
 export interface DatabaseTestOptions {
   /** Consumer Graph to install with Basis's restricted fixture role. */
   readonly graph?: Graph,
   /** Seed or prepare data as the trusted owner before entering the app role. */
-  readonly setup?: (sql: BunSQL) => Promise<void>,
+  readonly setup?: (database: DatabaseContext) => Promise<void>,
 }
 
 /** The one shared-fixture transaction context. */
@@ -1152,7 +1149,7 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
- * @param options - Custom definitions, app role and owner-run setup.
+ * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after rollback.
  */
 export async function withDatabase<T>(
@@ -1175,32 +1172,35 @@ export async function withDatabase<T>(
       await sql.unsafe(
         `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
       ).simple()
-      await options.setup?.(sql)
+      const context = (): DatabaseContext => {
+        const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
+          const savepoint = sql.savepoint as unknown as <Value>(
+            callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
+          ) => Promise<Value>
+          return savepoint(async savepointSql => {
+            const result = await work(savepointSql)
+            await validateTransactionState(entities, transactionClient(savepointSql))
+            return result
+          })
+        }
+        return {
+          create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
+          delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
+          edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
+          query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
+            queryEntity<Result>(sql, entities, entity, queryOptions)
+          ),
+          sql,
+          tx,
+          upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
+        }
+      }
+      await options.setup?.(context())
       await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
         SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
       `
-      const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
-        const savepoint = sql.savepoint as unknown as <Value>(
-          callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
-        ) => Promise<Value>
-        return savepoint(async savepointSql => {
-          const result = await work(savepointSql)
-          await validateTransactionState(entities, transactionClient(savepointSql))
-          return result
-        })
-      }
-      return callback({
-        create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
-        delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
-        edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
-        query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-          queryEntity<Result>(sql, entities, entity, queryOptions)
-        ),
-        sql,
-        tx,
-        upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
-      })
+      return callback(context())
     },
   ))
 }
@@ -1218,7 +1218,7 @@ export interface CommittedDatabaseContext extends MutationDatabase {
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
- * @param options - Custom definitions, app role and owner-run setup.
+ * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after commit.
  */
 export async function withCommittedDatabase<T>(
@@ -1239,7 +1239,19 @@ export async function withCommittedDatabase<T>(
     await sql.unsafe(
       `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
     ).simple()
-    await options.setup?.(sql)
+    if (options.setup) {
+      await options.setup({
+        create: (entity, values) => sql.create(entity, values),
+        delete: (entity, filter) => sql.delete(entity, filter),
+        edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
+        query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
+          queryEntity<Result>(sql, entities, entity, queryOptions)
+        ),
+        sql,
+        tx: async work => work(sql),
+        upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
+      })
+    }
     await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
     await sql`
       SELECT set_config('actor.id', ${actor ?? ''}, TRUE)

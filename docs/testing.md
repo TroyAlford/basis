@@ -131,9 +131,9 @@ await withDatabase('consumer-owner', ownerId, async database => {
   })
 }, {
   graph,
-  setup: async sql => {
-    await sql`INSERT INTO "Entity" ...`
-    await sql`INSERT INTO "WorkspaceMembership" ...`
+  setup: async database => {
+    await database.create('Workspace', { id: workspaceId, name: 'Consumer' })
+    await database.sql`INSERT INTO "WorkspaceMembership" ...`
   },
 })
 ```

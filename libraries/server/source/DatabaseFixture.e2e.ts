@@ -30,28 +30,11 @@ const graph = new Graph({
 
 const options = {
   graph,
-  setup: async (sql: Bun.SQL) => {
-    await sql`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${owner},
-        'Owner',
-        'User'),
-        (${viewer},
-        'Viewer',
-        'User'),
-        (${workspace},
-        'Workspace',
-        'Workspace')
-    `
-    await sql`
-      INSERT INTO "User" ("id")
-      VALUES (${owner}), (${viewer})
-    `
-    await sql`
-      INSERT INTO "Workspace" ("id")
-      VALUES (${workspace})
-    `
-    await sql`
+  setup: async database => {
+    await database.create('User', { id: owner, name: 'Owner' })
+    await database.create('User', { id: viewer, name: 'Viewer' })
+    await database.create('Workspace', { id: workspace, name: 'Workspace' })
+    await database.sql`
       INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
       VALUES (${workspace}, ${owner}, 'owner'), (${workspace}, ${viewer}, 'viewer')
     `
