@@ -255,7 +255,7 @@ Navigation ownership belongs to the Entity that exposes it. Declare a derived `C
 
 A `via` may also declare collection defaults in an options group: `DeckCardPrinting[deck = @]{$orderBy:-quantity}`. Supported options are `$limit`, `$offset`, and `$orderBy`, using the same values as query-time collection directives. A query-time directive overrides the field default; a query-time filter adds to the `via` filter. When no ordering is declared, relationship records use their composite endpoint keys as a deterministic tie-break.
 
-Every direction is independently opt-in; no reverse navigation is inferred. A collection without a projection endpoint returns relationship records; a collection with a projection endpoint returns the referenced Entity. Collection fields are query-only and do not appear in DDL, generated contracts, or writes.
+Every direction is independently opt-in; no reverse navigation is inferred. A collection without a projection endpoint returns relationship records and retains each composite row; a collection with a projection endpoint returns distinct referenced Entity identities. Relationship-property filters are existential over the matching edges, while target-field filters and relationship-property filters in one collection predicate must be satisfied by the same matching edge. Collection fields are query-only and do not appear in DDL, generated contracts, or writes.
 
 Duplicate endpoint tuples fail with SQLSTATE `23505`; a missing endpoint target fails with `23503`. Relationship tables are unordered sets of endpoint tuples and do not have fake `ordered`, `unique`, or `storage` flags. The entity tables, `TableDefinition`, phased foreign-key reconciliation, and query compiler all use the same canonical metadata.
 

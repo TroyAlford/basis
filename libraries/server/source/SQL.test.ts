@@ -685,7 +685,8 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[role = 'GM']", 'members.name', 'members.role'],
     })
-    expect(compiled.sql).toMatch(/"cj\d+"\."role" FROM "Membership"/u)
+    expect(compiled.sql).toMatch(/"cj\d+"\."role"/u)
+    expect(compiled.sql).toContain('FROM "Membership"')
     expect(compiled.sql).toContain('"Membership"')
     expect(compiled.sql).toContain('json_build_object(\'role\'')
     expect(compiled.values).toContain('GM')

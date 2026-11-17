@@ -51,6 +51,8 @@ export interface PolymorphicQueryOptions {
   readonly rawOrder?: readonly string[],
   /** Internal raw root condition used to correlate a projected collection. */
   readonly rawWhere?: string,
+  /** Values bound by `rawWhere`, in placeholder order. */
+  readonly rawWhereValues?: readonly unknown[],
   /**
    * Internal relationship metadata for flattened relationship-owned fields.
    * Only used by a collection child query.
@@ -75,6 +77,10 @@ export interface PolymorphicQueryOptions {
 export interface CompiledPolymorphicQuery {
   /** Convert one flat SQL row into the requested nested projection. */
   readonly hydrate: (row: Record<string, unknown>) => Record<string, unknown>,
+  /** Normalized predicate SQL without its leading WHERE, when requested. */
+  readonly predicateSql?: string,
+  /** Values bound by the normalized predicate. */
+  readonly predicateValues?: readonly unknown[],
   /** Complete SQL statement. */
   readonly sql: string,
   /** Values bound to `$1`, `$2`, … in order. */
@@ -289,6 +295,8 @@ interface CollectionRelationPlan {
   readonly relationshipAlias?: string,
   /** Target universal-root alias. */
   readonly rootAlias: string,
+  /** Non-correlated source predicate used by grouped counts. */
+  readonly sourceFilter?: string,
   /** Target entity definition, absent for the universal root. */
   readonly target?: EntityDefinition,
   /** Physical target table alias, absent for the universal root. */
@@ -751,7 +759,20 @@ class QueryProjection {
       target: targetAlias ?? '',
     })
     const relation = sql.relation
-    const condition = sql.condition
+    let sourceFilter: string | undefined
+    if (collection.kind === 'explicit'
+      && collection.viaFilter !== undefined
+      && sql.relationshipAlias !== undefined) {
+      sourceFilter = compileViaFilterSql(
+        this.#entities,
+        collection.relationship,
+        collection.viaFilter,
+        sql.relationshipAlias,
+      )
+    }
+    const condition = sourceFilter === undefined
+      ? sql.condition
+      : `(${sql.condition}) AND (${sourceFilter})`
     const parentId = collection.kind === 'inverse'
       ? targetAlias === undefined
         ? `"${rootAlias}".${quote('id')}`
@@ -765,6 +786,7 @@ class QueryProjection {
       relation,
       relationshipAlias,
       rootAlias,
+      ...(sourceFilter === undefined ? {} : { sourceFilter }),
       target,
       targetAlias,
       work: collection.kind === 'inverse'
@@ -789,41 +811,6 @@ class QueryProjection {
   }
 
   /**
-   * Build flattened relationship metadata for one collection child query.
-   * @param plan - Collection relation plan.
-   * @param collection - Collection navigation.
-   * @param target - Child target entity.
-   * @returns Relationship metadata, or undefined for inverse collections.
-   */
-  #relationshipOptions(
-    plan: CollectionRelationPlan,
-    collection: DerivedCollectionDefinition,
-    target: EntityDefinition,
-  ): NonNullable<PolymorphicQueryOptions['relationship']> | undefined {
-    const relationship = collection.kind === 'explicit' && collection.targetEndpoint
-      ? collection.relationship
-      : undefined
-    const relationshipAlias = plan.relationshipAlias
-    if (relationship === undefined || relationshipAlias === undefined) return undefined
-    const endpoint = collection.kind === 'explicit' ? collection.targetEndpoint : undefined
-    if (endpoint === undefined) return undefined
-    return {
-      expression: (field: string, targetAlias: string): string => {
-        const prefix = `${lowerFirst(relationship.name)}.`
-        const property = field.startsWith(prefix) ? field.slice(prefix.length) : field
-        return `(SELECT ${quote(relationshipAlias)}.${quote(property)} FROM ${plan.relation} ` +
-          `WHERE ${plan.condition} AND ${quote(relationshipAlias)}.${quote(`${endpoint.field}.id`)} = ` +
-          `${quote(targetAlias)}.${quote('id')})`
-      },
-      fields: new Map(relationship.fields
-        .filter(field => field.type !== FieldType.Array && field.type !== FieldType.JSON)
-        .map(field => [field.name, field])),
-      name: relationship.name,
-      targetFields: new Set(target.effectiveFields.map(field => field.name)),
-    }
-  }
-
-  /**
    * Render the authorized count of collection members matching one filter.
    * @param plan - Collection relation plan.
    * @param collection - Collection navigation.
@@ -840,19 +827,22 @@ class QueryProjection {
       : this.#entities.entity(collection.target)
     if (!target) throw new Error(`Unknown target entity "${collection.target}"`)
     const childAlias = this.#nextAlias('cm')
-    const relationshipOptions = this.#relationshipOptions(plan, collection, target)
+    const edgeFilter = collection.kind === 'explicit' && collection.targetEndpoint !== undefined
+      ? this.#collectionEdgeFilter(plan, filter)
+      : undefined
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields: ['id'],
       limit: null,
       offset: 0,
-      rawWhere: this.#collectionCorrelation(plan, childAlias),
-      ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
+      rawWhere: edgeFilter === undefined
+        ? this.#collectionCorrelation(plan, childAlias)
+        : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+          `AND (${edgeFilter.sql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
+          `${quote(childAlias)}.${quote('id')})`,
+      ...(edgeFilter === undefined ? {} : { rawWhereValues: edgeFilter.values }),
       rootAlias: childAlias,
-      where: filter,
-      ...(collection.kind === 'explicit' && collection.viaFilter !== undefined
-        ? { additionalWhere: [collection.viaFilter] }
-        : {}),
+      ...(edgeFilter === undefined ? { where: filter } : {}),
     })
     const values = child.values as readonly BoundScalar[]
     return bind => {
@@ -1030,8 +1020,12 @@ class QueryProjection {
       const joinAlias = this.#nextAlias('c')
       this.ctes.push(
         `"${cteName}" AS (` +
-        `SELECT ${plan.parentId} AS "parent_id", count(*)::int AS "total" ` +
-        `FROM ${plan.relation} GROUP BY ${plan.parentId})`,
+        `SELECT ${plan.parentId} AS "parent_id", ${
+          plan.collection.kind === 'explicit' && plan.collection.targetEndpoint !== undefined
+            ? `count(DISTINCT ${quote(plan.targetAlias ?? plan.rootAlias)}.${quote('id')})`
+            : 'count(*)'
+        }::int AS "total" ` +
+        `FROM ${plan.relation} WHERE ${plan.sourceFilter ?? 'TRUE'} GROUP BY ${plan.parentId})`,
       )
       this.joins.push(
         `LEFT JOIN "${cteName}" "${joinAlias}" ` +
@@ -1651,6 +1645,103 @@ class QueryProjection {
   }
 
   /**
+   * Compile a query filter against one projected collection's target/source edge.
+   * @param plan - Projected collection relation plan.
+   * @param source - Authored query filter.
+   * @returns SQL predicate and its bound values.
+   */
+  #collectionEdgeFilter(
+    plan: CollectionRelationPlan,
+    source: string,
+  ): { sql: string, values: readonly unknown[] } | undefined {
+    const target = plan.target
+    const relationshipAlias = plan.relationshipAlias
+    if (!target || !relationshipAlias) {
+      throw new Error('Collection edge filtering requires a concrete target and source relation')
+    }
+    const relationship = plan.collection.kind === 'explicit' ? plan.collection.relationship : undefined
+    const context = plan.targetAlias === undefined
+      ? rootContext(this.#entities, plan.rootAlias)
+      : targetContext(this.#entities, target, plan.targetAlias, plan.rootAlias)
+    const ambiguous = (name: string): never => {
+      throw new Error(
+        `Ambiguous collection field "${name}": ${target.name}.${name} and ` +
+        `${relationship?.name ?? 'relationship'}.${name} both exist`,
+      )
+    }
+    let usesRelationship = false
+    const probe = (name: string): QueryFieldDefinition => {
+      const property = relationship?.fields.find(candidate => candidate.name === name)
+      if (property) {
+        if (target.effectiveFields.some(candidate => candidate.name === name)) ambiguous(name)
+        usesRelationship = true
+        return { ...property, name }
+      }
+      const endpoint = relationship?.between.find(candidate => candidate.field === name)
+      if (endpoint) {
+        usesRelationship = true
+        return { name, type: FieldType.ID }
+      }
+      const resolved = resolveFieldPath(target, name, { resolve: value => this.#entities.entity(value) })
+      if ('kind' in resolved) throw new Error(`Unknown collection filter field "${name}"`)
+      return resolved.field
+    }
+    const normalized = QueryNormalizer.normalize(
+      target,
+      source,
+      probe,
+      () => undefined,
+      () => undefined,
+    ) ?? undefined
+    if (!usesRelationship || normalized === undefined) return undefined
+    const expressions = new Map<string, string>()
+    const field = (name: string): QueryFieldDefinition => {
+      const property = relationship?.fields.find(candidate => candidate.name === name)
+      if (property) {
+        if (target.effectiveFields.some(candidate => candidate.name === name)) ambiguous(name)
+        if (property.type === FieldType.Array || property.type === FieldType.JSON) {
+          throw new Error(`Relationship field "${name}" is not a scalar filter field`)
+        }
+        expressions.set(name, `${quote(relationshipAlias)}.${quote(name)}`)
+        return { ...property, name }
+      }
+      const endpoint = relationship?.between.find(candidate => candidate.field === name)
+      if (endpoint) {
+        expressions.set(name, `${quote(relationshipAlias)}.${quote(`${name}.id`)}`)
+        return { name, type: FieldType.ID }
+      }
+      const effective = context.effective.get(name)
+      if (!effective) throw new Error(`Unknown collection filter field "${name}"`)
+      expressions.set(name, this.#expression(context, effective, false))
+      return effective.type === FieldType.Entity
+        ? { name, type: FieldType.ID }
+        : effective
+    }
+    const where = SQL.where(
+      this.#entities,
+      target.name,
+      normalized,
+      {
+        definition: target,
+        expression: value => {
+          const expression = expressions.get(value.name)
+          if (!expression) throw new Error(`Unresolved collection filter field "${value.name}"`)
+          return expression
+        },
+        field,
+        filterField: field,
+      },
+    )
+    if (where.sql === '') {
+      return { sql: 'TRUE', values: [] }
+    }
+    return {
+      sql: where.sql.replace(/^WHERE\s+/u, ''),
+      values: where.values,
+    }
+  }
+
+  /**
    * Add one root collection envelope projection.
    * @param node - Projection occurrence.
    * @param spec - Projected collection request.
@@ -1676,8 +1767,12 @@ class QueryProjection {
     const orderOnlyFields = new Set(orderings
       .map(order => order.name)
       .filter(name => !projectedFields.has(name)))
-    const relationshipOptions = this.#relationshipOptions(plan, spec.collection, target)
     const childAlias = this.#nextAlias('c')
+    const edgeFilter = spec.collection.kind === 'explicit'
+      && spec.collection.targetEndpoint !== undefined
+      && directives.filter !== undefined
+      ? this.#collectionEdgeFilter(plan, directives.filter)
+      : undefined
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields: [...new Set([
@@ -1690,11 +1785,16 @@ class QueryProjection {
       limit: null,
       offset: 0,
       orderBy: orderings.map(order => (order.direction === 'DESC' ? `-${order.name}` : order.name)),
-      rawWhere: this.#collectionCorrelation(plan, childAlias),
-      ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
+      rawWhere: edgeFilter === undefined
+        ? this.#collectionCorrelation(plan, childAlias)
+        : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+          `AND (${edgeFilter.sql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
+          `${quote(childAlias)}.${quote('id')})`,
+      ...(edgeFilter === undefined ? {} : { rawWhereValues: edgeFilter.values }),
       rootAlias: childAlias,
-      ...(directives.filter === undefined ? {} : { where: directives.filter }),
-      ...(directives.additionalWhere.length === 0 ? {} : { additionalWhere: directives.additionalWhere }),
+      ...(edgeFilter !== undefined || directives.filter === undefined
+        ? {}
+        : { where: directives.filter }),
     })
     let totalChild: CompiledPolymorphicQuery | undefined
     if (directives.filter !== undefined) {
@@ -1705,9 +1805,7 @@ class QueryProjection {
         limit: null,
         offset: 0,
         rawWhere: this.#collectionCorrelation(plan, availableAlias),
-        ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
         rootAlias: availableAlias,
-        ...(directives.additionalWhere.length === 0 ? {} : { additionalWhere: directives.additionalWhere }),
       })
     }
     const edgeFields = [...spec.edgeFields]
@@ -2217,10 +2315,17 @@ export function compilePolymorphicQuery(
   const leafFilter = leaves.length === 0
     ? 'FALSE'
     : `${projection.root.rootAlias}."entity" IN (${leaves.join(', ')})`
+  const rawWhereOffset = predicate.values.length + projection.values.length
+  let rawWhere = options.rawWhere
+  if (rawWhere !== undefined && options.rawWhereValues !== undefined) {
+    rawWhere = rawWhere.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+      `$${rawWhereOffset + Number(value)}`
+    ))
+  }
   const conditions = [
     ...(definition.abstract ? [leafFilter] : []),
     ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')]),
-    ...(options.rawWhere === undefined ? [] : [options.rawWhere]),
+    ...(rawWhere === undefined ? [] : [rawWhere]),
   ]
   const whereSql = conditions.length === 0
     ? ''
@@ -2231,6 +2336,10 @@ export function compilePolymorphicQuery(
   const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length + projection.values.length)
   return {
     hydrate,
+    ...(predicate.sql === '' ? {} : {
+      predicateSql: predicate.sql.replace(/^WHERE\s+/u, ''),
+      predicateValues: predicate.values,
+    }),
     sql: [
       ...(projection.ctes.length === 0 ? [] : [`WITH ${projection.ctes.join(', ')}`]),
       `SELECT ${projection.columns.join(', ')}`,
@@ -2240,7 +2349,12 @@ export function compilePolymorphicQuery(
       ordering,
       pagination.sql,
     ].filter(part => part !== '').join(' '),
-    values: [...predicate.values, ...projection.values, ...pagination.values],
+    values: [
+      ...predicate.values,
+      ...projection.values,
+      ...(options.rawWhereValues ?? []),
+      ...pagination.values,
+    ],
   }
 }
 
@@ -2448,6 +2562,64 @@ function parseCollectionOrdering(
       name: entry.field,
     }
   })
+}
+
+/**
+ * Compile one authored relationship-record predicate with literals inlined.
+ * @param entities - Canonical definitions.
+ * @param relationship - Relationship source.
+ * @param filter - Authored predicate.
+ * @param alias - Relationship-table alias.
+ * @returns SQL predicate.
+ */
+function compileViaFilterSql(
+  entities: EntityDefinitions,
+  relationship: RelationshipDefinition,
+  filter: Filter,
+  alias: string,
+): string {
+  const view = entities.relationshipRecord(relationship.name)
+  if (!view) throw new Error(`Unknown relationship "${relationship.name}"`)
+  const field = relationship.fields[0]?.name ?? relationship.between[0]?.field
+  if (!field) throw new Error(`Relationship "${relationship.name}" has no fields`)
+  const compiled = compilePolymorphicQuery(entities, view, {
+    fields: [field],
+    limit: 1,
+    offset: 0,
+    rootAlias: alias,
+    where: filter,
+  })
+  if (compiled.predicateSql === undefined) return 'TRUE'
+  return inlineSqlValues(compiled.predicateSql, compiled.predicateValues ?? [])
+}
+
+/**
+ * Inline positional SQL bindings as literals.
+ * @param sql - SQL with positional placeholders.
+ * @param values - Bound values.
+ * @returns SQL with literals.
+ */
+function inlineSqlValues(sql: string, values: readonly unknown[]): string {
+  return sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+    inlineSqlValue(values[Number(value) - 1])
+  ))
+}
+
+/**
+ * Render one SQL literal.
+ * @param value - Runtime value.
+ * @returns SQL literal.
+ */
+function inlineSqlValue(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  if (value instanceof Date) return `'${value.toISOString()}'::timestamptz`
+  if (Array.isArray(value)) return `'${JSON.stringify(value).replaceAll("'", "''")}'`
+  if (typeof value === 'object') {
+    return `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`
+  }
+  return `'${String(value).replaceAll("'", "''")}'`
 }
 
 /**
