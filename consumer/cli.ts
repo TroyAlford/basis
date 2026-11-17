@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { Logger } from 'basis/logger'
 import { run } from 'basis/utilities'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
@@ -147,7 +147,26 @@ const hasEslintConfig = (): boolean => ESLINT_CONFIG_FILES.some(name => existsSy
  */
 const runEslint = (fix: boolean, target = '.'): number => {
   const config = hasEslintConfig() ? [] : ['--config', join(basisDir(), 'eslint.config.mjs')]
-  return runBin('eslint', 'eslint', [target, ...config, ...(fix ? ['--fix'] : [])])
+  return runBin('eslint', 'eslint', [
+    target,
+    ...config,
+    ...eslintCache('style'),
+    ...(fix ? ['--fix'] : []),
+  ])
+}
+
+/**
+ * Build the stable cache arguments for one ESLint surface.
+ *
+ * The style and compliance configs have different rule sets, so they use
+ * separate caches; sharing one would invalidate every entry on each run.
+ * @param surface - ESLint surface name.
+ * @returns Cache arguments, with the directory created eagerly.
+ */
+const eslintCache = (surface: 'compliance' | 'style'): string[] => {
+  const directory = join(process.cwd(), '.cache', 'eslint', surface)
+  mkdirSync(directory, { recursive: true })
+  return ['--cache', '--cache-location', join(directory, '.eslintcache')]
 }
 
 /**
@@ -202,6 +221,7 @@ const runCompliance = (): number => runBin('eslint', 'eslint', [
   '.',
   '--config',
   join(basisDir(), 'eslint.compliance.config.mjs'),
+  ...eslintCache('compliance'),
 ])
 
 /**

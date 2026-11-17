@@ -23,7 +23,6 @@ Root, `consumer/`, and workspace READMEs are front doors. They describe the pack
 
 ```bash
 bun install
-bun run build
 bun test
 bun run docs:check
 bun run docs:build

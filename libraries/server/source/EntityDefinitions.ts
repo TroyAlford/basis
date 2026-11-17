@@ -1251,7 +1251,7 @@ function validationFunctionName(owner: string, name: string, where: Filter): str
     .update(JSON.stringify({ name, owner, where }))
     .digest('hex')
     .slice(0, 16)
-  return `basis.validate_${hash}`
+  return `validate_${hash}`
 }
 
 /**

@@ -1,4 +1,5 @@
 import { run, runAsync } from 'basis/utilities'
+import type { TransactionSQL } from 'bun'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
@@ -16,6 +17,7 @@ import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
 import { mutationRunner, validateTransactionState } from '../source/Mutation'
+import { installBasis } from '../source/Schema'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -104,7 +106,7 @@ export const articleDefinition = {
 /** Restricted role used by fixture graph policies. */
 const FIXTURE_APP_ROLE = 'basis_app'
 /** Single schema owned by the one fixture graph. */
-const FIXTURE_SCHEMA = 'basis_fixture'
+const FIXTURE_SCHEMA = 'basis_fixture_v2'
 
 /** Deterministic identities and rows seeded into the one fixture graph. */
 export const fixtureRows = {
@@ -175,6 +177,81 @@ const fixtureGraph = new Graph({
           { field: 'owner', target: 'User', type: 'Entity' },
         ],
         name: 'Article',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+          { field: 'favorite', target: 'Entity', type: 'Entity' },
+          { field: 'manager', target: 'User', type: 'Entity' },
+          { field: 'permissions', type: 'String' },
+        ],
+        name: 'SystemUser',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+          { field: 'company', type: 'String' },
+        ],
+        name: 'Client',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+        ],
+        name: 'MtiUser',
+      },
+      {
+        extends: 'MtiUser',
+        fields: [
+          { field: 'favorite', target: 'Entity', type: 'Entity' },
+          { field: 'manager', target: 'MtiUser', type: 'Entity' },
+          { field: 'permissions', type: 'String' },
+        ],
+        name: 'MtiSystemUser',
+      },
+      {
+        extends: 'MtiUser',
+        fields: [{ field: 'company', type: 'String' }],
+        name: 'MtiClient',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'Snowflake' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Book',
+      },
+      {
+        extends: 'Book',
+        fields: [{ field: 'genre', type: 'String' }],
+        name: 'Novel',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'car', target: 'CycleCar', type: 'Entity' },
+        ],
+        name: 'CycleUser',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'user', target: 'CycleUser', type: 'Entity' },
+        ],
+        name: 'CycleCar',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'parent', target: 'TreeNode', type: 'Entity' },
+        ],
+        name: 'TreeNode',
       },
       {
         fields: [{ field: 'title', type: 'String' }],
@@ -457,7 +534,7 @@ export interface DatabaseContext {
   /** Reserved transaction connection already scoped to the app role. */
   readonly sql: DatabaseTransaction,
   /** Run one transaction-final validation unit. */
-  tx: <T>(work: (transaction: MutationDatabase) => T | Promise<T>) => Promise<T>,
+  tx: <T>(work: (transaction: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
   /** Upsert through the Graph-native mutation vocabulary. */
   upsert: Database['upsert'],
   /** Select a cached schema for one exact entity definition set. */
@@ -560,15 +637,21 @@ class OwnerDatabaseContext implements DatabaseContext {
     return queryEntity<T>(this.sql, this.#entities, entity, options)
   }
 
-  async tx<T>(work: (transaction: MutationDatabase) => T | Promise<T>): Promise<T> {
+  async tx<T>(work: (transaction: DatabaseTransaction) => T | Promise<T>): Promise<T> {
     if (this.#transaction) {
       const name = `${OWNER_SAVEPOINT_PREFIX}${this.#savepoint}`
       this.#savepoint += 1
       await this.connection.unsafe(`savepoint ${quoteIdentifier(name)}`).simple()
       try {
-        return await work(mutationRunner(this.#entities, this.#transaction))
-      } finally {
+        const result = await work(
+          transactionWithMutations(this.#entities, this.#transaction as unknown as TransactionSQL),
+        )
         await this.connection.unsafe(`release savepoint ${quoteIdentifier(name)}`).simple()
+        return result
+      } catch (error) {
+        await this.connection.unsafe(`rollback to savepoint ${quoteIdentifier(name)}`).simple()
+        await this.connection.unsafe(`release savepoint ${quoteIdentifier(name)}`).simple()
+        throw error
       }
     }
 
@@ -578,7 +661,7 @@ class OwnerDatabaseContext implements DatabaseContext {
       await this.connection.unsafe(
         `set local search_path to ${quoteIdentifier(this.#schema)}, public, basis, pg_temp`,
       ).simple()
-      return await work(mutationRunner(this.#entities, this.connection))
+      return await work(transactionWithMutations(this.#entities, this.connection as unknown as TransactionSQL))
     } finally {
       this.#transaction = null
       await this.connection.unsafe('rollback').simple()
@@ -605,11 +688,62 @@ class OwnerDatabaseContext implements DatabaseContext {
   }
 }
 
+/**
+ * Return a reserved fixture connection to a clean session state.
+ * @param connection - Reserved Bun SQL connection.
+ */
+async function resetConnection(connection: BunSQL): Promise<void> {
+  await connection.unsafe('rollback').simple().catch(() => undefined)
+  await connection.unsafe('reset all').simple().catch(() => undefined)
+}
+
+/**
+ * Wrap a reserved connection so every release resets it first.
+ * @param connection - Reserved Bun SQL connection.
+ * @returns The wrapped connection.
+ */
+function guardedConnection(connection: BunSQL): BunSQL {
+  return new Proxy(connection, {
+    apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
+    get: (target, property, receiver) => {
+      if (property === 'release') {
+        return async () => {
+          await resetConnection(target);
+          (target as unknown as { release: () => void }).release()
+        }
+      }
+      return Reflect.get(target, property, receiver)
+    },
+  })
+}
+
+/**
+ * Wrap a fixture pool so direct reserves acquire and release clean connections.
+ * @param pool - The fixture Bun SQL pool.
+ * @returns The guarded pool.
+ */
+function guardedPool(pool: BunSQL): BunSQL {
+  return new Proxy(pool, {
+    apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
+    get: (target, property, receiver) => {
+      if (property === 'reserve') {
+        return async () => {
+          const connection = await target.reserve()
+          await resetConnection(connection as unknown as BunSQL)
+          return guardedConnection(connection as unknown as BunSQL)
+        }
+      }
+      return Reflect.get(target, property, receiver)
+    },
+  })
+}
+
 /** The test-owned pool connected to the one seeded database container. */
 class FixtureDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
   #entities: EntityDefinitions
+  #guarded: BunSQL | null = null
   #sql: BunSQL
 
   /**
@@ -635,7 +769,8 @@ class FixtureDatabase implements Database {
    * @returns The underlying SQL client.
    */
   get sql(): BunSQL {
-    return this.#sql
+    this.#guarded ??= guardedPool(this.#sql)
+    return this.#guarded
   }
 
   /**
@@ -879,7 +1014,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       entities: EntityDefinitions,
       options: FixtureSchemaOptions = {},
     ): Promise<string> => {
-      const schema = fixtureSchemaName(entities, options.appRole, options.graph)
+      const schema = assertTestSchema(fixtureSchemaName(entities, options.appRole, options.graph))
       let pending = schemas.get(schema)
       if (!pending) {
         pending = ensureSchema(database as FixtureDatabase, schema, entities, options)
@@ -889,6 +1024,8 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       return pending
     }
 
+    await ensureApplicationRole(database)
+    await installBasis(database.sql, FIXTURE_APP_ROLE)
     const fixture: DatabaseFixture = {
       database,
       entities: sharedEntities,
@@ -1052,15 +1189,34 @@ function fixtureSchemaName(entities: EntityDefinitions, appRole?: string, graph?
   return `basis_fixture_${hash}`
 }
 
+/** Roles already created or normalized by this fixture process. */
+const ensuredApplicationRoles = new Map<string, Promise<void>>()
+
 /**
- * Ensure the restricted role used by the fixture graph exists.
+ * Ensure the restricted role used by the fixture graph exists once.
  * @param database - Connected fixture pool.
  * @param roleName - Application role to create or normalize.
+ * @returns A promise that settles once the role is ready.
  */
-async function ensureApplicationRole(
+function ensureApplicationRole(
   database: Database,
   roleName = FIXTURE_APP_ROLE,
 ): Promise<void> {
+  let pending = ensuredApplicationRoles.get(roleName)
+  if (!pending) {
+    pending = createApplicationRole(database, roleName)
+    ensuredApplicationRoles.set(roleName, pending)
+    void pending.catch(() => ensuredApplicationRoles.delete(roleName))
+  }
+  return pending
+}
+
+/**
+ * Create or normalize one application role.
+ * @param database - Connected fixture pool.
+ * @param roleName - Application role to create or normalize.
+ */
+async function createApplicationRole(database: Database, roleName: string): Promise<void> {
   const role = quoteIdentifier(roleName)
   await database.sql.unsafe(`
     DO $$
@@ -1084,170 +1240,258 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   const row = fixtureRows
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES
-      (${row.alice}, 'Alice', 'User'),
-      (${row.bob}, 'Bob', 'User'),
-      (${row.memberNote}, 'Member note', 'MemberNote'),
-      (${row.linkedNote}, 'Linked note', 'MemberNote'),
-      (${row.anonymousNote}, 'Anonymous note', 'AnonymousNote'),
-      (${row.visibleWorkspace}, 'Visible workspace', 'Workspace'),
-      (${row.editorWorkspace}, 'Editor workspace', 'Workspace'),
-      (${row.viewerWorkspace}, 'Viewer workspace', 'Workspace'),
-      (${row.hiddenWorkspace}, 'Hidden workspace', 'Workspace'),
-      (${row.project}, 'Project', 'Project'),
-      (${row.secondProject}, 'Second project', 'Project'),
-      (${row.thirdProject}, 'Third project', 'Project'),
-      (${row.openTask}, 'Open task', 'Task'),
-      (${row.otherTask}, 'Other task', 'Task'),
-      (${row.note}, 'Fixture note', 'Note'),
-      (${row.account}, 'Fixture account', 'Account'),
-      (${row.numberRow}, 'Fixture number row', 'NumberRow'),
-      (${row.queryRow}, 'Fixture query row', 'QueryRow'),
-      (${row.article}, 'Fixture article', 'Article')
+    VALUES (${row.alice},
+      'Alice',
+      'User'),
+      (${row.bob},
+      'Bob',
+      'User'),
+      (${row.memberNote},
+      'Member note',
+      'MemberNote'),
+      (${row.linkedNote},
+      'Linked note',
+      'MemberNote'),
+      (${row.anonymousNote},
+      'Anonymous note',
+      'AnonymousNote'),
+      (${row.visibleWorkspace},
+      'Visible workspace',
+      'Workspace'),
+      (${row.editorWorkspace},
+      'Editor workspace',
+      'Workspace'),
+      (${row.viewerWorkspace},
+      'Viewer workspace',
+      'Workspace'),
+      (${row.hiddenWorkspace},
+      'Hidden workspace',
+      'Workspace'),
+      (${row.project},
+      'Project',
+      'Project'),
+      (${row.secondProject},
+      'Second project',
+      'Project'),
+      (${row.thirdProject},
+      'Third project',
+      'Project'),
+      (${row.openTask},
+      'Open task',
+      'Task'),
+      (${row.otherTask},
+      'Other task',
+      'Task'),
+      (${row.note},
+      'Fixture note',
+      'Note'),
+      (${row.account},
+      'Fixture account',
+      'Account'),
+      (${row.numberRow},
+      'Fixture number row',
+      'NumberRow'),
+      (${row.queryRow},
+      'Fixture query row',
+      'QueryRow'),
+      (${row.article},
+      'Fixture article',
+      'Article')
   `
   await sql`
     INSERT INTO "User" ("id", "label", "email")
-    VALUES
-      (${row.alice}, 'Alice', 'alice@example.com'),
-      (${row.bob}, 'Bob', 'bob@example.com')
+    VALUES (${row.alice}, 'Alice', 'alice@example.com'), (${row.bob}, 'Bob', 'bob@example.com')
   `
   await sql`
     INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-    VALUES
-      (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
+    VALUES (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
   `
   await sql`
     INSERT INTO "Account" ("id", "label")
-    VALUES
-      (${row.account}, 'Fixture account')
+    VALUES (${row.account}, 'Fixture account')
   `
   await sql`
     INSERT INTO "NumberRow" ("id", "value")
-    VALUES
-      (${row.numberRow}, 7)
+    VALUES (${row.numberRow}, 7)
   `
   await sql`
     INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
-    VALUES
-      (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
+    VALUES (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
   `
   await sql`
     INSERT INTO "Article" ("id", "title", "owner.id")
-    VALUES
-      (${row.article}, 'Fixture article', ${row.alice})
+    VALUES (${row.article}, 'Fixture article', ${row.alice})
   `
   await sql`
     INSERT INTO "MemberNote" ("id", "title")
-    VALUES
-      (${row.memberNote}, 'Member note'),
-      (${row.linkedNote}, 'Linked note')
+    VALUES (${row.memberNote}, 'Member note'), (${row.linkedNote}, 'Linked note')
   `
   await sql`
     INSERT INTO "AnonymousNote" ("id", "title")
-    VALUES
-      (${row.anonymousNote}, 'Anonymous note')
+    VALUES (${row.anonymousNote}, 'Anonymous note')
   `
   await sql`
     INSERT INTO "ActorLink" ("note.id", "related.id")
-    VALUES
-      (${row.memberNote}, ${row.linkedNote})
+    VALUES (${row.memberNote}, ${row.linkedNote})
   `
   await sql`
     INSERT INTO "Workspace" ("id", "title")
-    VALUES
-      (${row.visibleWorkspace}, 'Visible workspace'),
-      (${row.hiddenWorkspace}, 'Hidden workspace'),
-      (${row.editorWorkspace}, 'Editor workspace'),
-      (${row.viewerWorkspace}, 'Viewer workspace')
+    VALUES (${row.visibleWorkspace},
+      'Visible workspace'),
+      (${row.hiddenWorkspace},
+      'Hidden workspace'),
+      (${row.editorWorkspace},
+      'Editor workspace'),
+      (${row.viewerWorkspace},
+      'Viewer workspace')
   `
   await sql`
     INSERT INTO "Project" ("id", "title", "workspace.id")
-    VALUES
-      (${row.project}, 'visible', ${row.visibleWorkspace}),
-      (${row.secondProject}, 'visible', ${row.hiddenWorkspace}),
-      (${row.thirdProject}, 'other', ${row.hiddenWorkspace})
+    VALUES (${row.project},
+      'visible',
+      ${row.visibleWorkspace}),
+      (${row.secondProject},
+      'visible',
+      ${row.hiddenWorkspace}),
+      (${row.thirdProject},
+      'other',
+      ${row.hiddenWorkspace})
   `
   await sql`
     INSERT INTO "Task" ("id", "title", "project.id")
-    VALUES
-      (${row.openTask}, 'open', ${row.project}),
-      (${row.otherTask}, 'open', ${row.thirdProject})
+    VALUES (${row.openTask}, 'open', ${row.project}), (${row.otherTask}, 'open', ${row.thirdProject})
   `
   await sql`
     INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
-    VALUES
-      (${row.visibleWorkspace}, ${row.alice}, 'Owner'),
-      (${row.editorWorkspace}, ${row.alice}, 'Editor'),
-      (${row.viewerWorkspace}, ${row.alice}, 'Viewer')
+    VALUES (${row.visibleWorkspace},
+      ${row.alice},
+      'Owner'),
+      (${row.editorWorkspace},
+      ${row.alice},
+      'Editor'),
+      (${row.viewerWorkspace},
+      ${row.alice},
+      'Viewer')
   `
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES
-      (${row.ownerA}, 'Owner A', 'Owner'),
-      (${row.ownerB}, 'Owner B', 'Owner'),
-      (${row.revisionA}, 'Revision A', 'Revision'),
-      (${row.orphanRevision}, 'Orphan revision', 'Revision'),
-      (${row.validDocument}, 'Valid document', 'Document'),
-      (${row.invalidChildDocument}, 'Invalid child document', 'Document'),
-      (${row.invalidParentDocument}, 'Invalid parent document', 'Document'),
-      (${row.orphanDocument}, 'Orphan document', 'Document'),
-      (${row.guardedWorkspace}, 'Guarded workspace', 'GuardedWorkspace')
+    VALUES (${row.ownerA},
+      'Owner A',
+      'Owner'),
+      (${row.ownerB},
+      'Owner B',
+      'Owner'),
+      (${row.revisionA},
+      'Revision A',
+      'Revision'),
+      (${row.orphanRevision},
+      'Orphan revision',
+      'Revision'),
+      (${row.validDocument},
+      'Valid document',
+      'Document'),
+      (${row.invalidChildDocument},
+      'Invalid child document',
+      'Document'),
+      (${row.invalidParentDocument},
+      'Invalid parent document',
+      'Document'),
+      (${row.orphanDocument},
+      'Orphan document',
+      'Document'),
+      (${row.guardedWorkspace},
+      'Guarded workspace',
+      'GuardedWorkspace')
   `
   await sql`
     INSERT INTO "Owner" ("id", "label")
-    VALUES
-      (${row.ownerA}, 'A'),
-      (${row.ownerB}, 'B')
+    VALUES (${row.ownerA}, 'A'), (${row.ownerB}, 'B')
   `
   await sql`
     INSERT INTO "Revision" ("id", "owner.id")
-    VALUES
-      (${row.revisionA}, ${row.ownerA}),
-      (${row.orphanRevision}, ${null})
+    VALUES (${row.revisionA}, ${row.ownerA}), (${row.orphanRevision}, ${null})
   `
   await sql`
     INSERT INTO "Record" ("id", "title", "status")
-    VALUES
-      (${row.validDocument}, 'Valid', 'ok'),
-      (${row.invalidChildDocument}, 'Invalid child', 'ok'),
-      (${row.invalidParentDocument}, 'Invalid parent', 'bad'),
-      (${row.orphanDocument}, 'Orphan', 'ok')
+    VALUES (${row.validDocument},
+      'Valid',
+      'ok'),
+      (${row.invalidChildDocument},
+      'Invalid child',
+      'ok'),
+      (${row.invalidParentDocument},
+      'Invalid parent',
+      'bad'),
+      (${row.orphanDocument},
+      'Orphan',
+      'ok')
   `
   await sql`
     INSERT INTO "Document" ("id", "flag", "note", "owner.id", "revision.id")
-    VALUES
-      (${row.validDocument}, TRUE, 'note', ${row.ownerA}, ${row.revisionA}),
-      (${row.invalidChildDocument}, FALSE, 'note', ${row.ownerA}, ${row.revisionA}),
-      (${row.invalidParentDocument}, TRUE, 'note', ${row.ownerA}, ${row.revisionA}),
-      (${row.orphanDocument}, TRUE, 'note', ${row.ownerA}, ${row.orphanRevision})
+    VALUES (${row.validDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.invalidChildDocument},
+      FALSE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.invalidParentDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.orphanDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.orphanRevision})
   `
   await sql`
     INSERT INTO "GuardedWorkspace" ("id", "flag", "title")
-    VALUES
-      (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
+    VALUES (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
   `
   await sql`
     INSERT INTO "GuardedMembership" ("workspace.id", "user.id")
-    VALUES
-      (${row.guardedWorkspace}, ${row.alice})
+    VALUES (${row.guardedWorkspace}, ${row.alice})
   `
 }
 
 /**
  * Run one test on the shared fixture with an optional custom Graph and actor.
  * @param label - Fixture acquisition label.
- * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
  * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after rollback.
  */
-export async function withDatabase<T>(
+export function withDatabase<T>(
+  label: string,
+  callback: (database: DatabaseContext) => Promise<T>,
+  options?: DatabaseTestOptions,
+): Promise<T>
+export function withDatabase<T>(
   label: string,
   actor: string | null,
   callback: (database: DatabaseContext) => Promise<T>,
-  options: DatabaseTestOptions = {},
+  options?: DatabaseTestOptions,
+): Promise<T>
+export async function withDatabase<T>(
+  label: string,
+  actorOrCallback: string | null | ((database: DatabaseContext) => Promise<T>),
+  callbackOrOptions?: ((database: DatabaseContext) => Promise<T>) | DatabaseTestOptions,
+  maybeOptions: DatabaseTestOptions = {},
 ): Promise<T> {
-  if (options.owner) {
+  const inline = typeof actorOrCallback === 'function'
+  const actor = inline ? null : actorOrCallback
+  const callback = inline
+    ? actorOrCallback
+    : callbackOrOptions as (database: DatabaseContext) => Promise<T>
+  const options = inline
+    ? (callbackOrOptions as DatabaseTestOptions | undefined) ?? {}
+    : maybeOptions
+  if (inline || options.owner || options.commit) {
     return withOwnerDatabase(label, callback, {
       commit: options.commit,
       entities: options.entities,
@@ -1270,14 +1514,14 @@ export async function withDatabase<T>(
       ).simple()
       let currentEntities = entities
       let currentSchema = schema
+      let active = sql as DatabaseTransaction
       const context = (): DatabaseContext => {
-        const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
-          const savepoint = sql.savepoint as unknown as <Value>(
+        const tx = async <Result>(work: (sql: DatabaseTransaction) => Result | Promise<Result>) => {
+          const savepoint = active.savepoint as unknown as <Value>(
             callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
           ) => Promise<Value>
           return savepoint(async savepointSql => {
-            const transaction = transactionWithMutations(currentEntities, savepointSql)
-            const result = await work(transaction)
+            const result = await work(savepointSql)
             await validateTransactionState(currentEntities, transactionClient(savepointSql))
             return result
           })
@@ -1311,8 +1555,7 @@ export async function withDatabase<T>(
             ))
           } finally {
             await connection.unsafe('rollback').simple().catch(() => undefined)
-            await connection.unsafe('reset role').simple().catch(() => undefined)
-            await connection.unsafe('reset search_path').simple().catch(() => undefined)
+            await connection.unsafe('reset all').simple().catch(() => undefined)
             connection.release()
           }
         }
@@ -1325,6 +1568,10 @@ export async function withDatabase<T>(
             currentSchema = nextSchema
           }
           currentEntities = nextEntities
+          active = transactionWithMutations(
+            currentEntities,
+            transactionClient(active) as unknown as TransactionSQL,
+          )
         }
         return {
           asOwner,
@@ -1346,7 +1593,7 @@ export async function withDatabase<T>(
       await options.setup?.(context())
       await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
-        SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
       `
       return callback(context())
     },
@@ -1403,159 +1650,14 @@ export async function withOwnerDatabase<T>(
     return result
   } finally {
     if (!completed) await context.rollback().catch(() => undefined)
-    await connection.unsafe('reset role').simple().catch(() => undefined)
-    await connection.unsafe('reset search_path').simple().catch(() => undefined)
+    await connection.unsafe('rollback').simple().catch(() => undefined)
+    await connection.unsafe('reset all').simple().catch(() => undefined)
     if (options.fresh) {
       await connection.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`)
         .simple().catch(() => undefined)
     }
     connection.release()
   }
-}
-
-/** A real committed transaction context for commit-boundary proofs. */
-export interface CommittedDatabaseContext extends MutationDatabase {
-  /** Entity definitions attached to the committed proof. */
-  readonly entities: EntityDefinitions,
-  /** Query through the canonical entity compiler. */
-  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
-  /** Schema selected for the committed proof. */
-  readonly schema: string,
-  /** Transaction-bound SQL client for the active committed proof. */
-  readonly sql: DatabaseTransaction,
-  /** Run one schema-scoped committed transaction. */
-  tx: <T>(callback: (sql: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
-}
-
-/** Options for the internal committed proof helper. */
-export interface CommittedDatabaseOptions extends DatabaseTestOptions {
-  /** Entity definitions for a committed proof; defaults to the fixture model. */
-  readonly entities?: EntityDefinitions,
-  /** Allocate a disposable unique schema instead of the cached fixture schema. */
-  readonly fresh?: boolean,
-}
-
-/**
- * Run one real committed transaction on the shared fixture.
- *
- * This is an internal lifecycle/concurrency proof helper, not a consumer test
- * API. `fresh` creates a disposable schema that is dropped after the callback.
- * @param label - Fixture acquisition label.
- * @param callback - Work using the committed context.
- * @param options - Custom Graph, owner-run setup, and fresh-schema selection.
- * @returns The callback result after commit.
- */
-export function withCommittedDatabase<T>(
-  label: string,
-  callback: (database: CommittedDatabaseContext) => Promise<T>,
-  options?: CommittedDatabaseOptions,
-): Promise<T>
-/**
- * Run one real committed app-role transaction on the shared fixture.
- * @param label - Fixture acquisition label.
- * @param actor - Verified actor identity, or null for anonymous.
- * @param callback - Work using the app-role transaction.
- * @param options - Custom Graph and owner-run setup.
- * @returns The callback result after commit.
- */
-export function withCommittedDatabase<T>(
-  label: string,
-  actor: string | null,
-  callback: (database: CommittedDatabaseContext) => Promise<T>,
-  options?: CommittedDatabaseOptions,
-): Promise<T>
-export async function withCommittedDatabase<T>(
-  label: string,
-  actorOrCallback: string | null | ((database: CommittedDatabaseContext) => Promise<T>),
-  callbackOrOptions?: ((database: CommittedDatabaseContext) => Promise<T>) | CommittedDatabaseOptions,
-  maybeOptions: CommittedDatabaseOptions = {},
-): Promise<T> {
-  const inline = typeof actorOrCallback === 'function'
-  const actor = inline ? null : actorOrCallback
-  const callback = inline
-    ? actorOrCallback
-    : callbackOrOptions as (database: CommittedDatabaseContext) => Promise<T>
-  const options = inline
-    ? (callbackOrOptions as CommittedDatabaseOptions | undefined) ?? {}
-    : maybeOptions
-  const fixture = await useDatabaseFixture(label)
-  const entities = options.entities ?? options.graph?.definitions ?? fixtureGraph.definitions
-
-  if (options.fresh) {
-    const schema = committedSchemaName()
-    await fixture.database.sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
-    const transaction = async <Result>(
-      work: (sql: DatabaseTransaction) => Result | Promise<Result>,
-    ): Promise<Result> => (
-      await fixture.database.tx(async sql => {
-        await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`).simple()
-        return work(sql)
-      }) as Result
-    )
-    const mutations = <Result>(
-      work: (mutation: MutationDatabase) => Promise<Result>,
-    ): Promise<Result> => transaction(tx => work(tx as DatabaseTransaction))
-    const database: CommittedDatabaseContext = {
-      create: (entity, values) => mutations(mutation => mutation.create(entity, values)),
-      delete: (entity, filter) => mutations(mutation => mutation.delete(entity, filter)),
-      edit: (entity, filter, changes) => mutations(mutation => mutation.edit(entity, filter, changes)),
-      entities: fixture.entities,
-      query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-        transaction(tx => queryEntity<Result>(tx, fixture.entities, entity, queryOptions))
-      ),
-      schema,
-      sql: fixture.database.sql as unknown as DatabaseTransaction,
-      tx: transaction,
-      upsert: (entity, filter, values) => mutations(mutation => mutation.upsert(entity, filter, values)),
-    }
-    try {
-      return await callback(database)
-    } finally {
-      await fixture.database.sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
-    }
-  }
-
-  const custom = options.graph !== undefined
-  const appRole = FIXTURE_APP_ROLE
-  if (!custom) await ensureGraphSchema(fixture.database)
-  const schema = custom
-    ? await fixture.schemaFor(entities, { appRole, graph: options.graph })
-    : fixture.fixtureSchema
-  return runAsActor({ id: actor }, () => fixture.database.tx(async sql => {
-    await sql.unsafe(
-      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
-    ).simple()
-    if (options.setup) {
-      await options.setup({
-        create: (entity, values) => sql.create(entity, values),
-        delete: (entity, filter) => sql.delete(entity, filter),
-        edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
-        query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-          queryEntity<Result>(sql, entities, entity, queryOptions)
-        ),
-        sql,
-        tx: async work => work(sql),
-        upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
-      } as unknown as DatabaseContext)
-    }
-    await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
-    await sql`
-      SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
-    `
-    return callback({
-      create: (entity, values) => sql.create(entity, values),
-      delete: (entity, filter) => sql.delete(entity, filter),
-      edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
-      entities,
-      query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-        queryEntity<Result>(sql, entities, entity, queryOptions)
-      ),
-      schema,
-      sql,
-      tx: async work => work(sql),
-      upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
-    })
-  }))
 }
 
 /**
@@ -1572,14 +1674,15 @@ async function ensureSchema(
   entities: EntityDefinitions,
   options: FixtureSchemaOptions = {},
 ): Promise<string> {
+  assertTestSchema(schema)
   const appRole = options.appRole
   if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
     await sql`
-      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
+      SELECT pg_advisory_xact_lock(hashtext(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
     `
     if (present[0]?.present) return
 
@@ -1615,10 +1718,9 @@ async function ensureSchema(
  */
 async function ensureGraphSchema(database: Database): Promise<string> {
   const schema = FIXTURE_SCHEMA
-  await ensureApplicationRole(database)
   await database.tx(async sql => {
     await sql`
-      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
+      SELECT pg_advisory_xact_lock(hashtext(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
@@ -1629,8 +1731,7 @@ async function ensureGraphSchema(database: Database): Promise<string> {
         const [table] = await sql<{ table_name: string }[]>`
           SELECT table_name
           FROM information_schema.tables
-          WHERE table_schema = ${schema}
-            AND table_name = ${entity.name}
+          WHERE table_schema = ${schema} AND table_name = ${entity.name}
         `
         if (!table?.table_name) {
           complete = false
@@ -1639,9 +1740,31 @@ async function ensureGraphSchema(database: Database): Promise<string> {
       }
     }
     if (complete) {
+      for (const trigger of fixtureGraph.physicalSchema(FIXTURE_APP_ROLE, true).triggers) {
+        const [found] = await sql<{ present: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
+            trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
+            namespace.nspname = ${schema} AND trigger.tgname = ${trigger.name} ) AS present
+        `
+        if (!found?.present) {
+          complete = false
+          break
+        }
+      }
+    }
+    if (complete) {
+      const [legacy] = await sql<{ present: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
+          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
+          namespace.nspname = ${schema} AND (trigger.tgname ILIKE '%enroll%' OR pg_get_triggerdef(trigger.oid)
+          ILIKE '%enroll_identity%' ) ) AS present
+      `
+      if (legacy?.present) complete = false
+    }
+    if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
-          ${fixtureRows.alice}) AS seeded
+        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" = ${fixtureRows.alice} ) AS
+          seeded
       `
       complete = Boolean(seeded?.seeded)
     }
@@ -1680,12 +1803,36 @@ function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`
 }
 
+/** Schemas Basis never creates through test schema registration. */
+const RESERVED_SCHEMAS = new Set([
+  'basis',
+  'public',
+  'pg_catalog',
+  'information_schema',
+  'pg_temp',
+  'pg_toast',
+])
+
+/**
+ * Fail closed before any test schema registration can claim a reserved schema.
+ * @param schema - Proposed test schema.
+ * @returns The same schema when it is safe to create.
+ * @throws {Error} When the schema is reserved or PostgreSQL-owned.
+ */
+function assertTestSchema(schema: string): string {
+  const normalized = schema.toLowerCase()
+  if (RESERVED_SCHEMAS.has(normalized) || normalized.startsWith('pg_')) {
+    throw new Error(`Test schema registration refuses reserved schema "${schema}"`)
+  }
+  return schema
+}
+
 /**
  * Create a unique per-proof schema name.
  * @returns A safe schema identifier.
  */
 function committedSchemaName(): string {
-  return `basis_test_${randomUUID().replaceAll('-', '')}`
+  return assertTestSchema(`basis_test_${randomUUID().replaceAll('-', '')}`)
 }
 
 /**

@@ -13,6 +13,7 @@ import { Action, Graph } from './Graph'
 import { ManagedPostgresService } from './ManagedPostgresService'
 import { ManagedPostgresOperations } from './PostgresOperations'
 import type { MigrationArtifact } from './Schema'
+import { installBasis } from './Schema'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
@@ -122,6 +123,7 @@ async function start(
 async function installArtifact(server: Server): Promise<MigrationArtifact> {
   const admin = await openAdmin(server.db)
   try {
+    await installBasis(admin.sql)
     return await installSchema(admin.sql, graph, {
       appRole: 'basis_app',
       schema: 'public',

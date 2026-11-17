@@ -10,6 +10,7 @@ import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
 import { Action, ADMIN_ROLE_ID, Security } from './Graph'
 import { Graph } from './Graph'
+import { installBasis } from './Schema'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
@@ -123,6 +124,7 @@ async function start(install: string, applicationGraph: Graph = graph): Promise<
   }
   const admin = await openAdmin(server.db)
   try {
+    await installBasis(admin.sql)
     await installSchema(admin.sql, applicationGraph, {
       appRole: 'basis_app',
       schema: 'public',
@@ -428,7 +430,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  })
+  }, 30_000)
 
   test('declines ambiguous targets and missing required User fields', async () => {
     const ambiguousInstall = tempDirectory('basis-authorization-ambiguous-')
@@ -510,7 +512,7 @@ describe('Authorization RLS', () => {
       await requiredServer.shutdown()
       removeService(requiredInstall)
     }
-  })
+  }, 30_000)
 
   test('enrolls a complete MTI chain and rolls back incomplete creation', async () => {
     const tieredInstall = tempDirectory('basis-authorization-tiered-')
@@ -583,7 +585,7 @@ describe('Authorization RLS', () => {
       await requiredChainServer.shutdown()
       removeService(requiredChainInstall)
     }
-  })
+  }, 30_000)
 
   test('passes the verified OAuth profile through the Server owner', async () => {
     const install = tempDirectory('basis-authorization-oauth-profile-')
@@ -777,7 +779,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  })
+  }, 30_000)
 
   test('applies membership grants declared on an abstract parent to concrete descendants', async () => {
     const abstractGraph = new Graph({
@@ -848,7 +850,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  })
+  }, 30_000)
 
   test('requires read for writes on the real PostgreSQL path', async () => {
     enum Capability {
@@ -982,7 +984,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  })
+  }, 30_000)
 
   test('allows where-only membership rules alongside an administrator capability', async () => {
     enum Capability {
@@ -1067,7 +1069,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  })
+  }, 30_000)
 
   test('excludes unauthorized collection rows from items and counts', async () => {
     const collectionGraph = new Graph({

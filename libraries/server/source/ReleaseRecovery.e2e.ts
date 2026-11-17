@@ -10,7 +10,7 @@ import { createDatabase, openAdmin } from './Database'
 import { Graph } from './Graph'
 import { ManagedPostgresService } from './ManagedPostgresService'
 import type { MigrationArtifact } from './Schema'
-import { DDL } from './Schema'
+import { DDL, installBasis } from './Schema'
 
 describe('interrupted database cutover recovery', () => {
   const originalCwd = process.cwd()
@@ -33,6 +33,7 @@ describe('interrupted database cutover recovery', () => {
         await database.connect()
         const admin = await openAdmin(database)
         try {
+          await installBasis(admin.sql)
           artifact = await installSchema(admin.sql, graph, {
             appRole: 'basis_app',
             schema: 'public',

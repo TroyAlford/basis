@@ -8,6 +8,7 @@ import { installSchema } from '../testing/Schema'
 import { createDatabase, openAdmin } from './Database'
 import { Graph } from './Graph'
 import type { MigrationArtifact } from './Schema'
+import { installBasis } from './Schema'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
@@ -53,6 +54,7 @@ describe('Graph-backed production readiness', () => {
       const admin = await openAdmin(database)
       let artifact: MigrationArtifact
       try {
+        await installBasis(admin.sql)
         artifact = await installSchema(admin.sql, graph, {
           appRole: 'basis_app',
           schema: 'public',

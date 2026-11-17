@@ -65,7 +65,7 @@ export class Authorization {
     try {
       return await this.#database.tx(async tx => {
         const rows = await tx<{ id: string | null }[]>`
-          SELECT basis.resolve_identity(${userId}) AS "id"
+          SELECT basis.resolve_identity(${this.graph.schema}, ${userId}) AS "id"
         `
         return rows[0]?.id ?? null
       })
@@ -137,7 +137,13 @@ export class Authorization {
     subject: string,
     profile: { readonly displayName?: string, readonly email?: string } = {},
   ): Promise<string | null> {
-    return this.#database.tx(tx => this.#enrollIdentityWithSql(tx, provider, subject, profile))
+    const admin = await openAdmin(this.#database).catch(() => null)
+    if (!admin) throw new Error('Authorization requires an administrative database connection')
+    try {
+      return await this.#enrollIdentityWithSql(admin.sql, provider, subject, profile)
+    } finally {
+      await admin.close()
+    }
   }
 
   /**
@@ -156,11 +162,68 @@ export class Authorization {
     subject: string,
     profile: { readonly displayName?: string, readonly email?: string } = {},
   ): Promise<string | null> {
-    const rows = await sql<{ id: string | null }[]>`
-      SELECT basis.enroll_identity(${provider}, ${subject}, ${profile.displayName ?? null},
-        ${profile.email ?? null}) AS "id"
-    `
-    return rows[0]?.id ?? null
+    return sql.begin(async tx => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${provider}:${subject}`}, 0))`
+      const [existing] = await tx<{ id: string, revoked: boolean }[]>`
+        SELECT e."user.id" AS id, e."revoked"
+        FROM "ExternalIdentity" e
+        WHERE e."provider" = ${provider} AND e."subject" = ${subject}
+        FOR UPDATE
+      `
+      if (existing?.revoked) return null
+      if (existing?.id) return existing.id
+
+      const leaves = this.graph.definitions.concreteDescendants('User')
+      if (leaves.length !== 1) {
+        throw new Error(
+          'Basis identity enrollment is ambiguous: ' +
+          (leaves.length === 0
+            ? 'no concrete User descendants'
+            : `multiple concrete User descendants: ${leaves.map(entity => entity.name).join(', ')}`),
+        )
+      }
+      const userEntity = leaves[0].name
+      const name = profile.displayName || profile.email || `${provider}:${subject}`
+      const [user] = await tx<{ id: string }[]>`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (gen_random_uuid()::text, ${name}, ${userEntity})
+        RETURNING "id"
+      `
+      if (!user) throw new Error('Authorization: failed to create user')
+      const ancestry = this.graph.definitions.ancestry(userEntity)
+        .filter(entity => entity !== 'Entity')
+        .reverse()
+      for (const entity of ancestry) {
+        const columns = ['id']
+        const values: unknown[] = [user.id]
+        const fields = this.graph.definitions.entity(entity)?.fields ?? []
+        if (fields.some(field => field.name === 'label')) {
+          columns.push('label')
+          values.push(name)
+        }
+        if (fields.some(field => field.name === 'email')) {
+          columns.push('email')
+          values.push(profile.email ?? null)
+        }
+        const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
+        await tx.unsafe(
+          `INSERT INTO ${JSON.stringify(entity)} (${columns.map(column => JSON.stringify(column)).join(', ')}) ` +
+          `VALUES (${placeholders})`,
+          values,
+        )
+      }
+      const [identity] = await tx<{ id: string }[]>`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (gen_random_uuid()::text, ${`${provider}:${subject}`}, 'ExternalIdentity')
+        RETURNING "id"
+      `
+      if (!identity) throw new Error('Authorization: failed to create external identity')
+      await tx`
+        INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
+        VALUES (${identity.id}, ${provider}, ${subject}, false, ${user.id})
+      `
+      return user.id
+    })
   }
 
   /**

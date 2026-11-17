@@ -9,7 +9,7 @@ import { createDatabase, openAdmin } from './Database'
 import { Graph } from './Graph'
 import { DatabaseRelease, loadRelease, ReleaseError } from './Release'
 import type { MigrationArtifact } from './Schema'
-import { artifactChecksum, DDL } from './Schema'
+import { artifactChecksum, DDL, installBasis } from './Schema'
 import { Server } from './Server'
 
 /**
@@ -196,6 +196,7 @@ describe('versioned database releases', () => {
       await database.connect()
       const admin = await openAdmin(database)
       try {
+        await installBasis(admin.sql)
         artifactA = await installSchema(admin.sql, graphA, {
           appRole: 'basis_app',
           schema: 'public',
@@ -313,6 +314,7 @@ describe('versioned database releases', () => {
       await database.connect()
       const admin = await openAdmin(database)
       try {
+        await installBasis(admin.sql)
         artifactA = await installSchema(admin.sql, graphA, {
           appRole: 'basis_app',
           schema: 'public',
@@ -436,6 +438,7 @@ describe('versioned database releases', () => {
       await database.connect()
       const admin = await openAdmin(database)
       try {
+        await installBasis(admin.sql)
         artifactA = await installSchema(admin.sql, graphA, {
           appRole: 'basis_app',
           schema: 'public',

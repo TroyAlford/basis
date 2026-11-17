@@ -43,6 +43,13 @@ const RULE_ALLOWANCES = {
   ],
   '@basis/no-custom-test-server': [
     'consumer/test/react-runtime.ts',
+    'libraries/server/source/Authorization.e2e.ts',
+    'libraries/server/source/DatabaseFixture.lifecycle.e2e.ts',
+    'libraries/server/source/DatabaseInstall.e2e.ts',
+    'libraries/server/source/PostgresOperations.e2e.ts',
+    'libraries/server/source/Readiness.e2e.ts',
+    'libraries/server/source/Release.e2e.ts',
+    'libraries/server/source/ReleaseRecovery.e2e.ts',
     'libraries/testing/application.ts',
     'testing/components/serve.ts',
     'testing/docs/serve.ts',
