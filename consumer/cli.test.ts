@@ -322,3 +322,28 @@ describe('basis check removal', () => {
     }
   }, CLI_TIMEOUT)
 })
+
+describe('basis db arguments', () => {
+  test('requires a known database subcommand', () => {
+    const dir = makeComponentFixture()
+    try {
+      expect(run(['db'], dir)).not.toBe(0)
+      expect(run(['db', 'unknown'], dir)).not.toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, CLI_TIMEOUT)
+
+  test('requires arguments before loading the application graph', () => {
+    const dir = makeComponentFixture()
+    try {
+      expect(run(['db', 'restore'], dir)).not.toBe(0)
+      expect(run(['db', 'restore', '--image', 'postgres:17-alpine'], dir)).not.toBe(0)
+      expect(run(['db', 'upgrade'], dir)).not.toBe(0)
+      expect(run(['db', 'rollback'], dir)).not.toBe(0)
+      expect(run(['db', 'rollback', '.basis/backups/source.dump', '--image'], dir)).not.toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, CLI_TIMEOUT)
+})
