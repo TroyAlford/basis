@@ -89,12 +89,6 @@ export interface ManagedDatabaseOptions extends DatabaseOptions {
 
 /** Options for a root entity query. */
 export interface QueryOptions {
-  /** Per-collection preview and pagination overrides. */
-  collections?: Readonly<Record<string, {
-    readonly limit?: number,
-    readonly offset?: number,
-    readonly relationshipFields?: readonly string[],
-  }>>,
   /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
   fields: readonly string[],
   /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
