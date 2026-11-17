@@ -220,7 +220,7 @@ describe('Query planning', () => {
           fields: ['id'],
           limit: 25,
           orderBy: 'id',
-          where: `pets.$count >= ${threshold}`,
+          where: `pets.$total >= ${threshold}`,
         })
         const variants = [
           {
@@ -263,7 +263,7 @@ describe('Query planning', () => {
         fields: ['id'],
         limit: 25,
         orderBy: 'id',
-        where: `id = '${selectiveParent}' $and pets.$count >= 2`,
+        where: `id = '${selectiveParent}' $and pets.$total >= 2`,
       })
       const selectiveVariants = [
         { name: 'selective-production@2', sql: selectiveProduction.sql, values: selectiveProduction.values },
@@ -308,21 +308,20 @@ describe('Query planning', () => {
 
       const projected = await queryEntity<{
         'id': string,
-        'pets': { items: unknown[], remaining: number, total: number },
-        'pets.$count': number,
+        'pets': { $matched: number, $total: number, items: unknown[] },
+        'pets.$total': number,
       }>(
         database.sql,
         definitions,
         'Person',
         {
-          collections: { pets: { limit: 1 } },
-          fields: ['id', 'pets.$count', 'pets'],
+          fields: ['id', 'pets.$total', 'pets{$limit:1}'],
           orderBy: 'id',
-          where: 'pets.$count >= 2',
+          where: 'pets.$total >= 2',
         },
       )
-      expect(projected.every(row => row['pets.$count'] >= 2)).toBe(true)
-      expect(projected.every(row => row.pets.total >= 2)).toBe(true)
+      expect(projected.every(row => row['pets.$total'] >= 2)).toBe(true)
+      expect(projected.every(row => row.pets.$total >= 2)).toBe(true)
       expect(projected.every(row => row.pets.items.length <= 1)).toBe(true)
     })
   })
@@ -336,7 +335,7 @@ describe('Query planning', () => {
         fields: ['id'],
         limit: 25,
         orderBy: 'id',
-        where: `pets.$count >= ${threshold}`,
+        where: `pets.$total >= ${threshold}`,
       })
       const variants = [
         { name: `scale-production@${threshold}`, sql: production.sql, values: production.values },
@@ -441,33 +440,33 @@ describe('Query planning', () => {
       `
 
       const counts = await queryEntity<{
-        favorite: { 'pets.$count': number },
+        favorite: { 'pets.$total': number },
         id: string,
       }>(database.sql, variantDefinitions, 'Source', {
-        fields: ['id', 'favorite.pets.$count'],
+        fields: ['id', 'favorite.pets.$total'],
         orderBy: 'id',
       })
-      expect(counts.map(row => row.favorite['pets.$count'])).toEqual([2, 1])
+      expect(counts.map(row => row.favorite['pets.$total'])).toEqual([2, 1])
       expect(await queryEntity<{ id: string }>(database.sql, variantDefinitions, 'Source', {
         fields: ['id'],
         orderBy: 'id',
-        where: 'favorite.pets.$count >= 2',
+        where: 'favorite.pets.$total >= 2',
       })).toEqual([{ id: alpha }])
       expect(await queryEntity<{ id: string }>(database.sql, variantDefinitions, 'Source', {
         fields: ['id'],
         orderBy: 'id',
-        where: 'favorite.pets.$count >= 1',
+        where: 'favorite.pets.$total >= 1',
       })).toEqual([{ id: alpha }, { id: beta }])
       expect(await queryEntity<{ id: string }>(database.sql, variantDefinitions, 'Source', {
         fields: ['id'],
         orderBy: 'id',
-        where: 'favorite.pets.$count = 1',
+        where: 'favorite.pets.$total = 1',
       })).toEqual([{ id: beta }])
       const structuredCount = compileEntityQuery(variantDefinitions, 'Source', {
         fields: ['id'],
         orderBy: 'id',
         where: {
-          field: 'favorite.pets.$count',
+          field: 'favorite.pets.$total',
           operator: Operator.Comparison.Equal,
           value: 1,
         },
@@ -475,20 +474,19 @@ describe('Query planning', () => {
       const stringCount = compileEntityQuery(variantDefinitions, 'Source', {
         fields: ['id'],
         orderBy: 'id',
-        where: 'favorite.pets.$count = 1',
+        where: 'favorite.pets.$total = 1',
       })
       expect(stringCount.sql).toBe(structuredCount.sql)
       expect(stringCount.values).toEqual(structuredCount.values)
 
       const previews = await queryEntity<{
-        favorite: { pets: { items: unknown[], total: number } },
+        favorite: { pets: { $matched: number, $total: number, items: unknown[] } },
         id: string,
       }>(database.sql, variantDefinitions, 'Source', {
-        collections: { 'favorite.pets': { limit: 1 } },
-        fields: ['id', 'favorite.pets'],
+        fields: ['id', 'favorite.pets{$limit:1}'],
         orderBy: 'id',
       })
-      expect(previews.map(row => row.favorite.pets.total)).toEqual([2, 1])
+      expect(previews.map(row => row.favorite.pets.$total)).toEqual([2, 1])
       expect(previews.map(row => row.favorite.pets.items.length)).toEqual([1, 1])
     })
   })

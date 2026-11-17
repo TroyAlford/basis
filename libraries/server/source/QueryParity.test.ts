@@ -232,13 +232,13 @@ describe('Query parity gate', () => {
       },
       {
         entity: 'Note',
-        source: 'scores.$count >= 2',
-        structured: { field: 'scores.$count', operator: Operator.Comparison.GreaterThanOrEqual, value: 2 },
+        source: 'scores.$total >= 2',
+        structured: { field: 'scores.$total', operator: Operator.Comparison.GreaterThanOrEqual, value: 2 },
       },
       {
         entity: 'User',
-        source: 'pets.$count = 0',
-        structured: { field: 'pets.$count', operator: Operator.Comparison.Equal, value: 0 },
+        source: 'pets.$total = 0',
+        structured: { field: 'pets.$total', operator: Operator.Comparison.Equal, value: 0 },
       },
       {
         entity: 'User',
@@ -263,27 +263,65 @@ describe('Query parity gate', () => {
   })
 
   test('supports count paths in predicates, projections, and ordering', () => {
-    expect(source('Note', 'scores.$count >= 2')).toEqual(
+    expect(source('Note', 'scores.$total >= 2')).toEqual(
       structured('Note', {
-        field: 'scores.$count',
+        field: 'scores.$total',
         operator: Operator.Comparison.GreaterThanOrEqual,
         value: 2,
       }),
     )
-    expect(source('User', 'pets.$count > 0')).toMatchObject({
+    expect(source('User', 'pets.$total > 0')).toMatchObject({
       sql: expect.stringContaining('EXISTS (SELECT 1 FROM "Pet"'),
     })
-    expect(source('User', 'pets.$count = 0')).toMatchObject({
+    expect(source('User', 'pets.$total = 0')).toMatchObject({
       sql: expect.stringContaining('NOT EXISTS (SELECT 1 FROM "Pet"'),
     })
-    expect(source('Note', 'scores.$count = 0').sql).toContain('COALESCE(cardinality')
-    expect(source('Note', 'scores.$count = 0', { fields: ['id', 'scores.$count'] }).sql)
-      .toContain('AS "scores.$count"')
-    expect(source('User', 'pets.$count >= 1', { orderBy: 'pets.$count' }).sql)
+    expect(source('Note', 'scores.$total = 0').sql).toContain('COALESCE(cardinality')
+    expect(source('Note', 'scores.$total = 0', { fields: ['id', 'scores.$total'] }).sql)
+      .toContain('AS "scores.$total"')
+    expect(source('User', 'pets.$total >= 1', { orderBy: 'pets.$total' }).sql)
       .toContain('ORDER BY COALESCE(')
-    expect(() => source('Note', 'title.$count > 0')).toThrow('requires a collection or native array field')
-    expect(() => source('Pet', 'owner.$count > 0')).toThrow('requires a collection or native array field')
-    expect(() => source('Note', 'tags.$count.foo > 0')).toThrow('traverses non-reference field')
+    expect(() => source('Note', 'title.$total > 0')).toThrow('requires a collection or native array field')
+    expect(() => source('Pet', 'owner.$total > 0')).toThrow('requires a collection or native array field')
+    expect(() => source('Note', 'tags.$total.foo > 0')).toThrow('traverses non-reference field')
+  })
+
+  test('supports filtered matched counts in predicates', () => {
+    const normalize = (query: ReturnType<typeof source>) => ({
+      sql: query.sql.replace(/\bcm\d+\b/gu, 'cm'),
+      values: query.values,
+    })
+    const sourceQuery = source('User', 'pets[age > 1].$matched >= 2')
+    const structuredQuery = structured('User', {
+      field: 'pets[age > 1].$matched',
+      operator: Operator.Comparison.GreaterThanOrEqual,
+      value: 2,
+    })
+    expect(normalize(sourceQuery)).toEqual(normalize(structuredQuery))
+    expect(sourceQuery.sql).toContain('__matched')
+    expect(sourceQuery.values).toEqual([1, 2, 25, 0])
+    expect(normalize(source('User', 'pets[age > 1].$total >= 2'))).toEqual(
+      normalize(structured('User', {
+        field: 'pets[age > 1].$total',
+        operator: Operator.Comparison.GreaterThanOrEqual,
+        value: 2,
+      })),
+    )
+    expect(normalize(source('User', 'pets.$matched >= 2')).sql)
+      .toBe(normalize(source('User', 'pets.$total >= 2')).sql)
+    expect(source('User', 'pets[owner.id = $me].$matched >= 2').sql).toContain('actor.id')
+    expect(source('User', "pets[owner.name = 'Ada'].$matched >= 2").sql).toContain('owner')
+    expect(() => source('Note', 'title.$matched > 0'))
+      .toThrow('requires a collection or native array field')
+    expect(() => structured('User', {
+      field: 'pets{$limit:2}.$matched',
+      operator: Operator.Comparison.GreaterThan,
+      value: 0,
+    })).toThrow('does not accept limit, offset, or orderBy directives')
+    expect(() => source('User', 'pets{$limit:2}.$matched > 0'))
+      .toThrow('does not accept limit, offset, or orderBy directives')
+    expect(() => source('User', 'pets{$offset:1}.$total > 0'))
+      .toThrow('does not accept limit, offset, or orderBy directives')
   })
 
   test('rejects collection member lists without requirements in both forms', () => {

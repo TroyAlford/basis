@@ -86,7 +86,6 @@ interface ParityCase {
   readonly expected?: readonly string[],
   /** Extra query options shared by both forms. */
   readonly options?: {
-    readonly collections?: Readonly<Record<string, { readonly limit?: number, readonly offset?: number }>>,
     readonly fields?: readonly string[],
     readonly limit?: number,
     readonly offset?: number,
@@ -192,7 +191,6 @@ async function execute(
 ): Promise<{ source: { id: string }[], structured: { id: string }[] }> {
   const options = queryCase.options ?? {}
   const shared = {
-    collections: options.collections,
     fields: options.fields ?? ['id'],
     limit: options.limit,
     offset: options.offset,
@@ -395,38 +393,38 @@ const cases: readonly ParityCase[] = [
   {
     entity: 'Person',
     expected: [ada],
-    source: 'pets.$count >= 2',
-    structured: { field: 'pets.$count', operator: Operator.Comparison.GreaterThanOrEqual, value: 2 },
+    source: 'pets.$total >= 2',
+    structured: { field: 'pets.$total', operator: Operator.Comparison.GreaterThanOrEqual, value: 2 },
   },
   {
     entity: 'Person',
     expected: [linus],
-    source: 'pets.$count = 0',
-    structured: { field: 'pets.$count', operator: Operator.Comparison.Equal, value: 0 },
+    source: 'pets.$total = 0',
+    structured: { field: 'pets.$total', operator: Operator.Comparison.Equal, value: 0 },
   },
   {
     entity: 'Person',
     expected: [ada, grace],
-    source: 'scores.$count > 0',
-    structured: { field: 'scores.$count', operator: Operator.Comparison.GreaterThan, value: 0 },
+    source: 'scores.$total > 0',
+    structured: { field: 'scores.$total', operator: Operator.Comparison.GreaterThan, value: 0 },
   },
   {
     entity: 'Person',
     expected: [linus],
-    source: 'scores.$count = 0',
-    structured: { field: 'scores.$count', operator: Operator.Comparison.Equal, value: 0 },
+    source: 'scores.$total = 0',
+    structured: { field: 'scores.$total', operator: Operator.Comparison.Equal, value: 0 },
   },
   {
     entity: 'Campaign',
     expected: [campaignOne],
-    source: 'members.$count >= 3',
-    structured: { field: 'members.$count', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
+    source: 'members.$total >= 3',
+    structured: { field: 'members.$total', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
   },
   {
     entity: 'Campaign',
     expected: [campaignThree],
-    source: 'members.$count = 0',
-    structured: { field: 'members.$count', operator: Operator.Comparison.Equal, value: 0 },
+    source: 'members.$total = 0',
+    structured: { field: 'members.$total', operator: Operator.Comparison.Equal, value: 0 },
   },
   {
     entity: 'Person',
@@ -547,8 +545,7 @@ describe('Query parity gate', () => {
         entity: 'Person',
         expected: [grace],
         options: {
-          collections: { pets: { limit: 1, offset: 0 } },
-          fields: ['id', 'pets'],
+          fields: ['id', 'pets{$limit:1}'],
           limit: 1,
           offset: 1,
           orderBy: 'title',
@@ -566,22 +563,22 @@ describe('Query parity gate', () => {
 
       const projected = await queryEntity<{
         readonly 'id': string,
-        readonly 'pets.$count': number,
-        readonly 'scores.$count': number,
+        readonly 'pets.$total': number,
+        readonly 'scores.$total': number,
       }>(database.sql, definitions, 'Person', {
-        fields: ['id', 'pets.$count', 'scores.$count'],
+        fields: ['id', 'pets.$total', 'scores.$total'],
         orderBy: 'id',
       })
       expect(projected).toEqual([
-        { 'id': ada, 'pets.$count': 2, 'scores.$count': 3 },
-        { 'id': grace, 'pets.$count': 1, 'scores.$count': 1 },
-        { 'id': linus, 'pets.$count': 0, 'scores.$count': 0 },
+        { 'id': ada, 'pets.$total': 2, 'scores.$total': 3 },
+        { 'id': grace, 'pets.$total': 1, 'scores.$total': 1 },
+        { 'id': linus, 'pets.$total': 0, 'scores.$total': 0 },
       ])
 
       const ordered = await queryEntity<{ id: string }>(database.sql, definitions, 'Person', {
         fields: ['id'],
-        orderBy: 'pets.$count',
-        where: 'pets.$count >= 0',
+        orderBy: 'pets.$total',
+        where: 'pets.$total >= 0',
       })
       expect(ordered.map(row => row.id)).toEqual([linus, grace, ada])
     })
