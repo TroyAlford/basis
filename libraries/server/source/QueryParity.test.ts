@@ -336,12 +336,20 @@ describe('Query parity gate', () => {
 test('supports relationship-record endpoint filters and reference identities', () => {
   const recordDefinitions = EntityDefinitions.load(JSON.stringify({
     entities: [
-      { fields: [], name: 'Deck' },
+      {
+        fields: [{
+          field: 'memberships',
+          target: 'DeckMembership',
+          type: 'Collection',
+          via: 'DeckMembership[deck = @]',
+        }],
+        name: 'Deck',
+      },
       { fields: [], name: 'User' },
     ],
     relationships: [{
       between: [
-        { collection: 'memberships', field: 'deck', target: 'Deck' },
+        { field: 'deck', target: 'Deck' },
         { field: 'user', target: 'User' },
       ],
       fields: [{ field: 'role', type: 'String' }],

@@ -97,6 +97,34 @@ describe('entityDefinitionFormat', () => {
     expect(output.output.indexOf('"entities"')).toBeLessThan(output.output.indexOf('"relationships"'))
   })
 
+  test('preserves Collection via paths while ordering fields', () => {
+    const code = JSON.stringify({
+      entities: [{
+        fields: [{
+          field: 'entries',
+          target: 'DeckCard',
+          type: 'Collection',
+          via: 'DeckCard[deck = @]',
+        }],
+        name: 'Deck',
+      }, { fields: [], name: 'Card' }],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+        ],
+        fields: [],
+        name: 'DeckCard',
+      }],
+    })
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain('"field": "entries"')
+    expect(output.output).toContain('"type": "Collection"')
+    expect(output.output).toContain('"target": "DeckCard"')
+    expect(output.output).toContain('"via": "DeckCard[deck = @]"')
+  })
+
   test('delegates semantics to the canonical loader before fixing', () => {
     const cases = [
       '{"entities":[{"name":"User","fields":[]},{"name":"User","fields":[]}]}',

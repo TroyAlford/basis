@@ -1656,13 +1656,37 @@ describe('Server database lifecycle', () => {
   isolatedTest('projects explicit relationship-record collections', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Deck' },
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'members', target: 'User', type: 'Collection', via: 'memberships.user' },
+            {
+              field: 'memberships',
+              target: 'DeckMembership',
+              type: 'Collection',
+              via: 'DeckMembership[deck = @]',
+            },
+          ],
+          name: 'Deck',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'decks', target: 'Deck', type: 'Collection', via: 'deckMemberships.deck' },
+            {
+              field: 'deckMemberships',
+              target: 'DeckMembership',
+              type: 'Collection',
+              via: 'DeckMembership[user = @]',
+            },
+          ],
+          name: 'User',
+        },
       ],
       relationships: [{
         between: [
-          { collection: 'memberships', field: 'deck', inverse: 'members', target: 'Deck' },
-          { collection: 'deckMemberships', field: 'user', inverse: 'decks', target: 'User' },
+          { field: 'deck', target: 'Deck' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'DeckMembership',
@@ -1732,6 +1756,7 @@ describe('Server database lifecycle', () => {
       where: { id: deckA },
     })
     expect(owners[0]?.memberships.$matched).toBe(1)
+    expect(owners[0]?.memberships.$total).toBe(2)
     expect(owners[0]?.memberships.items).toEqual([
       expect.objectContaining({
         role: 'Owner',
@@ -1791,13 +1816,48 @@ describe('Server database lifecycle', () => {
   isolatedTest('supports three-way relationship-record collections', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Deck' },
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Card' },
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Printing' },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]',
+            },
+            { field: 'cards', target: 'Card', type: 'Collection', via: 'entries.card' },
+            { field: 'printings', target: 'Printing', type: 'Collection', via: 'entries.printing' },
+          ],
+          name: 'Deck',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'decks',
+              target: 'Deck',
+              type: 'Collection',
+              via: 'DeckCardPrinting[card = @].deck',
+            },
+          ],
+          name: 'Card',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'decks',
+              target: 'Deck',
+              type: 'Collection',
+              via: 'DeckCardPrinting[printing = @].deck',
+            },
+          ],
+          name: 'Printing',
+        },
       ],
       relationships: [{
         between: [
-          { collection: 'entries', field: 'deck', target: 'Deck' },
+          { field: 'deck', target: 'Deck' },
           { field: 'card', target: 'Card' },
           { field: 'printing', target: 'Printing' },
         ],
@@ -1867,6 +1927,36 @@ describe('Server database lifecycle', () => {
       }),
     ]))
     expect(records[1]?.entries).toEqual({ $matched: 0, $total: 0, items: [] })
+    expect(entities.entity('Card')?.collections.map(collection => collection.name)).toEqual(['decks'])
+    expect(entities.entity('Printing')?.collections.map(collection => collection.name))
+      .toEqual(['decks'])
+    const projected = await queryEntity<{
+      cards: { $matched: number, items: { id: string }[] },
+      printings: { $matched: number, items: { id: string }[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'cards', 'printings'],
+      where: { id: deckA },
+    })
+    expect(projected[0]?.cards).toMatchObject({ $matched: 2 })
+    expect(projected[0]?.cards.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: cardA }),
+      expect.objectContaining({ id: cardB }),
+    ]))
+    expect(projected[0]?.printings).toMatchObject({ $matched: 2 })
+    expect(projected[0]?.printings.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: printingA }),
+      expect.objectContaining({ id: printingB }),
+    ]))
+    const reverse = await queryEntity<{ decks: { items: { id: string }[] } }>(
+      database.sql,
+      entities,
+      'Card',
+      {
+        fields: ['decks'],
+        where: { id: cardA },
+      },
+    )
+    expect(reverse[0]?.decks.items).toEqual([expect.objectContaining({ id: deckA })])
     const filtered = await queryEntity<{
       entries: { $matched: number, $total: number, items: Record<string, unknown>[] },
     }>(database.sql, entities, 'Deck', {

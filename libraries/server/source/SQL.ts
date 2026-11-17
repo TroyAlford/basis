@@ -628,6 +628,12 @@ function scalarField(entity: EntityDefinition, name: string): EnumFieldDefinitio
       'navigation fields cannot be used in predicates or ordering',
     )
   }
+  if (field.type === FieldType.Collection) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is a collection; ` +
+      'collection fields cannot be used in predicates or ordering',
+    )
+  }
   if (field.type === FieldType.Array) {
     throw new Error(
       `Query field "${entity.name}.${name}" is an array; ` +

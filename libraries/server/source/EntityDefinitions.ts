@@ -13,15 +13,17 @@ const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with sche
  * Canonical field types.
  *
  * `Entity` is the singular reference kind. `Array` holds scalar values in a
- * native PostgreSQL array. `JSON` is an opaque structured value. Entity
- * collections are navigations derived from inverse references or named
- * top-level relationships, never authored as fields.
+ * native PostgreSQL array. `JSON` is an opaque structured value. `Collection`
+ * is an authored, owner-relative navigation resolved through a `via` Graph
+ * path; it has no physical storage.
  */
 export enum FieldType {
   /** Native scalar array. */
   Array = 'Array',
   /** Boolean value. */
   Boolean = 'Boolean',
+  /** Logical collection navigation with no physical storage. */
+  Collection = 'Collection',
   /** Calendar date without a time of day. */
   Date = 'Date',
   /** Singular reference to another entity. */
@@ -151,6 +153,18 @@ export interface EntityReferenceFieldDefinition {
 /** Supported reciprocal navigation cardinalities. */
 export type InverseCardinality = 'Many' | 'One'
 
+/** One derived collection navigation declared on an entity. */
+export interface CollectionFieldDefinition {
+  /** Logical navigation name used by entity-rooted queries. */
+  readonly name: string,
+  /** Entity or relationship record type returned by the collection. */
+  readonly target: string,
+  /** Navigation-only discriminator. */
+  readonly type: FieldType.Collection,
+  /** Owner-relative Graph path resolved by the query compiler. */
+  readonly via: string,
+}
+
 /** One navigation-only reciprocal field. */
 export interface InverseFieldDefinition {
   /** Cardinality exposed by this reverse navigation. */
@@ -208,16 +222,18 @@ export type FieldDefinition =
   | EnumFieldDefinition
   | JSONFieldDefinition
   | ScalarFieldDefinition
+  | CollectionFieldDefinition
   | EntityReferenceFieldDefinition
   | InverseFieldDefinition
 
 /** One endpoint of a named relationship. */
 export interface RelationshipEndpointDefinition {
-  /** Explicit relationship-record collection exposed on the target entity. */
-  readonly collection?: string,
   /** Local endpoint column name, in camelCase. */
   readonly field: string,
-  /** Optional derived navigation of related entities exposed on the target entity. */
+  /**
+   * Optional legacy navigation of related entities exposed on the target entity.
+   * @deprecated Declare an Entity `Collection` field with `via` instead.
+   */
   readonly inverse?: string,
   /** Referenced entity or supported ancestor. */
   readonly target: string,
@@ -298,29 +314,35 @@ export interface RelationshipDerivedCollectionDefinition {
   readonly target: string,
 }
 
-/** An explicit collection of relationship records exposed on one endpoint target. */
-export interface RelationshipRecordCollectionDefinition {
-  /** Authored endpoint index that owns this navigation. */
-  readonly endpoint: number,
+/** An explicit collection declared as an Entity field and resolved through `via`. */
+export interface ExplicitCollectionDefinition {
   /** Derivation-kind discriminator. */
-  readonly kind: 'relationship-records',
+  readonly kind: 'explicit',
   /** Navigation name exposed on the target entity. */
   readonly name: string,
-  /** The named relationship that owns this navigation. */
+  /** Entity that authored the field. */
+  readonly owner: string,
+  /** Endpoint whose value is compared with the owning entity identity. */
+  readonly ownerEndpoint: RelationshipEndpointDefinition,
+  /** Relationship table traversed by the navigation. */
   readonly relationship: RelationshipDefinition,
-  /** Relationship record type returned by the navigation. */
+  /** Declared collection target. */
   readonly target: string,
+  /** Target endpoint when the collection projects an entity, absent for records. */
+  readonly targetEndpoint?: RelationshipEndpointDefinition,
+  /** Authored owner-relative Graph path. */
+  readonly via: string,
 }
 
 /** One collection navigation available in the query model. */
 export type DerivedCollectionDefinition =
+  | ExplicitCollectionDefinition
   | InverseDerivedCollectionDefinition
   | RelationshipDerivedCollectionDefinition
-  | RelationshipRecordCollectionDefinition
 
 /** One effective physical field and its owning entity table. */
 export type EffectiveFieldDefinition =
-  Exclude<FieldDefinition, InverseFieldDefinition> & {
+  Exclude<FieldDefinition, CollectionFieldDefinition | InverseFieldDefinition> & {
     /** Entity table that physically owns this field. */
     readonly owner: string,
   }
@@ -1711,7 +1733,7 @@ function parseRelationshipEndpoint(
   if (!isRecord(value)) {
     throw invalid(`relationship "${relationshipName}" endpoint must be an object`)
   }
-  assertKnownKeys(value, ['collection', 'field', 'inverse', 'target'], 'relationship endpoint')
+  assertKnownKeys(value, ['field', 'inverse', 'target'], 'relationship endpoint')
   if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
     throw invalid(`relationship "${relationshipName}" endpoint field must be a camelCase identifier`)
   }
@@ -1720,12 +1742,6 @@ function parseRelationshipEndpoint(
     && (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse))
   ) {
     throw invalid(`relationship "${relationshipName}" endpoint inverse must be a camelCase identifier`)
-  }
-  if (
-    value.collection !== undefined
-    && (typeof value.collection !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.collection))
-  ) {
-    throw invalid(`relationship "${relationshipName}" endpoint collection must be a camelCase identifier`)
   }
   if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
     throw invalid(`relationship "${relationshipName}" endpoint target must be a PascalCase entity name`)
@@ -1740,7 +1756,6 @@ function parseRelationshipEndpoint(
   validatePhysicalIdentifier(`${relationshipName}_${value.field}_fkey`, `relationship "${relationshipName}" constraint`)
   validatePhysicalIdentifier(`${relationshipName}_${value.field}_idx`, `relationship "${relationshipName}" index`)
   return {
-    ...(value.collection === undefined ? {} : { collection: value.collection as string }),
     field: value.field,
     ...(value.inverse === undefined ? {} : { inverse: value.inverse as string }),
     target: value.target,
@@ -1763,7 +1778,11 @@ function parseRelationshipField(
   if ('idRefinement' in parsed) {
     throw invalid(`relationship "${relationshipName}" may not declare an id refinement`)
   }
-  if (parsed.field.type === FieldType.Entity || parsed.field.type === FieldType.Inverse) {
+  if (
+    parsed.field.type === FieldType.Collection
+    || parsed.field.type === FieldType.Entity
+    || parsed.field.type === FieldType.Inverse
+  ) {
     throw invalid(
       `relationship field "${relationshipName}.${parsed.field.name}" must be a scalar, enum, array or JSON field`,
     )
@@ -1772,6 +1791,75 @@ function parseRelationshipField(
     throw invalid(`relationship "${relationshipName}" may not declare a field named "id"`)
   }
   return parsed.field
+}
+
+/** One parsed segment of a `via` Graph path. */
+interface ViaSegment {
+  /** Optional bracket filter text. */
+  readonly filter?: string,
+  /** Relationship, collection, or endpoint name. */
+  readonly name: string,
+}
+
+/**
+ * Split one `via` path while respecting bracket filter groups and quoting.
+ * @param value - Authored via path.
+ * @returns Parsed path segments.
+ */
+function splitCollectionPath(value: string): readonly ViaSegment[] {
+  const raw: string[] = []
+  let current = ''
+  let depth = 0
+  let quote: string | undefined
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (quote !== undefined) {
+      current += character
+      if (character === '\\') {
+        index += 1
+        current += value[index] ?? ''
+      } else if (character === quote) {
+        quote = undefined
+      }
+      continue
+    }
+    if (character === '\'' || character === '"' || character === '`') {
+      quote = character
+      current += character
+      continue
+    }
+    if (character === '[') {
+      depth += 1
+      current += character
+      continue
+    }
+    if (character === ']') {
+      depth -= 1
+      current += character
+      continue
+    }
+    if (character === '.' && depth === 0) {
+      raw.push(current)
+      current = ''
+      continue
+    }
+    current += character
+  }
+  if (quote !== undefined || depth !== 0) {
+    throw invalid(`collection via path "${value}" is unbalanced`)
+  }
+  raw.push(current)
+  return raw.map(segment => {
+    const open = segment.indexOf('[')
+    if (open === -1) return { name: segment }
+    if (!segment.endsWith(']')) {
+      throw invalid(`collection via segment "${segment}" must end its filter group`)
+    }
+    return {
+      filter: segment.slice(open + 1, -1),
+      name: segment.slice(0, open),
+    }
+  })
 }
 
 /**
@@ -1863,15 +1951,132 @@ function deriveNavigations(
           target: remote.target,
         })
       }
-      if (endpoint.collection !== undefined) {
-        addDirect(endpoint.target, {
-          endpoint: index,
-          kind: 'relationship-records',
-          name: endpoint.collection,
-          relationship,
-          target: relationship.name,
-        })
+    }
+  }
+  const relationshipsByName = new Map(
+    relationships.map(relationship => [relationship.name, relationship]),
+  )
+  const declaredCollection = (owner: string, name: string) => {
+    let current = byName.get(owner)
+    while (current) {
+      const field = current.fields.find(candidate => (
+        candidate.type === FieldType.Collection && candidate.name === name
+      ))
+      if (field?.type === FieldType.Collection) return { field, owner: current.name }
+      current = current.extends ? byName.get(current.extends) : undefined
+    }
+    return undefined
+  }
+  const resolvedCollections = new Map<string, ExplicitCollectionDefinition>()
+  const resolvingCollections = new Set<string>()
+  const resolveCollection = (
+    owner: string,
+    field: CollectionFieldDefinition,
+  ): ExplicitCollectionDefinition => {
+    const cacheKey = `${owner}\u0000${field.name}`
+    const cached = resolvedCollections.get(cacheKey)
+    if (cached) return cached
+    if (resolvingCollections.has(cacheKey)) {
+      throw invalid(`collection field "${owner}.${field.name}" has a cyclic via path`)
+    }
+    resolvingCollections.add(cacheKey)
+    const segments = splitCollectionPath(field.via)
+    const first = segments[0]
+    if (!first) throw invalid(`collection field "${owner}.${field.name}" via path is empty`)
+    let relationship: RelationshipDefinition
+    let ownerEndpoint: RelationshipEndpointDefinition
+    let projection: readonly string[]
+    const directRelationship = relationshipsByName.get(first.name)
+    if (directRelationship) {
+      if (first.filter === undefined) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via relationship must identify its owner endpoint with @`,
+        )
       }
+      const match = /^\s*([a-z][A-Za-z0-9]*)\s*=\s*@(?:\.id)?\s*$/u.exec(first.filter)
+      if (!match) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via filter must be "endpoint = @"`,
+        )
+      }
+      const endpoint = directRelationship.between.find(candidate => candidate.field === match[1])
+      if (!endpoint) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via uses unknown endpoint ` +
+          `"${match[1]}" on relationship "${directRelationship.name}"`,
+        )
+      }
+      relationship = directRelationship
+      ownerEndpoint = endpoint
+      projection = segments.slice(1).map(segment => {
+        if (segment.filter !== undefined) {
+          throw invalid(`collection field "${owner}.${field.name}" via cannot filter a projection`)
+        }
+        return segment.name
+      })
+    } else {
+      const source = declaredCollection(owner, first.name)
+      if (!source) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via references unknown relationship ` +
+          `or collection "${first.name}"`,
+        )
+      }
+      if (first.filter !== undefined) {
+        throw invalid(`collection field "${owner}.${field.name}" via cannot filter an intermediate collection`)
+      }
+      const resolvedSource = resolveCollection(source.owner, source.field)
+      relationship = resolvedSource.relationship
+      ownerEndpoint = resolvedSource.ownerEndpoint
+      if (resolvedSource.targetEndpoint) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via cannot traverse projected collection ` +
+          `"${source.owner}.${source.field.name}"`,
+        )
+      }
+      projection = segments.slice(1).map(segment => {
+        if (segment.filter !== undefined) {
+          throw invalid(`collection field "${owner}.${field.name}" via cannot filter a projection`)
+        }
+        return segment.name
+      })
+    }
+    let targetEndpoint: RelationshipEndpointDefinition | undefined
+    for (const segment of projection) {
+      const endpoint = relationship.between.find(candidate => candidate.field === segment)
+      if (!endpoint) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via projects unknown endpoint ` +
+          `"${segment}" on relationship "${relationship.name}"`,
+        )
+      }
+      targetEndpoint = endpoint
+    }
+    const target = targetEndpoint?.target ?? relationship.name
+    if (target !== field.target) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" target "${field.target}" does not match ` +
+        `via result "${target}"`,
+      )
+    }
+    const resolved: ExplicitCollectionDefinition = {
+      kind: 'explicit',
+      name: field.name,
+      owner,
+      ownerEndpoint,
+      relationship,
+      ...(targetEndpoint === undefined ? {} : { targetEndpoint }),
+      target,
+      via: field.via,
+    }
+    resolvingCollections.delete(cacheKey)
+    resolvedCollections.set(cacheKey, resolved)
+    return resolved
+  }
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Collection) continue
+      addDirect(entity.name, resolveCollection(entity.name, field))
     }
   }
 
@@ -2403,6 +2608,10 @@ function parseField(
     return { field: parseEnumField(entityName, value, enums) }
   }
 
+  if (value.type === FieldType.Collection) {
+    return { field: parseCollectionField(entityName, value) }
+  }
+
   if (value.type === FieldType.Inverse) {
     return { field: parseInverseField(entityName, value) }
   }
@@ -2486,6 +2695,35 @@ function parseField(
       type: type as ScalarFieldType,
       ...(unique === undefined ? {} : { unique }),
     },
+  }
+}
+
+/**
+ * Validate one derived collection navigation descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated collection field.
+ */
+function parseCollectionField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): CollectionFieldDefinition {
+  assertKnownKeys(value, ['field', 'target', 'type', 'via'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`collection field "${entityName}.${name}" target must be a PascalCase name`)
+  }
+  if (typeof value.via !== 'string' || value.via.trim().length === 0) {
+    throw invalid(`collection field "${entityName}.${name}" via must be a non-empty Graph path`)
+  }
+  return {
+    name,
+    target: value.target,
+    type: FieldType.Collection,
+    via: value.via.trim(),
   }
 }
 
@@ -2695,12 +2933,12 @@ function resolveEntity(
   for (const ancestor of ancestors) {
     for (const field of ancestor.fields) {
       if (field.type === FieldType.Inverse) inverseFields.push(field)
-      else effective.push({ ...field, owner: ancestor.name })
+      else if (field.type !== FieldType.Collection) effective.push({ ...field, owner: ancestor.name })
     }
   }
   for (const field of seed.fields) {
     if (field.type === FieldType.Inverse) inverseFields.push(field)
-    else effective.push({ ...field, owner: seed.name })
+    else if (field.type !== FieldType.Collection) effective.push({ ...field, owner: seed.name })
   }
   const idField: ScalarFieldDefinition = {
     ...(formats.get(seed.name) ? { format: formats.get(seed.name) } : {}),
@@ -2757,7 +2995,10 @@ function entityTable(
 }
 
 /** One authored field that owns PostgreSQL storage. */
-type PhysicalFieldDefinition = Exclude<FieldDefinition, InverseFieldDefinition>
+type PhysicalFieldDefinition = Exclude<
+  FieldDefinition,
+  CollectionFieldDefinition | InverseFieldDefinition
+>
 
 /**
  * Whether a field owns physical storage.
@@ -2765,7 +3006,7 @@ type PhysicalFieldDefinition = Exclude<FieldDefinition, InverseFieldDefinition>
  * @returns `true` for scalar, array, JSON or forward-reference fields.
  */
 function isPhysicalField(field: FieldDefinition): field is PhysicalFieldDefinition {
-  return field.type !== FieldType.Inverse
+  return field.type !== FieldType.Collection && field.type !== FieldType.Inverse
 }
 
 /**

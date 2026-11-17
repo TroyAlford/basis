@@ -677,16 +677,15 @@ class QueryProjection {
     const planKey = `${key}\u0000${parentAlias}`
     const cached = this.#collectionPlans.get(planKey)
     if (cached) return cached
-    if (collection.kind === 'relationship-records') {
+    if (collection.kind === 'explicit' && collection.targetEndpoint === undefined) {
       const relationship = collection.relationship
-      const endpoint = relationship.between[collection.endpoint]
-      if (!endpoint) throw new Error(`Unknown relationship endpoint ${collection.endpoint}`)
+      const ownerColumn = `${collection.ownerEndpoint.field}.id`
       const alias = this.#nextAlias('cr')
       const plan: CollectionRelationPlan = {
         collection,
-        condition: `${quote(alias)}.${quote(`${endpoint.field}.id`)} = "${parentAlias}".${quote('id')}`,
+        condition: `${quote(alias)}.${quote(ownerColumn)} = "${parentAlias}".${quote('id')}`,
         parentAlias,
-        parentId: `${quote(alias)}.${quote(`${endpoint.field}.id`)}`,
+        parentId: `${quote(alias)}.${quote(ownerColumn)}`,
         relation: `${quote(relationship.name)} ${quote(alias)}`,
         rootAlias: alias,
         target: this.#entities.relationshipRecord(relationship.name),
@@ -702,7 +701,9 @@ class QueryProjection {
     const targetAlias = targetName === 'Entity' ? undefined : this.#nextAlias('ct')
     const rootAlias = this.#nextAlias('cr')
     const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
-    const relationshipAlias = relationship ? this.#nextAlias('cj') : undefined
+    const relationshipAlias = collection.kind === 'relationship' || collection.kind === 'explicit'
+      ? this.#nextAlias('cj')
+      : undefined
     const sql = collectionSqlRelation(collection, `"${parentAlias}".${quote('id')}`, {
       relationship: relationshipAlias ?? '',
       root: rootAlias,
@@ -715,6 +716,10 @@ class QueryProjection {
       parentId = targetAlias === undefined
         ? `"${rootAlias}".${quote('id')}`
         : `"${targetAlias}".${quote(collection.reference.column)}`
+    } else if (collection.kind === 'explicit') {
+      parentId = targetAlias === undefined
+        ? `"${rootAlias}".${quote('id')}`
+        : `"${targetAlias}".${quote('id')}`
     } else {
       parentId = `"${relationshipAlias as string}".${quote(
         `${relationship?.between[collection.endpoint].field as string}.id`,
@@ -1140,7 +1145,7 @@ class QueryProjection {
     ].join('.')
     const hasDirectives = directives.filter !== undefined || directives.limit !== undefined
       || directives.offset !== undefined || directives.orderBy !== undefined
-    const recordCollection = node.context.collections.get(name)?.kind === 'relationship-records'
+    const recordCollection = node.context.collections.get(name)?.kind === 'explicit'
     if (hasDirectives && rest.length > 0 && !recordCollection) {
       throw new Error(`Collection directives must end the path "${rawName}"; use separate child paths`)
     }
@@ -1493,9 +1498,9 @@ class QueryProjection {
    * @param node - Projection occurrence owning the collection.
    * @param spec - Relationship-record collection request.
    */
-  #addProjectedRelationshipRecords(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
-    if (spec.collection.kind !== 'relationship-records') {
-      throw new Error('Relationship-record projection requires a relationship-record collection')
+  #addProjectedExplicitRecords(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
+    if (spec.collection.kind !== 'explicit' || spec.collection.targetEndpoint !== undefined) {
+      throw new Error('Explicit record projection requires a relationship-record collection')
     }
     const collection = spec.collection
     const relationship = collection.relationship
@@ -1503,8 +1508,7 @@ class QueryProjection {
     if (!target) throw new Error(`Unknown relationship "${relationship.name}"`)
     const limit = spec.limit === undefined ? 3 : spec.limit
     const offset = spec.offset ?? 0
-    const endpoint = relationship.between[collection.endpoint]
-    if (!endpoint) throw new Error(`Unknown endpoint ${collection.endpoint} for "${relationship.name}"`)
+    const endpoint = collection.ownerEndpoint
     const childAlias = this.#nextAlias('cr')
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
@@ -1528,24 +1532,52 @@ class QueryProjection {
       `$${base + Number(value) - 1}`
     ))
     this.values.push(...child.values)
+    let totalSql: string | undefined
+    if (spec.filters.size > 0) {
+      const totalChildAlias = this.#nextAlias('ct')
+      const totalChild = compilePolymorphicQuery(this.#entities, target, {
+        aliasPrefix: `${totalChildAlias}_`,
+        fields: [...new Set([
+          ...relationship.between.map(item => item.field),
+          ...relationship.fields.map(field => field.name),
+          ...spec.fields,
+        ])],
+        limit: null,
+        offset: 0,
+        rawWhere:
+          `${quote(totalChildAlias)}.${quote(`${endpoint.field}.id`)} = ` +
+          `${quote(node.context.baseAlias)}.${quote('id')}`,
+        rootAlias: totalChildAlias,
+      })
+      const totalBase = this.#valueStart + this.values.length
+      totalSql = totalChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+        `$${totalBase + Number(value) - 1}`
+      ))
+      this.values.push(...totalChild.values)
+    }
     const alias = columnAlias(node.path, collection.name)
     const matchedAlias = `${alias}__matched`
-    const totalAlias = matchedAlias
+    const totalAlias = totalSql === undefined ? matchedAlias : `${alias}__total`
     const lateralAlias = this.#nextAlias('pr')
     const page = [
       ...(limit === null ? [] : [`LIMIT ${limit}`]),
       ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
     ].join(' ')
+    const counts = totalSql === undefined
+      ? `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched"`
+      : `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched", ` +
+        `(SELECT count(*) FROM (${totalSql}) AS "__total") AS "__total"`
     this.joins.push(
       'LEFT JOIN LATERAL (SELECT ' +
       'COALESCE((SELECT json_agg(row_to_json("__item")) ' +
       `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), '[]'::json) AS "__items", ` +
-      `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched"` +
+      counts +
       `) AS ${quote(lateralAlias)} ON TRUE`,
     )
     this.columns.push(
       `${quote(lateralAlias)}.${quote('__items')} AS ${quote(alias)}`,
       `${quote(lateralAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
+      ...(totalSql === undefined ? [] : [`${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`]),
     )
     node.projectedCollections.push({
       alias,
@@ -1558,7 +1590,9 @@ class QueryProjection {
             : []
         return {
           $matched: Number(row[matchedAlias] ?? 0),
-          $total: Number(row[totalAlias] ?? 0),
+          $total: totalSql === undefined
+            ? Number(row[matchedAlias] ?? 0)
+            : Number(row[totalAlias] ?? 0),
           items: entries.map(entry => child.hydrate(entry as Record<string, unknown>)),
         }
       },
@@ -1579,8 +1613,8 @@ class QueryProjection {
    * @param spec - Requested target and edge fields.
    */
   #addProjectedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
-    if (spec.collection.kind === 'relationship-records') {
-      this.#addProjectedRelationshipRecords(node, spec)
+    if (spec.collection.kind === 'explicit' && spec.collection.targetEndpoint === undefined) {
+      this.#addProjectedExplicitRecords(node, spec)
       return
     }
     const key = collectionKey(node.path, spec.collection.name)
@@ -2253,6 +2287,7 @@ function fieldContract(field: FieldDefinition): string {
     return `Array:${field.items.type}:${field.items.format ?? ''}`
   }
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
+  if (field.type === FieldType.Collection) return `Collection:${field.target}:${field.via}`
   if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
   return `${field.type}:${field.format ?? ''}`
 }

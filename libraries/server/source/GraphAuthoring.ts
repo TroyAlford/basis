@@ -125,6 +125,18 @@ export interface AuthoredReferenceField {
   readonly unique?: true,
 }
 
+/** One authored derived collection navigation. */
+export interface AuthoredCollectionField {
+  /** Field name, in camelCase. */
+  readonly field: string,
+  /** Entity or relationship record type returned by the collection. */
+  readonly target: string,
+  /** Collection field type. */
+  readonly type: Authored<FieldType.Collection>,
+  /** Owner-relative Graph path used to resolve the collection. */
+  readonly via: string,
+}
+
 /** One authored reciprocal inverse navigation. */
 export interface AuthoredInverseField {
   /** Inverse cardinality. */
@@ -142,6 +154,7 @@ export interface AuthoredInverseField {
 /** Any authored entity field. */
 export type AuthoredField =
   | AuthoredArrayField
+  | AuthoredCollectionField
   | AuthoredEnumField
   | AuthoredIdentityField
   | AuthoredInverseField
@@ -208,11 +221,12 @@ export interface AuthoredEntity {
 
 /** One authored relationship endpoint. */
 export interface AuthoredRelationshipEndpoint {
-  /** Optional relationship-record collection name on the target entity. */
-  readonly collection?: string,
   /** Endpoint field name, in camelCase. */
   readonly field: string,
-  /** Optional inverse navigation name on the target entity. */
+  /**
+   * Optional legacy inverse navigation name on the target entity.
+   * @deprecated Declare an Entity `Collection` field with `via` instead.
+   */
   readonly inverse?: string,
   /** Referenced entity name. */
   readonly target: string,

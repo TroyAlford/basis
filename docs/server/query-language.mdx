@@ -244,7 +244,7 @@ const referencePaths = [
 
 ### Relationship-record collections
 
-A relationship endpoint may declare `collection` to expose the relationship records themselves. Those records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets.
+An Entity may declare a derived `Collection` field with a `via` Graph path to expose relationship records or project an endpoint Entity. Relationship records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets. Collection fields create no storage.
 
 ```ts
 deck.memberships
@@ -254,7 +254,7 @@ deck.memberships[user = $me $and role = 'Editor']
 deck.memberships $contains (user = $me)
 ```
 
-A separate `inverse` endpoint navigation continues to expose related entities (`deck.members`). Relationship records can also be queried as a root (`db.query('DeckMembership', …)`) and addressed by their required endpoint keys for direct `db.create`, `db.edit`, `db.delete`, and `db.upsert`.
+A projected collection such as `cards` (`via: 'entries.card'`) exposes the endpoint Entity. Relationship records can also be queried as a root (`db.query('DeckMembership', …)`) and addressed by their required endpoint keys for direct `db.create`, `db.edit`, `db.delete`, and `db.upsert`.
 
 ## Stage 18 — collection comparisons (implemented)
 
@@ -346,7 +346,7 @@ const collectionComparisons = [
 - `$empty` tests zero related items. On a relationship navigation, `$eq null` is invalid; `pets !$empty` means at least one related item, independent of any inner predicate.
 - `pets $contains [(P), (Q)]` means `Contains(P) AND Contains(Q)`. P and Q may be satisfied by different items. `pets $contains (P $and Q)` means one item satisfies both. `pets $contains (P $or Q)` means one item satisfies either. Empty bracketed requirement lists are rejected.
 - A structured `filters` array contains independent requirements. A one-item `filters` array containing an `$and`, `$or`, or `$not` tree applies that whole tree to one member. `$all` accepts exactly one member predicate.
-- Inner predicates are relative to the collection item and may use the item’s scalar or singular-reference paths, including terminal identity equality and `null`; reference paths retain the same eight-hop limit as projection. Named N:M relationship properties use the established lowercase prefix, such as `membership.role`. The prefix is not available on inverse collections, and Array or JSON relationship properties are rejected as predicate targets.
+- Inner predicates are relative to the collection item and may use the item’s scalar or singular-reference paths, including terminal identity equality and `null`; reference paths retain the same eight-hop limit as projection. A relationship-record collection exposes edge fields directly, such as `memberships $contains (role = 'Owner')`. Legacy relationship-derived entity collections may retain the lower-case relationship prefix, such as `membership.role`. Array or JSON relationship properties are rejected as predicate targets.
 - Collection comparisons preserve two-valued null behavior. A null inner scalar makes a non-null comparison false; its negation is true, and a null field is a counterexample to `$all`.
 - Each independent requirement compiles to its own correlated `EXISTS`; negation uses the shared logical operator with null-safe two-valued semantics. The query remains one parameterized SQL statement with the same finite work budget. Nested collection comparisons, unbounded traversal, N+1 lookups, and application-side child hydration are rejected.
 
@@ -497,7 +497,7 @@ const scopedMemberPredicates = [
 ```
 
 - Native arrays accept `@` as a scalar member; `@.field` is invalid because array elements are scalar values. The array options are `$contains` (existential) and `$all` (universal).
-- Entity collections accept `@` or `@.path`. `@` and `@.id` both mean the current member entity identity; other paths use the same typed field/reference validation as relative syntax. `pets $contains (@.age > 10)` and `pets $contains (age > 10)` normalize identically. Relationship-owned properties remain available through the established lowercase prefix, for example `@.membership.role`.
+- Entity collections accept `@` or `@.path`. `@` and `@.id` both mean the current member entity identity; other paths use the same typed field/reference validation as relative syntax. `pets $contains (@.age > 10)` and `pets $contains (age > 10)` normalize identically. Relationship-record collections expose edge fields directly, for example `memberships $contains (@.role = 'Owner')`.
 - Structured inner filters are relative to the member. Native-array members use the canonical pseudo-field `@`; entity collections use their normal relative field names, and `@`/`@.id` normalize to `id`.
 - `$all` is vacuously true for an empty array or collection; `$contains` is false. Existing two-valued NULL behavior applies to member comparisons. Literal array membership, `$empty`, array set/sequence equality, and opaque JSON containment retain their stage-19 semantics.
 - Arrays compile with `unnest` and entity collections with the existing correlated semijoin. Nested collection correlation, outer-context captures, JSON structural equality, and implicit `@` operands are rejected. A quantifier must contain a non-empty member predicate list.
@@ -528,7 +528,7 @@ const countPredicates = [
 ]
 ```
 
-- `$total` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references. A projected collection envelope exposes both `$total` (the authorized population before its filter) and `$matched` (the authorized count after the filter and before paging). `$matched` is also valid in predicates on a filter-qualified collection path (`members[role = 'GM'].$matched >= 2`); there, `$total` continues to count the whole authorized population and ignores the member filter. Pagination directives are not valid on count predicates.
+- `$total` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references. A projected collection envelope exposes both `$total` (the authorized population before its filter) and `$matched` (the authorized count after the filter and before paging). `$matched` is also valid in predicates on a filter-qualified collection path (`memberships[role = 'Owner'].$matched >= 2`); there, `$total` continues to count the whole authorized population and ignores the member filter. Pagination directives are not valid on count predicates.
 - Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
 - Relationship `collection.$total = 0` canonicalizes to `NOT EXISTS` and `collection.$total > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
 - Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.

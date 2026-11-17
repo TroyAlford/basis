@@ -1205,7 +1205,12 @@ describe('Authorization RLS', () => {
     const recordGraph = new Graph({
       entities: [
         {
-          fields: [],
+          fields: [{
+            field: 'memberships',
+            target: 'DeckMembership',
+            type: 'Collection',
+            via: 'DeckMembership[deck = @]',
+          }],
           name: 'Deck',
           security: {
             [Action.Read]: [{ where: 'memberships $contains (user = $me)' }],
@@ -1215,8 +1220,8 @@ describe('Authorization RLS', () => {
       ],
       relationships: [{
         between: [
-          { collection: 'memberships', field: 'deck', target: 'Deck' },
-          { collection: 'deckMemberships', field: 'user', target: 'User' },
+          { field: 'deck', target: 'Deck' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'DeckMembership',
@@ -1290,6 +1295,164 @@ describe('Authorization RLS', () => {
       )))
       expect(direct).toEqual([{ id: first }])
       expect(await asActor(charlie, () => server.db.query('Deck', { fields: ['id'] }))).toEqual([])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 60_000)
+
+  test('applies relationship RLS to three-way record collections', async () => {
+    const threeWayGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'members', target: 'User', type: 'Collection', via: 'memberships.user' },
+            {
+              field: 'memberships',
+              target: 'DeckMembership',
+              type: 'Collection',
+              via: 'DeckMembership[deck = @]',
+            },
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]',
+            },
+          ],
+          name: 'Deck',
+          security: {
+            [Action.Read]: [{ where: 'memberships $contains (user = $me)' }],
+          },
+        },
+        {
+          fields: [],
+          name: 'User',
+          security: {
+            [Action.Read]: Security.Public,
+          },
+        },
+        {
+          fields: [{
+            field: 'decks',
+            target: 'Deck',
+            type: 'Collection',
+            via: 'DeckCardPrinting[card = @].deck',
+          }],
+          name: 'Card',
+        },
+        {
+          fields: [{
+            field: 'decks',
+            target: 'Deck',
+            type: 'Collection',
+            via: 'DeckCardPrinting[printing = @].deck',
+          }],
+          name: 'Printing',
+        },
+      ],
+      relationships: [
+        {
+          between: [
+            { field: 'deck', target: 'Deck' },
+            { field: 'user', target: 'User' },
+          ],
+          fields: [{ field: 'role', type: 'String' }],
+          name: 'DeckMembership',
+          security: {
+            [Action.Read]: Security.Public,
+          },
+        },
+        {
+          between: [
+            { field: 'deck', target: 'Deck' },
+            { field: 'card', target: 'Card' },
+            { field: 'printing', target: 'Printing' },
+          ],
+          fields: [{ field: 'quantity', type: 'Number' }],
+          name: 'DeckCardPrinting',
+          security: {
+            [Action.Read]: [{ where: 'deck.members $contains (@ = $me)' }],
+          },
+        },
+      ],
+    })
+    const install = tempDirectory('basis-authorization-three-way-')
+    const server = await start(install, threeWayGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      const charlie = await authorization.enrollIdentity('test', 'charlie', { email: 'charlie@example.com' })
+      if (!alice || !bob || !charlie) throw new Error('record users were not enrolled')
+      const deck = randomUUID()
+      const card = randomUUID()
+      const printing = randomUUID()
+      await admin.sql.begin(async tx => {
+        for (const [id, name, entity] of [
+          [deck, 'Deck', 'Deck'],
+          [card, 'Card', 'Card'],
+          [printing, 'Printing', 'Printing'],
+        ] as const) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${name}, ${entity})
+          `
+        }
+        await tx`INSERT INTO "Deck" ("id") VALUES (${deck})`
+        await tx`INSERT INTO "Card" ("id") VALUES (${card})`
+        await tx`INSERT INTO "Printing" ("id") VALUES (${printing})`
+        await tx`
+          INSERT INTO "DeckMembership" ("deck.id", "user.id", "role")
+          VALUES (${deck}, ${alice}, 'Owner')
+        `
+        await tx`
+          INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+          VALUES (${deck}, ${card}, ${printing}, 4)
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const readEntries = (actor: string | null) => asActor(actor, () => server.db.query<{
+        entries: { $matched: number, $total: number, items: { quantity: number }[] },
+      }>('Deck', {
+        fields: ['id', 'entries'],
+        where: { id: deck },
+      }))
+      const member = await readEntries(alice)
+      expect(member[0]?.entries.$matched).toBe(1)
+      expect(member[0]?.entries.items).toEqual([expect.objectContaining({ quantity: 4 })])
+      expect(await readEntries(bob)).toEqual([])
+      expect(await readEntries(charlie)).toEqual([])
+      expect(await readEntries(null)).toEqual([])
+      const direct = await asActor(alice, () => server.db.tx(async sql => (
+        sql<{ quantity: number }[]>`
+          SELECT "quantity"
+          FROM "DeckCardPrinting"
+        `
+      )))
+      expect(direct).toEqual([{ quantity: 4 }])
+      expect(await asActor(bob, () => server.db.tx(async sql => (
+        sql<{ quantity: number }[]>`
+          SELECT "quantity"
+          FROM "DeckCardPrinting"
+        `
+      )))).toEqual([])
+      expect(await asActor(null, () => server.db.tx(async sql => (
+        sql<{ quantity: number }[]>`
+          SELECT "quantity"
+          FROM "DeckCardPrinting"
+        `
+      )))).toEqual([])
     } finally {
       await admin.close()
       await server.shutdown()

@@ -30,12 +30,31 @@ The document root accepts `entities` and an optional `relationships` array. This
           "target": "Article",
           "inverse": "author",
           "cardinality": "Many"
+        },
+        {
+          "field": "campaigns",
+          "type": "Collection",
+          "target": "Campaign",
+          "via": "Membership[user = @].campaign"
+        },
+        {
+          "field": "memberships",
+          "type": "Collection",
+          "target": "Membership",
+          "via": "Membership[user = @]"
         }
       ]
     },
     {
       "name": "Campaign",
-      "fields": []
+      "fields": [
+        {
+          "field": "members",
+          "type": "Collection",
+          "target": "User",
+          "via": "Membership[campaign = @].user"
+        }
+      ]
     },
     {
       "name": "Article",
@@ -66,13 +85,11 @@ The document root accepts `entities` and an optional `relationships` array. This
       "between": [
         {
           "field": "user",
-          "target": "User",
-          "inverse": "campaigns"
+          "target": "User"
         },
         {
           "field": "campaign",
-          "target": "Campaign",
-          "inverse": "members"
+          "target": "Campaign"
         }
       ],
       "fields": [
@@ -98,7 +115,7 @@ const campaign = graph.definitions.entity('Campaign')
 const membership = graph.definitions.relationship('Membership')
 ```
 
-Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor. Fields also accept optional `nullable: boolean` and `default` values. Scalar, array, and JSON fields omit `NOT NULL` only when `nullable: true`; when omitted they are non-null. Reference columns remain nullable by default for compatibility, and `nullable: false` makes a reference column non-null. A `default` must match the field type and is emitted as a PostgreSQL default expression; an empty array default is emitted with its declared element type (`ARRAY[]::text[]`, `ARRAY[]::double precision[]`, and so on) so PostgreSQL can install it. Repeatable navigation (`Inverse`) fields have no physical column and do not accept nullability or defaults.
+Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; derived collections use `Collection` with an exact `target` and owner-relative `via`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor. Fields also accept optional `nullable: boolean` and `default` values. Scalar, array, and JSON fields omit `NOT NULL` only when `nullable: true`; when omitted they are non-null. Reference columns remain nullable by default for compatibility, and `nullable: false` makes a reference column non-null. A `default` must match the field type and is emitted as a PostgreSQL default expression; an empty array default is emitted with its declared element type (`ARRAY[]::text[]`, `ARRAY[]::double precision[]`, and so on) so PostgreSQL can install it. Repeatable navigation (`Inverse`) fields have no physical column and do not accept nullability or defaults.
 
 The implicit system root owns `id: ID`, `name: String`, the concrete-leaf `entity` discriminator, and the update-tracking fields `lastUpdatedBy` (a nullable reference to `User`) and `lastUpdatedAt` (a nullable `Timestamp` backed by `timestamptz`). The universal lightweight object shape remains `{ id, name, entity }`. `id` is always the primary key; every ordinary entity table receives generated `id text primary key` storage and a parent foreign-key column. Root field names are reserved from ordinary declarations.
 
@@ -109,7 +126,7 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 - Without a refinement, ID accepts either format.
 - A descendant inherits an ancestor format; a conflicting redeclaration is rejected.
 
-The example derives `User.articles` from `Article.author.inverse`, and derives `User.campaigns` and `Campaign.members` from the single `Membership` relationship. Navigations are not authored entity fields. Like effective fields, derived navigations are inherited across MTI: a `SystemUser extends User` query exposes the ancestor’s `articles` and `campaigns`, and a descendant field or navigation that shadows an inherited navigation is rejected.
+The example derives `User.articles` from `Article.author.inverse`; `User.campaigns` and `Campaign.members` are independently authored `Collection` fields resolved through the single `Membership` relationship. Collection fields are navigations with no physical storage. Like effective fields, navigations are inherited across MTI: a `SystemUser extends User` query exposes the ancestor’s `articles` and `campaigns`, and a descendant field or navigation that shadows an inherited navigation is rejected.
 
 ## References, arrays, JSON, and relationships
 
@@ -197,16 +214,42 @@ Opaque structured values use `type: "JSON"` and map to a non-null PostgreSQL `js
 A named relationship is a first-class declaration in the top-level `relationships` array. There is no `type` discriminator. Every relationship has exactly `name`, `between`, and `fields`:
 
 - `name` is PascalCase and distinct from all entity and relationship names.
-- `between` has two or more `{ field, target, inverse?, collection? }` endpoints in authored order. Endpoint fields and any declared inverse/collection names must be distinct on their target.
-- `inverse` exposes a related-entity collection on the endpoint target. `collection` exposes the relationship records themselves. Either may be omitted; neither is inferred. `inverse` is available only for two-endpoint relationships because a remote entity is otherwise ambiguous.
+- `between` has two or more `{ field, target }` endpoints in authored order. Endpoint fields must differ.
 - `fields` is required, may be empty, and may contain only scalar, `Array`, or `JSON` fields. It cannot contain `Entity`, `Collection`, `Structured`, or `ValueCollection` fields.
-- Relationship fields are properties of the relationship itself, not target entity fields.
+- Relationship fields are properties of the relationship itself, not endpoint entity fields.
 
-The physical table is named by the relationship. Each endpoint column is the endpoint field's dotted path (`"user.id"`, `"campaign.id"`), is `text not null`, and participates in the composite primary key in authored order. Deferrable foreign keys target the respective entity or supported ancestor `id`, and every endpoint column receives an index. Relationship fields are regular non-null columns. There is no surrogate `id`, `name`, `entity`, or root `Entity` row for a relationship.
+Navigation ownership belongs to the Entity that exposes it. Declare a derived `Collection` field with an explicit `target` and owner-relative `via` Graph path; it creates no table and no column:
+
+```json
+{
+  "name": "DeckCardPrinting",
+  "between": [
+    { "field": "deck", "target": "Deck" },
+    { "field": "card", "target": "Card" },
+    { "field": "printing", "target": "Printing" }
+  ],
+  "fields": [{ "field": "quantity", "type": "Number" }]
+}
+```
+
+```json
+// Deck.fields
+{ "field": "entries", "type": "Collection", "target": "DeckCardPrinting", "via": "DeckCardPrinting[deck = @]" }
+{ "field": "cards", "type": "Collection", "target": "Card", "via": "entries.card" }
+{ "field": "printings", "type": "Collection", "target": "Printing", "via": "entries.printing" }
+
+// Card.fields
+{ "field": "decks", "type": "Collection", "target": "Deck", "via": "DeckCardPrinting[card = @].deck" }
+
+// Printing.fields
+{ "field": "decks", "type": "Collection", "target": "Deck", "via": "DeckCardPrinting[printing = @].deck" }
+```
+
+`@` is the owning Entity identity. Every direction is independently opt-in; no reverse navigation is inferred. A collection without a projection endpoint returns relationship records; a collection with a projection endpoint returns the referenced Entity. Collection fields are query-only and do not appear in DDL, generated contracts, or writes.
 
 Duplicate endpoint tuples fail with SQLSTATE `23505`; a missing endpoint target fails with `23503`. Relationship tables are unordered sets of endpoint tuples and do not have fake `ordered`, `unique`, or `storage` flags. The entity tables, `TableDefinition`, phased foreign-key reconciliation, and query compiler all use the same canonical metadata.
 
-An explicit `collection` endpoint navigation makes the relationship records first-class query objects:
+A derived relationship-record collection makes the records first-class query objects:
 
 ```ts
 const [deck] = await server.db.query<{
@@ -410,15 +453,15 @@ const visits = await server.db.query<{
 Derived collection navigations project an `{ items, $matched, $total }` envelope. `$total` is the full authorized collection count before the optional filter; `$matched` is the authorized matching count after the filter and before offset/limit. Without a filter, `$matched` and `$total` are equal. `items` is capped at three by default. A collection path may carry one optional filter group `[...]`, followed by one optional options group `{...}`:
 
 ```ts
-const campaigns = await server.db.query<{
-  campaigns: {
-    items: { entity: string, id: string, name: string, role: string }[],
+const memberships = await server.db.query<{
+  memberships: {
+    items: { campaign: { entity: string, id: string, name: string }, role: string }[],
     $matched: number,
     $total: number,
   },
   id: string,
 }>('User', {
-  fields: ['id', 'campaigns', 'campaigns.name', 'campaigns.role'],
+  fields: ['id', 'memberships', 'memberships.campaign', 'memberships.role'],
 })
 ```
 
@@ -449,7 +492,7 @@ await server.db.query('Campaign', {
 
 `$orderBy` uses the same shorthand as the root `orderBy` contract: a field name, a leading `-` for descending, or an array of those for multiple levels (`$orderBy:[name,-createdAt]`). It applies to scalar item fields, not references or nested collections. SQL aggregation preserves the requested order and appends the target identity as a stable tie-break, so equal sort values never duplicate or skip rows across pages. Ordering-only fields are used inside the aggregate but are not returned unless a separate item path requests them (`members{$orderBy:email}` does not add `email`; add `members.email`). Each collection option may appear at most once; `$limit:1,$limit:2` is rejected rather than silently overwritten.
 
-The filter changes `items` and `$matched`; `$matched` is the full filtered count, under the same database visibility (including row-level security) as `items`, before offset/limit. `$total` is the same authorized population before the filter. `$total` is also available as a read-only intrinsic in predicates, projections, and supported ordering paths. `$matched` is available in predicates for filter-qualified collection paths: `members[role = 'GM'].$matched >= 2` counts only matching members. On that same path, `$total` ignores the member filter and counts the whole authorized collection (`members[role = 'GM'].$total = 5`). Relationship properties flatten onto the item for both projection and filtering (`printings.quantity`, `members.role`), so `members[role = 'GM']` and `members.role` address the same value. If the target entity declares the same name as a relationship property, that flattened name is ambiguous and rejected; use a non-conflicting name or a separate target navigation. The same path syntax continues through singular references and nested collections, for example `printings{$limit:100}.panels{$limit:null}`.
+The filter changes `items` and `$matched`; `$matched` is the full filtered count, under the same database visibility (including row-level security) as `items`, before offset/limit. `$total` is the same authorized population before the filter. `$total` is also available as a read-only intrinsic in predicates, projections, and supported ordering paths. `$matched` is available in predicates for filter-qualified collection paths: `members[role = 'GM'].$matched >= 2` counts only matching members. On that same path, `$total` ignores the member filter and counts the whole authorized collection (`members[role = 'GM'].$total = 5`). A relationship-record collection exposes its edge fields directly for both projection and filtering (`memberships.role`), so `memberships[role = 'Owner']` filters the same record field. Legacy relationship-derived entity collections may flatten relationship properties with a lower-case relationship prefix; if the target entity declares the same name, that flattened name is ambiguous and rejected. The same path syntax continues through singular references and nested collections, for example `printings{$limit:100}.panels{$limit:null}`.
 
 Nested collection paths are legal beneath singular references and other collection items, for example `owner.pets.toys.label`. A collection item path that returns through the immediately reciprocal relationship is rejected as reciprocal backtracking: `Pet.owner.pets.owner` and `Person.pet.owner` fail, while repeated forward-only references such as `Person.manager.manager` remain legal.
 
@@ -489,7 +532,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, a leading `-` for descending, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and collection path projections. Collection paths return `{ items, $matched, $total }` envelopes with a default page size of three; `{...}` options change limit/offset/order, and `[...]` filters constrain `items` and `$matched`, while `$total` remains the unfiltered authorized population. Named-relationship properties flatten onto each item (`members.role`), and paths continue through singular references and nested collections. Collection predicates, collection counts, native Array comparisons, scoped `@` member predicates, opaque JSON `$contains`, nested collections under collection members, composed singular-reference plus collection paths (`owner.pets $contains (...)`), and same-occurrence correlation within one grouped `$contains` are implemented (array operands are capped at 128 elements; unsafe or non-round-trippable JSON numeric literals are rejected); JSON path traversal/equality and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Only guaranteed reciprocal backtracking is rejected; cyclic entity definitions and physical foreign keys remain valid.
+`orderBy` is optional and accepts a field name, a leading `-` for descending, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and collection path projections. Collection paths return `{ items, $matched, $total }` envelopes with a default page size of three; `{...}` options change limit/offset/order, and `[...]` filters constrain `items` and `$matched`, while `$total` remains the unfiltered authorized population. Relationship-record collections expose relationship-owned fields directly on each item (`memberships.role`), and paths continue through singular references and nested collections. Collection predicates, collection counts, native Array comparisons, scoped `@` member predicates, opaque JSON `$contains`, nested collections under collection members, composed singular-reference plus collection paths (`owner.pets $contains (...)`), and same-occurrence correlation within one grouped `$contains` are implemented (array operands are capped at 128 elements; unsafe or non-round-trippable JSON numeric literals are rejected); JSON path traversal/equality and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Only guaranteed reciprocal backtracking is rejected; cyclic entity definitions and physical foreign keys remain valid.
 
 ## `db.sql`
 

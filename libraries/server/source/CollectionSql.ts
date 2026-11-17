@@ -40,15 +40,42 @@ export function collectionSqlRelation(
   aliases: CollectionSqlAliases,
 ): CollectionSqlRelation {
   const targetName = collection.target
-  if (collection.kind === 'relationship-records') {
+  if (collection.kind === 'explicit') {
     const relationship = collection.relationship
-    const local = relationship.between[collection.endpoint]
-    if (!local) throw new Error(`Unknown relationship endpoint ${collection.endpoint}`)
+    const ownerColumn = `${collection.ownerEndpoint.field}.id`
+    if (collection.targetEndpoint === undefined) {
+      return {
+        condition: `${quote(aliases.relationship)}.${quote(ownerColumn)} = ${parentId}`,
+        relation: `${quote(relationship.name)} ${quote(aliases.relationship)}`,
+        relationshipAlias: aliases.relationship,
+        rootAlias: aliases.relationship,
+      }
+    }
+    const targetColumn = `${collection.targetEndpoint.field}.id`
+    const condition =
+      `EXISTS (SELECT 1 FROM ${quote(relationship.name)} ${quote(aliases.relationship)} ` +
+      `WHERE ${quote(aliases.relationship)}.${quote(ownerColumn)} = ${parentId} ` +
+      `AND ${quote(aliases.relationship)}.${quote(targetColumn)} = ` +
+      (targetName === 'Entity'
+        ? `${quote(aliases.root)}.${quote('id')}`
+        : `${quote(aliases.target)}.${quote('id')}`) +
+      ')'
+    if (targetName === 'Entity') {
+      return {
+        condition,
+        relation: `${quote('Entity')} ${quote(aliases.root)}`,
+        rootAlias: aliases.root,
+      }
+    }
+    const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
+    const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
     return {
-      condition: `${quote(aliases.relationship)}.${quote(`${local.field}.id`)} = ${parentId}`,
-      relation: `${quote(relationship.name)} ${quote(aliases.relationship)}`,
-      relationshipAlias: aliases.relationship,
-      rootAlias: aliases.relationship,
+      condition,
+      relation:
+        `${targetSource} JOIN ${rootSource} ON ` +
+        `${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`,
+      rootAlias: aliases.root,
+      targetAlias: aliases.target,
     }
   }
   if (collection.kind === 'inverse') {

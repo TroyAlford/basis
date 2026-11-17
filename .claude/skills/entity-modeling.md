@@ -11,40 +11,46 @@ Use an Entity when the thing has independent identity or must be the target of a
 
 ## Relationship declarations
 
-An endpoint may expose a related-entity navigation with `inverse`, the relationship records with `collection`, or neither. Both are explicit; no reverse navigation is inferred.
+A relationship owns its physical table and endpoints. It does not own navigations.
 
 ```ts
 {
-  name: 'DeckMembership',
+  name: 'DeckCardPrinting',
   between: [
-    {
-      collection: 'memberships',
-      field: 'deck',
-      inverse: 'members',
-      target: 'Deck',
-    },
-    {
-      collection: 'deckMemberships',
-      field: 'user',
-      inverse: 'decks',
-      target: 'User',
-    },
+    { field: 'deck', target: 'Deck' },
+    { field: 'card', target: 'Card' },
+    { field: 'printing', target: 'Printing' },
   ],
-  fields: [{ field: 'role', type: 'String' }],
+  fields: [{ field: 'quantity', type: FieldType.Number }],
 }
 ```
 
-- `inverse` is available only for two-endpoint relationships.
-- `collection` exposes relationship records and works for two or more endpoints.
-- Endpoint fields form the composite identity; relationship records have no surrogate `id`.
-- Do not add an `Entity` root, `name`, `entity`, or universal reference to a relationship record.
+Declare every navigation on the Entity that exposes it with `type: FieldType.Collection`, an exact `target`, and an owner-relative `via` Graph path:
+
+```ts
+// Deck.fields
+{ field: 'entries', type: FieldType.Collection, target: 'DeckCardPrinting', via: 'DeckCardPrinting[deck = @]' }
+{ field: 'cards', type: FieldType.Collection, target: 'Card', via: 'entries.card' }
+{ field: 'printings', type: FieldType.Collection, target: 'Printing', via: 'entries.printing' }
+
+// Card.fields
+{ field: 'decks', type: FieldType.Collection, target: 'Deck', via: 'DeckCardPrinting[card = @].deck' }
+```
+
+- `@` is the owning Entity identity.
+- A `via` whose result is a relationship returns relationship records.
+- A `via` whose result is an endpoint Entity returns that Entity.
+- No reverse navigation is inferred; declare each direction separately.
+- Collection fields create no tables or columns and are not written through mutations.
+- Relationship records have no surrogate `id` and are not valid `Entity` reference targets.
 
 ## Query and writes
 
 ```ts
-deck.members
-deck.memberships
-deck.memberships[role = 'Editor'].user
+deck.entries
+deck.entries[quantity > 1]
+deck.cards
+deck.entries[quantity > 1].card
 deck.memberships $contains (user = $me $and role = 'Editor')
 ```
 
@@ -52,6 +58,6 @@ Relationship records support direct root reads and writes by required endpoint k
 
 ## Authorization
 
-Authorize relationship records on the relationship itself. Use relationship-record collections in entity policies when membership is the authorization fact. Do not introduce a surrogate relationship row id into policy SQL.
+Authorize relationship records on the relationship itself. Use derived collection fields in entity policies when membership is the authorization fact. Do not introduce a surrogate relationship row id into policy SQL.
 
 See [database](../../docs/server/database.mdx), [query language](../../docs/server/query-language.mdx), and [authorization](../../docs/server/authorization.mdx).

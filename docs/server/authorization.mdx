@@ -103,7 +103,7 @@ roles: {
 }
 ```
 
-Each entity and named relationship owns an action-keyed `security` declaration. A relationship endpoint may expose its records as an explicit `collection`, and that collection can participate in authorization with the same predicate grammar:
+Each entity and named relationship owns an action-keyed `security` declaration. An Entity may declare a derived `Collection` field, and that collection can participate in authorization with the same predicate grammar:
 
 ```ts
 Deck: {
@@ -174,28 +174,27 @@ const graph = new Graph({
   entities: [
     {
       name: 'Workspace',
-      fields: [],
+      fields: [
+        {
+          field: 'memberships',
+          target: 'WorkspaceMembership',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @]',
+        },
+        {
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'memberships.user',
+        },
+      ],
       security: {
         [Action.Read]: {
-          where: 'members $contains (id = $me)',
+          where: 'memberships $contains (user = $me)',
         },
         [Action.Update]: {
           grant: WorkspaceCapability.Edit,
-          where: {
-            field: 'members',
-            operator: '$contains',
-            filters: [{
-              operator: '$and',
-              filters: [
-                { field: 'id', operator: '$eq', value: '$me' },
-                {
-                  field: 'workspaceMembership.role',
-                  operator: '$eq',
-                  value: MembershipRole.Owner,
-                },
-              ],
-            }],
-          },
+          where: "memberships $contains (user = $me $and role = 'Owner')",
         },
       },
     },
@@ -204,8 +203,8 @@ const graph = new Graph({
   relationships: [{
     name: 'WorkspaceMembership',
     between: [
-      { field: 'workspace', target: 'Workspace', inverse: 'members' },
-      { field: 'user', target: 'User', inverse: 'workspaces' },
+      { field: 'workspace', target: 'Workspace' },
+      { field: 'user', target: 'User' },
     ],
     fields: [{ field: 'role', type: 'String' }],
   }],
@@ -221,50 +220,30 @@ const graph = new Graph({
 })
 ```
 
-`members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required. The read rule is where-only, so membership itself is the complete row qualifier; the update rule combines an editor capability with the resource-specific Owner role.
+`memberships` is a derived relationship-record collection. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required. The read rule is where-only, so membership itself is the complete row qualifier; the update rule combines an editor capability with the resource-specific Owner role.
 
-Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
+Relationship-owned scalar properties are addressed as fields on the relationship-record collection. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
 
 ```ts
 [Action.Update]: {
   grant: WorkspaceCapability.Edit,
   where: {
-    field: 'members',
+    field: 'memberships',
     operator: '$contains',
     filters: [{
       operator: '$and',
       filters: [
-        { field: 'id', operator: '$eq', value: '$me' },
-        {
-          field: 'workspaceMembership.role',
-          operator: '$eq',
-          value: MembershipRole.Owner,
-        },
+        { field: 'user', operator: '$eq', value: '$me' },
+        { field: 'role', operator: '$eq', value: MembershipRole.Owner },
       ],
     }],
   },
 }
 ```
 
-The equivalent structured predicate is:
+Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship fields. Derived entity collections and relationship-record collections both work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
 
-```ts
-{
-  field: 'members',
-  operator: '$contains',
-  filters: [{
-    operator: '$and',
-    filters: [
-      { field: 'id', operator: '$eq', value: '$me' },
-      { field: 'workspaceMembership.role', operator: '$eq', value: MembershipRole.Owner },
-    ],
-  }],
-}
-```
-
-Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections and named-relationship collections both work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
-
-Collection predicates are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
+Entity collection predicates are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. Direct relationship policies compile against the composite relationship row without a helper or surrogate id. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
 
 A resource role such as Owner, Editor, or Viewer is relationship data, not a Graph role. Applications may still enforce domain rules such as preventing removal of the last Owner in ordinary application transactions. Existing direct predicates such as `owner = $me` continue to use the unchanged policy path.
 

@@ -238,6 +238,7 @@ describe('EntityDefinitions', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
       'Array',
       'Boolean',
+      'Collection',
       'Date',
       'Entity',
       'Enum',
@@ -363,7 +364,73 @@ describe('EntityDefinitions', () => {
     for (const value of cases) expect(() => load(value)).toThrow()
   })
 
-  test('supports optional endpoint navigations and variable relationship arity', () => {
+  test('derives explicit Collection fields through via Graph paths', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'entries', target: 'DeckCardPrinting', type: 'Collection', via: 'DeckCardPrinting[deck = @]' },
+            { field: 'cards', target: 'Card', type: 'Collection', via: 'entries.card' },
+            { field: 'printings', target: 'Printing', type: 'Collection', via: 'entries.printing' },
+          ],
+          name: 'Deck',
+        },
+        {
+          fields: [
+            { field: 'decks', target: 'Deck', type: 'Collection', via: 'DeckCardPrinting[card = @].deck' },
+          ],
+          name: 'Card',
+        },
+        {
+          fields: [
+            { field: 'decks', target: 'Deck', type: 'Collection', via: 'DeckCardPrinting[printing = @].deck' },
+          ],
+          name: 'Printing',
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(entities.entity('Deck')?.collections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'explicit', name: 'entries', target: 'DeckCardPrinting' }),
+      expect.objectContaining({ kind: 'explicit', name: 'cards', target: 'Card' }),
+      expect.objectContaining({ kind: 'explicit', name: 'printings', target: 'Printing' }),
+    ]))
+    expect(entities.entity('Card')?.collections).toEqual([
+      expect.objectContaining({ kind: 'explicit', name: 'decks', target: 'Deck' }),
+    ])
+    expect(entities.entity('Printing')?.collections).toEqual([
+      expect.objectContaining({ kind: 'explicit', name: 'decks', target: 'Deck' }),
+    ])
+    expect(entities.entity('Deck')?.effectiveFields.some(field => field.name === 'entries')).toBe(false)
+    expect(entities.ddl.join('\n')).not.toContain('"entries"')
+    expect(() => load({
+      entities: [{
+        fields: [{ field: 'cards', target: 'Card', type: 'Collection', via: 'Missing[deck = @]' }],
+        name: 'Deck',
+      }, { fields: [], name: 'Card' }],
+    })).toThrow('unknown relationship')
+    expect(() => load({
+      entities: [{
+        fields: [{ field: 'cards', target: 'Printing', type: 'Collection', via: 'DeckCardPrinting[deck = @].card' }],
+        name: 'Deck',
+      }, { fields: [], name: 'Card' }],
+      relationships: [{
+        between: [{ field: 'deck', target: 'Deck' }, { field: 'card', target: 'Card' }],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('target')
+  })
+
+  test('supports optional inverse navigations and variable relationship arity', () => {
     const entities = load({
       entities: [
         { fields: [], name: 'Deck' },
@@ -374,15 +441,15 @@ describe('EntityDefinitions', () => {
       relationships: [
         {
           between: [
-            { collection: 'memberships', field: 'deck', inverse: 'members', target: 'Deck' },
-            { collection: 'deckMemberships', field: 'user', inverse: 'decks', target: 'User' },
+            { field: 'deck', inverse: 'members', target: 'Deck' },
+            { field: 'user', inverse: 'decks', target: 'User' },
           ],
           fields: [{ field: 'role', type: 'String' }],
           name: 'DeckMembership',
         },
         {
           between: [
-            { collection: 'entries', field: 'deck', target: 'Deck' },
+            { field: 'deck', target: 'Deck' },
             { field: 'card', target: 'Card' },
             { field: 'printing', target: 'Printing' },
           ],
@@ -394,24 +461,14 @@ describe('EntityDefinitions', () => {
     const deck = entities.entity('Deck')
     const user = entities.entity('User')
     expect(deck?.collections).toContainEqual(expect.objectContaining({
-      kind: 'relationship-records',
-      name: 'memberships',
-      target: 'DeckMembership',
-    }))
-    expect(deck?.collections).toContainEqual(expect.objectContaining({
       kind: 'relationship',
       name: 'members',
       target: 'User',
     }))
-    expect(deck?.collections).toContainEqual(expect.objectContaining({
-      kind: 'relationship-records',
-      name: 'entries',
-      target: 'DeckCardPrinting',
-    }))
     expect(user?.collections).toContainEqual(expect.objectContaining({
-      kind: 'relationship-records',
-      name: 'deckMemberships',
-      target: 'DeckMembership',
+      kind: 'relationship',
+      name: 'decks',
+      target: 'Deck',
     }))
     expect(entities.relationship('DeckCardPrinting')?.between).toHaveLength(3)
     expect(() => load({
