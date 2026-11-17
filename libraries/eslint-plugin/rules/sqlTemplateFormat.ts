@@ -49,13 +49,21 @@ function sqlComments(sql: string): SqlComment[] {
 }
 
 /**
+ * Result of formatting one SQL template body.
+ */
+export interface SqlFormatResult {
+  formatted: string,
+  unsupported?: string,
+}
+
+/**
  * Format one SQL template body through the PostgreSQL AST.
  * @param sql - SQL text with expression placeholders.
  * @param indent - Prefix for every formatted line.
  * @param quoteIdentifiers - Whether emitted identifiers should be quoted.
- * @returns Formatted SQL text.
+ * @returns Formatting result, including an unsupported construct when present.
  */
-export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): string {
+export function formatSQLResult(sql: string, indent = '', quoteIdentifiers = true): SqlFormatResult {
   const placeholders = new Map<string, string>()
   let safeSql = ''
   for (let index = 0; index < sql.length;) {
@@ -78,7 +86,7 @@ export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): st
   }
   try {
     const parsed = parseSync(safeSql) as any
-    if (!parsed.stmts?.length) return ''
+    if (!parsed.stmts?.length) return { formatted: '' }
     const comments = sqlComments(safeSql)
     let formatted = parsed.stmts.map((raw: any) => {
       const start = raw.stmt_location ?? 0
@@ -88,16 +96,27 @@ export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): st
     for (const [safe, original] of placeholders) {
       formatted = formatted.replace(new RegExp(safe, 'giu'), original)
     }
-    return formatted
+    return { formatted }
   } catch (error) {
-    if (error instanceof UnsupportedNodeError) {
-      process.emitWarning(`${error.message}; preserving the original SQL`)
-    }
     const lines = sql.split('\n')
     while (lines.length > 0 && (lines[0] as string).trim() === '') lines.shift()
     while (lines.length > 0 && (lines[lines.length - 1] as string).trim() === '') lines.pop()
-    return lines.map(line => `${indent}${line}`).join('\n')
+    return {
+      formatted: lines.map(line => `${indent}${line}`).join('\n'),
+      ...(error instanceof UnsupportedNodeError ? { unsupported: error.nodeType } : {}),
+    }
   }
+}
+
+/**
+ * Format one SQL template body through the PostgreSQL AST.
+ * @param sql - SQL text with expression placeholders.
+ * @param indent - Prefix for every formatted line.
+ * @param quoteIdentifiers - Whether emitted identifiers should be quoted.
+ * @returns Formatted SQL text.
+ */
+export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): string {
+  return formatSQLResult(sql, indent, quoteIdentifiers).formatted
 }
 
 /** One SQL comment with its absolute location. */
@@ -135,8 +154,6 @@ const ALIAS_STOP_WORDS = new Set([
 class LibpgPrinter {
   #usedComments = new Set<number>()
 
-  #warned = new Set<string>()
-
   /*
    * Node printers keyed by the raw PostgreSQL node tag. A node type without a
    * printer is emitted from source and reported instead of being dropped.
@@ -161,6 +178,13 @@ class LibpgPrinter {
     ['AlterTableStmt', (body, indent) => this.alterTable(body, indent)],
     ['CreateSchemaStmt', (body, indent) => this.createSchema(body, indent)],
     ['CreateTrigStmt', (body, indent) => this.createTrigger(body, indent)],
+    ['ClosePortalStmt', (body, indent) => this.closePortal(body, indent)],
+    ['CreateExtensionStmt', (body, indent) => this.createExtension(body, indent)],
+    ['CreatePolicyStmt', (body, indent) => this.createPolicy(body, indent)],
+    ['GrantStmt', (body, indent) => this.grant(body, indent)],
+    ['RenameStmt', (body, indent) => this.rename(body, indent)],
+    ['TransactionStmt', (body, indent) => this.transaction(body, indent)],
+    ['VariableShowStmt', (body, indent) => this.variableShow(body, indent)],
   ])
 
   /* Expression printers keyed by the raw PostgreSQL node tag. */
@@ -213,6 +237,11 @@ class LibpgPrinter {
     ['NamedArgExpr', body => `${this.quoteIdentifier(body.name)} => ${this.expr(body.arg)}`],
     ['GroupingFunc', body => `GROUPING(${(body.args ?? []).map((item: any) => this.expr(item)).join(', ')})`],
     ['SetToDefault', () => 'DEFAULT'],
+    ['Boolean', body => (body.boolval ? 'true' : 'false')],
+    ['GroupingSet', body => this.groupingSet(body)],
+    ['AccessPriv', body => this.accessPriv(body)],
+    ['RoleSpec', body => this.roleSpec(body)],
+    ['ObjectWithArgs', body => this.objectWithArgs(body)],
     ['String', body => body.sval ?? ''],
   ])
 
@@ -258,24 +287,14 @@ class LibpgPrinter {
   }
 
   /**
-   * Print an unhandled statement node from source.
+   * Reject a statement without a faithful printer.
    * @param node - Raw statement node.
-   * @param indent - Prefix for this block.
-   * @returns Unformatted statement lines.
+   * @param _args - Unsupported call arguments.
    */
-  unsupportedStatement(node: any, indent: string): string[] {
+  unsupportedStatement(node: any, ..._args: any[]): never {
+    void _args
     const tagged = this.tag(node)
-    const type = tagged?.[0] ?? 'unknown'
-    const location = this.startLocation(node)
-    const key = `${type}:${location}`
-    if (!this.#warned.has(key)) {
-      this.#warned.add(key)
-      const where = location >= 0 ? location : 'unknown location'
-      process.emitWarning(`SQL formatter: unsupported AST statement "${type}" at ${where}`)
-    }
-    const text = this.source.slice(this.start, this.end).trim()
-    if (!text) throw new UnsupportedNodeError(type)
-    return text.split('\n').map(line => `${indent}${line}`)
+    throw new UnsupportedNodeError(tagged?.[0] ?? 'unknown')
   }
 
   /**
@@ -1680,7 +1699,11 @@ class LibpgPrinter {
    */
   drop(body: any, indent: string): string[] {
     const types: Record<string, string> = {
+      OBJECT_FUNCTION: 'FUNCTION',
       OBJECT_INDEX: 'INDEX',
+      OBJECT_MATVIEW: 'MATERIALIZED VIEW',
+      OBJECT_PROCEDURE: 'PROCEDURE',
+      OBJECT_ROUTINE: 'ROUTINE',
       OBJECT_SCHEMA: 'SCHEMA',
       OBJECT_SEQUENCE: 'SEQUENCE',
       OBJECT_TABLE: 'TABLE',
@@ -1688,9 +1711,11 @@ class LibpgPrinter {
       OBJECT_VIEW: 'VIEW',
     }
     const names = (body.objects ?? []).map((object: any) => {
-      const items = this.tag(object)?.[1]?.items ?? []
-      return this.identifierList(items)
-    }).join(', ')
+      const value = this.tag(object)?.[1]
+      if (value?.items) return this.identifierList(value.items)
+      if (value?.objname) return this.objectWithArgs(value)
+      return ''
+    }).filter(Boolean).join(', ')
     const type = types[body.removeType]
     if (!type) return [this.unsupported(`DROP ${body.removeType}`, body)]
     const ifExists = body.missing_ok ? ' IF EXISTS' : ''
@@ -1843,6 +1868,200 @@ class LibpgPrinter {
       case 'AT_ChangeOwner': return `OWNER TO ${name}`
       default: return this.unsupported(`ALTER TABLE ${body.subtype}`, node)
     }
+  }
+
+  /**
+   * Format a CLOSE statement.
+   * @param body - ClosePortalStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  closePortal(body: any, indent: string): string[] {
+    return [`${indent}CLOSE ${body.portalname ? this.quoteIdentifier(body.portalname) : 'ALL'}`]
+  }
+
+  /**
+   * Format a CREATE EXTENSION statement.
+   * @param body - CreateExtensionStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createExtension(body: any, indent: string): string[] {
+    const options = (body.options ?? []).map((node: any) => {
+      const option = this.tag(node)?.[1]
+      if (!option) return ''
+      const value = this.tag(option.arg)?.[1]
+      return option.defname === 'schema'
+        ? `SCHEMA ${this.quoteIdentifier(value?.sval ?? '')}`
+        : `${option.defname.toUpperCase()} ${value?.sval ?? ''}`
+    }).filter(Boolean)
+    return [
+      `${indent}CREATE EXTENSION ${body.if_not_exists ? 'IF NOT EXISTS ' : ''}${this.quoteIdentifier(body.extname)}` +
+        `${options.length ? ` WITH ${options.join(' ')}` : ''}`,
+    ]
+  }
+
+  /**
+   * Format a CREATE POLICY statement.
+   * @param body - CreatePolicyStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createPolicy(body: any, indent: string): string[] {
+    const roles = (body.roles ?? []).map((node: any) => this.roleSpec(this.tag(node)?.[1] ?? node)).join(', ')
+    const lines = [
+      `${indent}CREATE POLICY ${this.quoteIdentifier(body.policy_name)} ON ${this.relationName(body.table)}`,
+      `${indent}  AS ${body.permissive ? 'PERMISSIVE' : 'RESTRICTIVE'}`,
+      `${indent}  FOR ${String(body.cmd_name ?? 'all').toUpperCase()}`,
+      `${indent}  TO ${roles || 'PUBLIC'}`,
+    ]
+    if (body.qual) lines.push(`${indent}  USING (${this.expr(body.qual)})`)
+    if (body.with_check) lines.push(`${indent}  WITH CHECK (${this.expr(body.with_check)})`)
+    return lines
+  }
+
+  /**
+   * Format a GRANT or REVOKE statement.
+   * @param body - GrantStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  grant(body: any, indent: string): string[] {
+    const command = body.is_grant ? 'GRANT' : 'REVOKE'
+    const privileges = (body.privileges ?? []).length > 0
+      ? body.privileges.map((node: any) => this.accessPriv(this.tag(node)?.[1] ?? node)).join(', ')
+      : 'ALL'
+    const objectType = this.objectType(body.objtype)
+    const objects = (body.objects ?? []).map((node: any) => this.grantObject(node)).join(', ')
+    const plural = objectType === 'TABLE' ? 'TABLES'
+      : objectType === 'SEQUENCE' ? 'SEQUENCES'
+        : objectType === 'FUNCTION' ? 'FUNCTIONS' : objectType
+    const target = body.targtype === 'ACL_TARGET_ALL_IN_SCHEMA'
+      ? `ALL ${plural} IN SCHEMA ${objects}`
+      : body.targtype === 'ACL_TARGET_DEFAULTS' ? 'DEFAULT PRIVILEGES'
+        : `${objectType} ${objects}`
+    const grantees = (body.grantees ?? []).map((node: any) => this.roleSpec(this.tag(node)?.[1] ?? node)).join(', ')
+    const behavior = body.is_grant ? '' : body.behavior === 'DROP_CASCADE' ? ' CASCADE' : ''
+    return [`${indent}${command} ${privileges} ON ${target} ${body.is_grant ? 'TO' : 'FROM'} ${grantees}${behavior}`]
+  }
+
+  /**
+   * Format a grant object.
+   * @param node - Grant object.
+   * @returns Object text.
+   */
+  grantObject(node: any): string {
+    const tagged = this.tag(node)
+    if (tagged?.[0] === 'ObjectWithArgs') return this.objectWithArgs(tagged[1])
+    return this.qualifiedName([node]) || this.expr(node)
+  }
+
+  /**
+   * Format a POSTGRES object type keyword.
+   * @param type - ObjectType enum.
+   * @returns SQL object type.
+   */
+  objectType(type: string): string {
+    if (type === 'OBJECT_TABLE') return 'TABLE'
+    if (type === 'OBJECT_SEQUENCE') return 'SEQUENCE'
+    if (type === 'OBJECT_SCHEMA') return 'SCHEMA'
+    if (type === 'OBJECT_FUNCTION') return 'FUNCTION'
+    if (type === 'OBJECT_DATABASE') return 'DATABASE'
+    if (type === 'OBJECT_DOMAIN') return 'DOMAIN'
+    if (type === 'OBJECT_TYPE') return 'TYPE'
+    return type?.replace(/^OBJECT_/u, '') ?? ''
+  }
+
+  /**
+   * Format a role specification.
+   * @param body - RoleSpec body.
+   * @returns Role text.
+   */
+  roleSpec(body: any): string {
+    if (body.roletype === 'ROLESPEC_PUBLIC') return 'PUBLIC'
+    if (body.roletype === 'ROLESPEC_CURRENT_USER') return 'CURRENT_USER'
+    if (body.roletype === 'ROLESPEC_SESSION_USER') return 'SESSION_USER'
+    if (body.roletype === 'ROLESPEC_CURRENT_ROLE') return 'CURRENT_ROLE'
+    return this.quoteIdentifier(body.rolename ?? '')
+  }
+
+  /**
+   * Format an access privilege.
+   * @param body - AccessPriv body.
+   * @returns Privilege text.
+   */
+  accessPriv(body: any): string {
+    const columns = body.cols?.length ? ` (${this.identifierList(body.cols)})` : ''
+    return `${String(body.priv_name ?? 'ALL').toUpperCase()}${columns}`
+  }
+
+  /**
+   * Format a function or object name with arguments.
+   * @param body - ObjectWithArgs body.
+   * @returns Object text.
+   */
+  objectWithArgs(body: any): string {
+    const name = this.qualifiedName(body.objname ?? [])
+    const args = (body.objargs ?? []).map((node: any) => this.formatTypeName(this.tag(node)?.[1] ?? node)).join(', ')
+    return `${name}(${args})`
+  }
+
+  /**
+   * Format a grouping set.
+   * @param body - GroupingSet body.
+   * @returns Grouping set text.
+   */
+  groupingSet(body: any): string {
+    const content = (body.content ?? []).map((node: any) => this.expr(node))
+    if (body.kind === 'GROUPING_SET_EMPTY') return '()'
+    if (body.kind === 'GROUPING_SET_ROLLUP') return `ROLLUP (${content.join(', ')})`
+    if (body.kind === 'GROUPING_SET_CUBE') return `CUBE (${content.join(', ')})`
+    return `GROUPING SETS (${content.join(', ')})`
+  }
+
+  /**
+   * Format a RENAME statement.
+   * @param body - RenameStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  rename(body: any, indent: string): string[] {
+    return [
+      `${indent}ALTER ${this.objectType(body.renameType)} ${this.relationName(body.relation)}` +
+        ` RENAME TO ${this.quoteIdentifier(body.newname)}`,
+    ]
+  }
+
+  /**
+   * Format a transaction-control statement.
+   * @param body - TransactionStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  transaction(body: any, indent: string): string[] {
+    const kinds: Record<string, string> = {
+      TRANS_STMT_BEGIN: 'BEGIN',
+      TRANS_STMT_COMMIT: 'COMMIT',
+      TRANS_STMT_COMMIT_PREPARED: 'COMMIT PREPARED',
+      TRANS_STMT_PREPARE: 'PREPARE TRANSACTION',
+      TRANS_STMT_RELEASE: 'RELEASE',
+      TRANS_STMT_ROLLBACK: 'ROLLBACK',
+      TRANS_STMT_ROLLBACK_PREPARED: 'ROLLBACK PREPARED',
+      TRANS_STMT_ROLLBACK_TO: 'ROLLBACK TO',
+      TRANS_STMT_SAVEPOINT: 'SAVEPOINT',
+    }
+    const keyword = kinds[body.kind] ?? body.kind
+    return [`${indent}${keyword}${body.savepoint_name ? ` ${this.quoteIdentifier(body.savepoint_name)}` : ''}`]
+  }
+
+  /**
+   * Format a SHOW statement.
+   * @param body - VariableShowStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  variableShow(body: any, indent: string): string[] {
+    return [`${indent}SHOW ${body.name}`]
   }
 
   /**
@@ -2363,7 +2582,10 @@ class PlPgSqlPrinter {
       case 'PLpgSQL_stmt_raise': {
         const levels: Record<number, string> = { 17: 'LOG', 18: 'NOTICE', 19: 'WARNING', 20: 'INFO', 21: 'EXCEPTION' }
         const level = levels[body.elog_level] ?? 'NOTICE'
-        return [`${indent}RAISE ${level} '${String(body.message ?? '').replace(/'/gu, "''")}';`]
+        const params = (body.params ?? [])
+          .map((param: any) => this.expression(param.PLpgSQL_expr?.query ?? '')).filter(Boolean)
+        const suffix = params.length > 0 ? `, ${params.join(', ')}` : ''
+        return [`${indent}RAISE ${level} '${String(body.message ?? '').replace(/'/gu, "''")}'${suffix};`]
       }
       case 'PLpgSQL_stmt_execsql': {
         const query = body.sqlstmt?.PLpgSQL_expr?.query ?? ''
@@ -2371,6 +2593,12 @@ class PlPgSqlPrinter {
         const formatted = formatSQL(query, `${indent}`)
         if (!formatted) return []
         const lines = formatted.split('\n')
+        if (body.into && body.target) {
+          const target = this.plTarget(body.target)
+          const from = lines.findIndex(line => /^\s*FROM\b/u.test(line))
+          if (from >= 0) lines.splice(from, 0, `${indent}INTO ${target}`)
+          else lines.push(`${indent}INTO ${target}`)
+        }
         lines[lines.length - 1] = `${lines[lines.length - 1]};`
         return lines
       }
@@ -2448,7 +2676,7 @@ class PlPgSqlPrinter {
       }
       case 'PLpgSQL_stmt_dynexecute': {
         const query = this.expression(body.query?.PLpgSQL_expr?.query ?? '')
-        const into = body.into ? ` INTO ${body.into}` : ''
+        const into = body.into && body.target ? ` INTO ${this.plTarget(body.target)}` : ''
         const params = (body.params ?? [])
           .map((param: any) => this.expression(param.PLpgSQL_expr?.query ?? '')).join(', ')
         return [`${indent}EXECUTE ${query}${into}${params ? ` USING ${params}` : ''};`]
@@ -2517,6 +2745,19 @@ class PlPgSqlPrinter {
   }
 
   /**
+   * Format a PL/pgSQL assignment target.
+   * @param target - PLpgSQL_row, PLpgSQL_var, or PLpgSQL_rec.
+   * @returns Comma-separated target names.
+   */
+  plTarget(target: any): string {
+    const row = target?.PLpgSQL_row
+    if (row?.fields?.length) return row.fields.map((field: any) => field.name).join(', ')
+    const variable = target?.PLpgSQL_var ?? target?.PLpgSQL_rec
+    if (variable?.refname) return variable.refname
+    throw new UnsupportedNodeError('PLpgSQL target')
+  }
+
+  /**
    * Format one PL/pgSQL expression.
    * @param query - Expression SQL.
    * @returns Inline expression.
@@ -2577,8 +2818,16 @@ export const sqlTemplateFormat: Rule.RuleModule = {
         const dedented = rawLines.map(line => (
           line.trim() === '' ? '' : line.startsWith(rawIndent) ? line.slice(rawIndent.length) : line
         )).join('\n')
-        const formatted = formatSQL(dedented, `${baseIndent}  `)
-        let body = `\n${formatted}\n${baseIndent}`
+        const result = formatSQLResult(dedented, `${baseIndent}  `)
+        if (result.unsupported) {
+          context.report({
+            data: { construct: result.unsupported },
+            messageId: 'unsupportedSql',
+            node,
+          })
+          return
+        }
+        let body = `\n${result.formatted}\n${baseIndent}`
         placeholders.forEach(({ interpolation, placeholder }) => {
           body = body.replace(placeholder, interpolation)
         })
@@ -2599,6 +2848,7 @@ export const sqlTemplateFormat: Rule.RuleModule = {
     fixable: 'code',
     messages: {
       formatSql: 'SQL template is not in canonical format.',
+      unsupportedSql: 'SQL formatting is not supported for {{construct}}.',
     },
     schema: [],
     type: 'layout',

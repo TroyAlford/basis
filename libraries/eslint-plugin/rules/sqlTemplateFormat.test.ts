@@ -254,6 +254,47 @@ describe('formatSQL', () => {
     })
   })
 
+  describe('plpgsql targets', () => {
+    test('preserves EXECUTE INTO targets and RAISE parameters', () => {
+      expect(formatSQL(`
+        create function f() returns void as $$
+        declare present text;
+        begin
+          select 'x' into present from t;
+          raise exception 'bad %', present;
+        end $$ language plpgsql
+      `)).toMatchIndented(`
+        CREATE FUNCTION f() RETURNS VOID AS $$
+        DECLARE
+          present TEXT;
+        BEGIN
+          SELECT 'x'
+          INTO present
+          FROM "t";
+          RAISE EXCEPTION 'bad %', present;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+      expect(formatSQL(`
+        create function f() returns text as $$
+        declare present text;
+        begin
+          execute 'select 1' into present using 1;
+          return present;
+        end $$ language plpgsql
+      `)).toMatchIndented(`
+        CREATE FUNCTION f() RETURNS TEXT AS $$
+        DECLARE
+          present TEXT;
+        BEGIN
+          EXECUTE 'select 1' INTO present USING 1;
+          RETURN PRESENT;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+    })
+  })
+
   describe('operators', () => {
     test('keeps PostgreSQL JSON operators intact', () => {
       expect(formatSQL('select * from widgets where data @> $1 and tags <@ $2')).toMatchIndented(`
@@ -529,8 +570,8 @@ describe('formatSQL', () => {
       `)
     })
 
-    test('preserves a statement with an unhandled nested node', () => {
-      const sql = 'select a, count(*) from t group by grouping sets ((a), ())'
+    test('reports an unsupported statement without emitting a fix', () => {
+      const sql = 'create operator ^ (leftarg = int, rightarg = int, procedure = int4eq)'
       const formatted = formatSQL(sql)
       expect(formatted).toBe(sql)
       expect(() => parseSync(formatted)).not.toThrow()
@@ -554,8 +595,8 @@ describe('formatSQL', () => {
       }
     })
 
-    test('emits an unhandled statement from source and reports it', () => {
-      const sql = 'create policy p on widgets using (true)'
+    test('keeps unsupported SQL unchanged for the rule boundary', () => {
+      const sql = 'create operator ^ (leftarg = int, rightarg = int, procedure = int4eq)'
       expect(formatSQL(sql)).toBe(sql)
     })
 
@@ -563,6 +604,45 @@ describe('formatSQL', () => {
       expect(formatSQL('select row(1, 2)')).toMatchIndented(`
         SELECT ROW(1, 2)
       `)
+    })
+  })
+
+  describe('actual corpus statements', () => {
+    test('formats DROP FUNCTION and grants', () => {
+      expect(formatSQL('drop function if exists basis.has_role(text, text) cascade')).toMatchIndented(`
+        DROP FUNCTION IF EXISTS "basis"."has_role"(TEXT, TEXT) CASCADE
+      `)
+      expect(formatSQL('grant usage on schema app to role1, role2')).toMatchIndented(`
+        GRANT USAGE ON SCHEMA "app" TO "role1", "role2"
+      `)
+      expect(formatSQL('grant select, insert on all tables in schema app to public')).toMatchIndented(`
+        GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA "app" TO PUBLIC
+      `)
+      expect(formatSQL('revoke all on function basis.f(text, text) from public cascade')).toMatchIndented(`
+        REVOKE ALL ON FUNCTION "basis"."f"(TEXT, TEXT) FROM PUBLIC CASCADE
+      `)
+    })
+
+    test('formats extension, policy, transaction, and session statements', () => {
+      expect(formatSQL('create extension if not exists pg_trgm with schema public')).toMatchIndented(`
+        CREATE EXTENSION IF NOT EXISTS "pg_trgm" WITH SCHEMA "public"
+      `)
+      expect(formatSQL(`
+        create policy p on widgets as permissive for select to public using (true)
+      `)).toMatchIndented(`
+        CREATE POLICY "p" ON "widgets"
+          AS PERMISSIVE
+          FOR SELECT
+          TO PUBLIC
+          USING (true)
+      `)
+      expect(formatSQL('alter table widgets rename to other')).toMatchIndented(`
+        ALTER TABLE "widgets" RENAME TO "other"
+      `)
+      expect(formatSQL('begin')).toMatchIndented('BEGIN')
+      expect(formatSQL('savepoint x')).toMatchIndented('SAVEPOINT "x"')
+      expect(formatSQL('show search_path')).toMatchIndented('SHOW search_path')
+      expect(formatSQL('close cursor_name')).toMatchIndented('CLOSE "cursor_name"')
     })
   })
 
@@ -745,10 +825,12 @@ const query = sql\`(
     expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
   })
 
-  test('does not emit a partial fix for an unhandled nested node', () => {
-    const sql = 'select a, count(*) from t group by grouping sets ((a), ())'
+  test('reports an unsupported construct and does not emit a fix', () => {
+    const sql = 'create operator ^ (leftarg = int, rightarg = int, procedure = int4eq)'
     const output = lint(`sql\`${sql}\``)
     expect(output.output).toContain(sql)
+    expect(output.messages.some(message => message.messageId === 'unsupportedSql')).toBe(true)
+    expect(output.messages.some(message => message.fix !== undefined)).toBe(false)
     expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
   })
 
