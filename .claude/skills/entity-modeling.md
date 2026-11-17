@@ -39,6 +39,7 @@ Declare every navigation on the Entity that exposes it with `type: FieldType.Col
 
 - `@` is the owning Entity identity.
 - A `via` bracket filter uses full Graph predicate syntax and must identify the owner endpoint, for example `DeckCardPrinting[deck = @ $and quantity > 1]`. A collection alias can add another record filter, for example `largeEntries[quantity > 5].printing`.
+- A `via` options group can set `$orderBy`, `$limit`, and `$offset`; query directives override these defaults and query filters add to the `via` filter.
 - A `via` whose result is a relationship returns relationship records.
 - A `via` whose result is an endpoint Entity returns that Entity.
 - No reverse navigation is inferred; declare each direction separately.

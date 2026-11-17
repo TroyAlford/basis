@@ -244,7 +244,7 @@ const referencePaths = [
 
 ### Relationship-record collections
 
-An Entity may declare a derived `Collection` field with a `via` Graph path to expose relationship records or project an endpoint Entity. The `via` filter uses full predicate syntax and must identify the owner endpoint with `@`, for example `DeckCardPrinting[deck = @ $and quantity > 1]`. Collection aliases may add another relationship-record filter, for example `largeEntries[quantity > 5].printing`. Relationship records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets. Collection fields create no storage.
+An Entity may declare a derived `Collection` field with a `via` Graph path to expose relationship records or project an endpoint Entity. The `via` filter uses full predicate syntax and must identify the owner endpoint with `@`, for example `DeckCardPrinting[deck = @ $and quantity > 1]`. Collection aliases may add another relationship-record filter, for example `largeEntries[quantity > 5].printing`. A `via` options group can declare `$orderBy`, `$limit`, and `$offset`; query-time directives override those defaults, and query-time filters add to the `via` filter. Relationship records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets. Collection fields create no storage.
 
 ```ts
 deck.memberships
