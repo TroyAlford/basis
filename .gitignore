@@ -1,6 +1,7 @@
 **/.DS_Store
 **/.playwright-local/**
 **/coverage
+**/.cache
 **/dist/**
 **/node_modules
 **/temp
