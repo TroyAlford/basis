@@ -62,16 +62,16 @@ describe('entityDefinitionFormat', () => {
           inverse: 'author',
           target: 'Article',
           type: 'Inverse',
-        }],
+        }, { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' }],
         name: 'User',
       }, {
-        fields: [],
+        fields: [{ field: 'members', target: 'User', type: 'Collection', via: 'Membership[campaign = @].user' }],
         name: 'Campaign',
       }],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [
           { field: 'role', type: 'String' },
@@ -92,7 +92,7 @@ describe('entityDefinitionFormat', () => {
     expect(output.output).toContain('"relationships": [')
     expect(output.output).toContain('"between": [')
     expect(output.output).toContain('"field": "user"')
-    expect(output.output).toContain('"inverse": "campaigns"')
+    expect(output.output).toContain('"via": "Membership[user = @].campaign"')
     expect(output.output).toContain('"field": "role"')
     expect(output.output.indexOf('"entities"')).toBeLessThan(output.output.indexOf('"relationships"'))
   })

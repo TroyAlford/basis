@@ -12,10 +12,38 @@ function invalidAuthoring(): void {
   new Graph({ entities: [{ fields: [{ field: 'bad', type: 'Unknown' }], name: 'Bad' }] })
   // @ts-expect-error a reference field requires a target entity
   new Graph({ entities: [{ fields: [{ field: 'owner', type: FieldType.Entity }], name: 'Bad' }] })
-  // @ts-expect-error inverse cardinality must be One or Many
-  new Graph({ entities: [{ fields: [{ cardinality: 'Sometimes', field: 'owners', inverse: 'owner', target: 'User', type: FieldType.Inverse }], name: 'Bad' }] }) // eslint-disable-line @stylistic/max-len
-  // @ts-expect-error relationship-owned fields cannot be entity references
-  new Graph({ relationships: [{ between: [{ field: 'user', inverse: 'teams', target: 'User' }, { field: 'team', inverse: 'members', target: 'User' }], fields: [{ field: 'owner', target: 'User', type: FieldType.Entity }], name: 'Membership' }] }) // eslint-disable-line @stylistic/max-len
+  new Graph({
+    entities: [{
+      fields: [{
+        // @ts-expect-error inverse cardinality must be One or Many
+        cardinality: 'Sometimes',
+        field: 'owners',
+        inverse: 'owner',
+        target: 'User',
+        type: FieldType.Inverse,
+      }],
+      name: 'Bad',
+    }],
+  }) // eslint-disable-line @stylistic/max-len
+  new Graph({
+    relationships: [{
+      between: [{
+        field: 'user',
+        target: 'User',
+      },
+      {
+        field: 'team',
+        target: 'User',
+      }],
+      fields: [{
+        field: 'owner',
+        target: 'User',
+        // @ts-expect-error relationship-owned fields cannot be entity references
+        type: FieldType.Entity,
+      }],
+      name: 'Membership',
+    }],
+  }) // eslint-disable-line @stylistic/max-len
 }
 
 void invalidAuthoring
@@ -66,7 +94,16 @@ describe('Graph authoring types', () => {
   test('accepts relationship-owned fields in validation member predicates', () => {
     const graph = new Graph({
       entities: [{
-        fields: [{ field: 'label', type: FieldType.String }],
+        fields: [{
+          field: 'label',
+          type: FieldType.String,
+        },
+        {
+          field: 'workspaces',
+          target: 'Workspace',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
         name: 'User',
       }, {
         constraints: [{
@@ -85,13 +122,22 @@ describe('Graph authoring types', () => {
           type: Constraint.Validation,
           where: 'members $contains (label = workspaceMembership.role)',
         }],
-        fields: [{ field: 'title', type: FieldType.String }],
+        fields: [{
+          field: 'title',
+          type: FieldType.String,
+        },
+        {
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @].user',
+        }],
         name: 'Workspace',
       }],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: FieldType.String }],
         name: 'WorkspaceMembership',

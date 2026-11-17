@@ -135,10 +135,17 @@ const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
         inverse: 'author',
         target: 'Article',
         type: 'Inverse',
-      }],
+      }, { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' }],
       name: 'User',
+    }, {
+      fields: [{
+        field: 'members',
+        target: 'User',
+        type: 'Collection',
+        via: 'Membership[campaign = @].user',
+      }],
+      name: 'Campaign',
     },
-    { fields: [], name: 'Campaign' },
     {
       fields: [
         { field: 'author', inverse: 'articles', target: 'User', type: 'Entity' },
@@ -150,8 +157,8 @@ const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
   relationships: [{
     between: [
-      { field: 'user', inverse: 'campaigns', target: 'User' },
-      { field: 'campaign', inverse: 'members', target: 'Campaign' },
+      { field: 'user', target: 'User' },
+      { field: 'campaign', target: 'Campaign' },
     ],
     fields: [
       { field: 'role', type: 'String' },
@@ -659,7 +666,7 @@ describe('SQL.where', () => {
     })).toThrow('Collection options must precede filters')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[name != 'Ada'].name"],
-    })).toThrow('Collection directives must end the path')
+    })).not.toThrow()
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:1}', 'members{$offset:1}'],
     })).toThrow('more than one directive path')
@@ -691,15 +698,27 @@ describe('SQL.where', () => {
           fields: [
             { field: 'id', format: 'UUID' },
             { field: 'role', type: 'String' },
+            { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' },
           ],
           name: 'User',
+        }, {
+          fields: [{
+            field: 'id',
+            format: 'UUID',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'Membership[campaign = @].user',
+          }],
+          name: 'Campaign',
         },
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
       ],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'Membership',

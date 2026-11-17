@@ -198,10 +198,17 @@ const relationshipOntology = {
         inverse: 'author',
         target: 'Article',
         type: 'Inverse',
-      }],
+      }, { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' }],
       name: 'User',
+    }, {
+      fields: [{
+        field: 'members',
+        target: 'User',
+        type: 'Collection',
+        via: 'Membership[campaign = @].user',
+      }],
+      name: 'Campaign',
     },
-    { fields: [], name: 'Campaign' },
     {
       fields: [
         { field: 'author', inverse: 'articles', target: 'User', type: 'Entity' },
@@ -213,8 +220,8 @@ const relationshipOntology = {
   ],
   relationships: [{
     between: [
-      { field: 'user', inverse: 'campaigns', target: 'User' },
-      { field: 'campaign', inverse: 'members', target: 'Campaign' },
+      { field: 'user', target: 'User' },
+      { field: 'campaign', target: 'Campaign' },
     ],
     fields: [
       { field: 'role', type: 'String' },
@@ -276,8 +283,8 @@ describe('EntityDefinitions', () => {
     expect(entities.relationships).toHaveLength(1)
     expect(entities.relationship('Membership')).toMatchObject({
       between: [
-        { field: 'user', inverse: 'campaigns', target: 'User' },
-        { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        { field: 'user', target: 'User' },
+        { field: 'campaign', target: 'Campaign' },
       ],
       name: 'Membership',
     })
@@ -370,7 +377,14 @@ describe('EntityDefinitions', () => {
         {
           fields: [
             { field: 'entries', target: 'DeckCardPrinting', type: 'Collection', via: 'DeckCardPrinting[deck = @]' },
+            {
+              field: 'largeEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 1]',
+            },
             { field: 'cards', target: 'Card', type: 'Collection', via: 'entries.card' },
+            { field: 'largePrintings', target: 'Printing', type: 'Collection', via: 'largeEntries.printing' },
             { field: 'printings', target: 'Printing', type: 'Collection', via: 'entries.printing' },
           ],
           name: 'Deck',
@@ -400,7 +414,14 @@ describe('EntityDefinitions', () => {
     })
     expect(entities.entity('Deck')?.collections).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'explicit', name: 'entries', target: 'DeckCardPrinting' }),
+      expect.objectContaining({
+        kind: 'explicit',
+        name: 'largeEntries',
+        target: 'DeckCardPrinting',
+        viaFilter: { field: 'quantity', operator: '$gt', value: 1 },
+      }),
       expect.objectContaining({ kind: 'explicit', name: 'cards', target: 'Card' }),
+      expect.objectContaining({ kind: 'explicit', name: 'largePrintings', target: 'Printing' }),
       expect.objectContaining({ kind: 'explicit', name: 'printings', target: 'Printing' }),
     ]))
     expect(entities.entity('Card')?.collections).toEqual([
@@ -476,6 +497,46 @@ describe('EntityDefinitions', () => {
         name: 'DeckCardPrinting',
       }],
     })).toThrow('projection')
+    expect(() => load({
+      entities: [{
+        fields: [{
+          field: 'entries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[quantity > 1]',
+        }],
+        name: 'Deck',
+      }, { fields: [], name: 'Card' }, { fields: [], name: 'Printing' }],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('owner endpoint')
+    expect(() => load({
+      entities: [{
+        fields: [{
+          field: 'entries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @ $or quantity > 1]',
+        }],
+        name: 'Deck',
+      }, { fields: [], name: 'Card' }, { fields: [], name: 'Printing' }],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('top-level')
   })
 
   test('allows inherited Collection owners and rejects incompatible aliases', () => {
@@ -543,19 +604,32 @@ describe('EntityDefinitions', () => {
     })).toThrow('owner')
   })
 
-  test('supports optional inverse navigations and variable relationship arity', () => {
+  test('supports variable relationship arity without endpoint navigation', () => {
     const entities = load({
-      entities: [
-        { fields: [], name: 'Deck' },
-        { fields: [], name: 'User' },
-        { fields: [], name: 'Card' },
-        { fields: [], name: 'Printing' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'DeckMembership[deck = @].user',
+        }],
+        name: 'Deck',
+      }, {
+        fields: [{
+          field: 'decks',
+          target: 'Deck',
+          type: 'Collection',
+          via: 'DeckMembership[user = @].deck',
+        }],
+        name: 'User',
+      },
+      { fields: [], name: 'Card' },
+      { fields: [], name: 'Printing' }],
       relationships: [
         {
           between: [
-            { field: 'deck', inverse: 'members', target: 'Deck' },
-            { field: 'user', inverse: 'decks', target: 'User' },
+            { field: 'deck', target: 'Deck' },
+            { field: 'user', target: 'User' },
           ],
           fields: [{ field: 'role', type: 'String' }],
           name: 'DeckMembership',
@@ -574,12 +648,12 @@ describe('EntityDefinitions', () => {
     const deck = entities.entity('Deck')
     const user = entities.entity('User')
     expect(deck?.collections).toContainEqual(expect.objectContaining({
-      kind: 'relationship',
+      kind: 'explicit',
       name: 'members',
       target: 'User',
     }))
     expect(user?.collections).toContainEqual(expect.objectContaining({
-      kind: 'relationship',
+      kind: 'explicit',
       name: 'decks',
       target: 'Deck',
     }))
@@ -598,24 +672,36 @@ describe('EntityDefinitions', () => {
         between: [
           { field: 'deck', inverse: 'members', target: 'Deck' },
           { field: 'user', inverse: 'decks', target: 'User' },
-          { field: 'other', inverse: 'others', target: 'Deck' },
         ],
         fields: [],
         name: 'DeckMembership',
       }],
-    })).toThrow('inverse navigations require exactly two endpoints')
+    })).toThrow('unknown relationship endpoint property "inverse"')
   })
 
   test('rejects invalid relationship endpoints, names, fields and alias collisions', () => {
     const base = {
-      entities: [
-        { fields: [], name: 'User' },
-        { fields: [], name: 'Campaign' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'campaigns',
+          target: 'Campaign',
+          type: 'Collection',
+          via: 'Membership[user = @].campaign',
+        }],
+        name: 'User',
+      }, {
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'Membership[campaign = @].user',
+        }],
+        name: 'Campaign',
+      }],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [],
         name: 'Membership',
@@ -635,8 +721,8 @@ describe('EntityDefinitions', () => {
       relationships: [{
         ...base.relationships[0],
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'Missing' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'Missing' },
+          { field: 'campaign', target: 'Campaign' },
         ],
       }],
     })).toThrow('unknown target entity "Missing"')
@@ -645,25 +731,11 @@ describe('EntityDefinitions', () => {
       relationships: [{
         ...base.relationships[0],
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'user', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'user', target: 'Campaign' },
         ],
       }],
     })).toThrow('endpoint fields must differ')
-    expect(() => load({
-      ...base,
-      relationships: [{
-        ...base.relationships[0],
-        between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'campaigns', target: 'Campaign' },
-        ],
-      }],
-    })).toThrow('endpoint inverse names must differ')
-    expect(() => load({
-      ...base,
-      entities: [{ fields: [{ field: 'campaigns', type: 'String' }], name: 'User' }, base.entities[1]],
-    })).toThrow('conflicts with a field')
     expect(() => load({
       ...base,
       relationships: [{
@@ -687,8 +759,8 @@ describe('EntityDefinitions', () => {
       relationships: [{
         ...base.relationships[0],
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'user', inverse: 'members', target: 'User' },
+          { field: 'user', target: 'User' },
+          { field: 'user', target: 'User' },
         ],
       }],
     })).toThrow('endpoint fields must differ')
@@ -908,21 +980,37 @@ describe('EntityDefinitions', () => {
 
   test('supports abstract relationship targets and distinct self-relations', () => {
     const entities = load({
-      entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Person' },
-        { extends: 'Person', fields: [], name: 'Member' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'id',
+          format: 'UUID',
+        },
+        {
+          field: 'mentors',
+          target: 'Person',
+          type: 'Collection',
+          via: 'Mentorship[member = @].mentor',
+        },
+        {
+          field: 'mentees',
+          target: 'Person',
+          type: 'Collection',
+          via: 'Mentorship[mentor = @].member',
+        }],
+        name: 'Person',
+      },
+      { extends: 'Person', fields: [], name: 'Member' }],
       relationships: [{
         between: [
-          { field: 'mentor', inverse: 'mentees', target: 'Person' },
-          { field: 'member', inverse: 'mentors', target: 'Person' },
+          { field: 'mentor', target: 'Person' },
+          { field: 'member', target: 'Person' },
         ],
         fields: [{ field: 'since', type: 'Date' }],
         name: 'Mentorship',
       }],
     })
     expect(entities.entity('Person')?.collections.map(collection => collection.name))
-      .toEqual(['mentees', 'mentors'])
+      .toEqual(['mentors', 'mentees'])
     expect(entities.relationships[0]?.between.map(endpoint => endpoint.target))
       .toEqual(['Person', 'Person'])
     const ddl = entities.ddl.join('\n')
@@ -945,11 +1033,19 @@ describe('EntityDefinitions', () => {
               target: 'Article',
               type: 'Inverse',
             },
+            { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' },
           ],
           name: 'User',
         },
-        { extends: 'User', fields: [], name: 'SystemUser' },
-        { fields: [], name: 'Campaign' },
+        { extends: 'User', fields: [], name: 'SystemUser' }, {
+          fields: [{
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'Membership[campaign = @].user',
+          }],
+          name: 'Campaign',
+        },
         {
           fields: [{ field: 'author', inverse: 'articles', target: 'User', type: 'Entity' }],
           name: 'Article',
@@ -957,8 +1053,8 @@ describe('EntityDefinitions', () => {
       ],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'Membership',
@@ -975,7 +1071,7 @@ describe('EntityDefinitions', () => {
       entities: model.entities.map(entity => (entity.name === 'SystemUser'
         ? { ...entity, fields: [{ field: 'campaigns', type: 'String' }] }
         : entity)),
-    })).toThrow('conflicts with an inherited navigation')
+    })).toThrow(/conflicts with an inherited navigation|already owned/)
   })
 
   test('emits nullable fields without NOT NULL while preserving defaults', () => {
@@ -1178,14 +1274,35 @@ describe('EntityDefinitions', () => {
 
   test('normalizes named relationship uniqueness constraints', () => {
     const entities = load({
-      entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'id',
+          format: 'UUID',
+        },
+        {
+          field: 'campaigns',
+          target: 'Campaign',
+          type: 'Collection',
+          via: 'Membership[user = @].campaign',
+        }],
+        name: 'User',
+      }, {
+        fields: [{
+          field: 'id',
+          format: 'UUID',
+        },
+        {
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'Membership[campaign = @].user',
+        }],
+        name: 'Campaign',
+      }],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         constraints: [{
           description: 'Each user may join a campaign once.',

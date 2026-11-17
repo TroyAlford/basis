@@ -124,8 +124,28 @@ export interface GraphOptions {
 /** The system security ontology shared by every graph. */
 const SYSTEM_DOCUMENT: AuthoredDocument = {
   entities: [
-    { fields: [], name: 'User' },
-    { fields: [{ field: 'description', type: 'String' }], name: 'Role' },
+    {
+      fields: [{
+        field: 'roles',
+        target: 'Role',
+        type: 'Collection',
+        via: 'UserRole[user = @].role',
+      }],
+      name: 'User',
+    },
+    {
+      fields: [{
+        field: 'description',
+        type: 'String',
+      },
+      {
+        field: 'users',
+        target: 'User',
+        type: 'Collection',
+        via: 'UserRole[role = @].user',
+      }],
+      name: 'Role',
+    },
     {
       fields: [
         { field: 'provider', type: 'String' },
@@ -138,8 +158,8 @@ const SYSTEM_DOCUMENT: AuthoredDocument = {
   ],
   relationships: [{
     between: [
-      { field: 'user', inverse: 'roles', target: 'User' },
-      { field: 'role', inverse: 'users', target: 'Role' },
+      { field: 'user', target: 'User' },
+      { field: 'role', target: 'Role' },
     ],
     fields: [],
     name: 'UserRole',
@@ -734,14 +754,15 @@ export class Graph {
       resolve: value => this.#policyEntity(value),
     })
     const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-    const prefix = collection.kind === 'relationship'
-      ? `${lowerFirst(collection.relationship.name)}.`
-      : ''
+    const relationship = collection.kind === 'explicit' && collection.targetEndpoint
+      ? collection.relationship
+      : undefined
+    const prefix = relationship === undefined ? '' : `${lowerFirst(relationship.name)}.`
     if ('kind' in resolved) {
-      if (collection.kind === 'relationship' && normalized.startsWith(prefix)) {
+      if (relationship !== undefined && normalized.startsWith(prefix)) {
         throw new Error(
           'Graph: unknown relationship field ' +
-          `"${collection.relationship.name}.${normalized.slice(prefix.length)}"`,
+          `"${relationship.name}.${normalized.slice(prefix.length)}"`,
         )
       }
       throw new Error(`Graph: unknown field "${target.name}.${path}"`)
@@ -915,7 +936,9 @@ export class Graph {
       root: rootAliasName,
       target: targetAlias,
     })
-    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
+    const relationship = collection.kind === 'explicit' && collection.targetEndpoint
+      ? collection.relationship
+      : undefined
     const resolverAlias = sql.targetAlias ?? sql.rootAlias
     const resolver = this.#policyResolver(
       target,

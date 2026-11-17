@@ -31,7 +31,7 @@ No input form gets its own executor or database path. A query is either compiled
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
 
-Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, nested and composed collection comparisons over inverse and named N:M navigations, native Array/opaque JSON operations, the `$me` actor sentinel, and field-to-field comparison operands.
+Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, nested and composed collection comparisons over inverse and derived Collection navigations, native Array/opaque JSON operations, the `$me` actor sentinel, and field-to-field comparison operands.
 
 ## Input forms
 
@@ -244,7 +244,7 @@ const referencePaths = [
 
 ### Relationship-record collections
 
-An Entity may declare a derived `Collection` field with a `via` Graph path to expose relationship records or project an endpoint Entity. Relationship records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets. Collection fields create no storage.
+An Entity may declare a derived `Collection` field with a `via` Graph path to expose relationship records or project an endpoint Entity. The `via` filter uses full predicate syntax and must identify the owner endpoint with `@`, for example `DeckCardPrinting[deck = @ $and quantity > 1]`. Collection aliases may add another relationship-record filter, for example `largeEntries[quantity > 5].printing`. Relationship records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets. Collection fields create no storage.
 
 ```ts
 deck.memberships
@@ -510,7 +510,7 @@ The gate covers:
 
 - root, inherited, and descendant scalar fields, including abstract-query leaves;
 - singular reference paths, reference identities, nullable/missing references, and descendant reference targets;
-- inverse and named N:M collections, relationship properties, literal `$empty`/`$contains`/`$all`, and explicit `@`/relative member paths;
+- inverse and derived Collection navigations, relationship properties, literal `$empty`/`$contains`/`$all`, and explicit `@`/relative member paths;
 - native Array literal membership, set/sequence equality, `@` member predicates, and opaque JSON containment;
 - two-valued NULL behavior, source diagnostic offsets, finite reference depth, array operand bounds, and query work budgets;
 - stable source ordering, pagination, collection-preview bindings, and real PostgreSQL result parity.

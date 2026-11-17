@@ -164,7 +164,7 @@ export function resolveCollectionMember(
   options: PathResolutionOptions,
 ): CollectionMemberResolution | PathFailure {
   const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-  if (collection.kind === 'relationship') {
+  if (collection.kind === 'explicit' && collection.targetEndpoint) {
     const prefix = `${lowerFirst(collection.relationship.name)}.`
     if (normalized.startsWith(prefix)) {
       const property = normalized.slice(prefix.length)

@@ -683,11 +683,28 @@ describe('DDL schema planning', () => {
       entities: [{ fields: [], name: 'Campaign' }, { fields: [], name: 'User' }],
     }))
     const desired = EntityDefinitions.load(JSON.stringify({
-      entities: [{ fields: [], name: 'Campaign' }, { fields: [], name: 'User' }],
+      entities: [{
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'Membership[campaign = @].user',
+        }],
+        name: 'Campaign',
+      },
+      {
+        fields: [{
+          field: 'campaigns',
+          target: 'Campaign',
+          type: 'Collection',
+          via: 'Membership[user = @].campaign',
+        }],
+        name: 'User',
+      }],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [],
         name: 'Membership',

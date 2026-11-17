@@ -121,6 +121,7 @@ const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
           target: 'Pet',
           type: 'Inverse',
         },
+        { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' },
       ],
       name: 'User',
     },
@@ -132,13 +133,20 @@ const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
       ],
       name: 'Pet',
+    }, {
+      fields: [{
+        field: 'members',
+        target: 'User',
+        type: 'Collection',
+        via: 'Membership[campaign = @].user',
+      }],
+      name: 'Campaign',
     },
-    { fields: [], name: 'Campaign' },
   ],
   relationships: [{
     between: [
-      { field: 'user', inverse: 'campaigns', target: 'User' },
-      { field: 'campaign', inverse: 'members', target: 'Campaign' },
+      { field: 'user', target: 'User' },
+      { field: 'campaign', target: 'Campaign' },
     ],
     fields: [
       { field: 'role', type: 'String' },

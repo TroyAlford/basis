@@ -223,11 +223,6 @@ export interface AuthoredEntity {
 export interface AuthoredRelationshipEndpoint {
   /** Endpoint field name, in camelCase. */
   readonly field: string,
-  /**
-   * Optional legacy inverse navigation name on the target entity.
-   * @deprecated Declare an Entity `Collection` field with `via` instead.
-   */
-  readonly inverse?: string,
   /** Referenced entity name. */
   readonly target: string,
 }

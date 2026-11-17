@@ -245,7 +245,15 @@ Navigation ownership belongs to the Entity that exposes it. Declare a derived `C
 { "field": "decks", "type": "Collection", "target": "Deck", "via": "DeckCardPrinting[printing = @].deck" }
 ```
 
-`@` is the owning Entity identity. Every direction is independently opt-in; no reverse navigation is inferred. A collection without a projection endpoint returns relationship records; a collection with a projection endpoint returns the referenced Entity. Collection fields are query-only and do not appear in DDL, generated contracts, or writes.
+`@` is the owning Entity identity. The bracketed `via` filter uses the full Graph predicate syntax relative to the relationship record; it must contain exactly one top-level owner comparison such as `deck = @`, and may combine additional record predicates:
+
+```json
+{ "field": "largeEntries", "type": "Collection", "target": "DeckCardPrinting", "via": "DeckCardPrinting[deck = @ $and quantity > 1]" }
+{ "field": "largePrintings", "type": "Collection", "target": "Printing", "via": "largeEntries.printing" }
+{ "field": "hugePrintings", "type": "Collection", "target": "Printing", "via": "largeEntries[quantity > 5].printing" }
+```
+
+Every direction is independently opt-in; no reverse navigation is inferred. A collection without a projection endpoint returns relationship records; a collection with a projection endpoint returns the referenced Entity. Collection fields are query-only and do not appear in DDL, generated contracts, or writes.
 
 Duplicate endpoint tuples fail with SQLSTATE `23505`; a missing endpoint target fails with `23503`. Relationship tables are unordered sets of endpoint tuples and do not have fake `ordered`, `unique`, or `storage` flags. The entity tables, `TableDefinition`, phased foreign-key reconciliation, and query compiler all use the same canonical metadata.
 

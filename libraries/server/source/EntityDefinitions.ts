@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { Operator } from './Operator'
 import { comparableFieldType, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilterScope, Filter } from './Predicate'
@@ -230,11 +231,6 @@ export type FieldDefinition =
 export interface RelationshipEndpointDefinition {
   /** Local endpoint column name, in camelCase. */
   readonly field: string,
-  /**
-   * Optional legacy navigation of related entities exposed on the target entity.
-   * @deprecated Declare an Entity `Collection` field with `via` instead.
-   */
-  readonly inverse?: string,
   /** Referenced entity or supported ancestor. */
   readonly target: string,
 }
@@ -300,20 +296,6 @@ export interface DerivedSingularDefinition {
   readonly target: string,
 }
 
-/** A collection navigation derived from one relationship endpoint. */
-export interface RelationshipDerivedCollectionDefinition {
-  /** Authored endpoint index that owns this navigation. */
-  readonly endpoint: 0 | 1,
-  /** Derivation-kind discriminator. */
-  readonly kind: 'relationship',
-  /** Navigation name exposed on the target entity. */
-  readonly name: string,
-  /** The named relationship that owns this navigation. */
-  readonly relationship: RelationshipDefinition,
-  /** Entity type returned by the navigation. */
-  readonly target: string,
-}
-
 /** An explicit collection declared as an Entity field and resolved through `via`. */
 export interface ExplicitCollectionDefinition {
   /** Derivation-kind discriminator. */
@@ -332,13 +314,14 @@ export interface ExplicitCollectionDefinition {
   readonly targetEndpoint?: RelationshipEndpointDefinition,
   /** Authored owner-relative Graph path. */
   readonly via: string,
+  /** Additional relationship-record predicate declared inside `via`. */
+  readonly viaFilter?: Filter,
 }
 
 /** One collection navigation available in the query model. */
 export type DerivedCollectionDefinition =
   | ExplicitCollectionDefinition
   | InverseDerivedCollectionDefinition
-  | RelationshipDerivedCollectionDefinition
 
 /** One effective physical field and its owning entity table. */
 export type EffectiveFieldDefinition =
@@ -1676,21 +1659,11 @@ function parseRelationship(
   }
   const endpoints = value.between.map(candidate => parseRelationshipEndpoint(name, candidate, byName))
   const endpointFields = new Set<string>()
-  const inverseNames = new Set<string>()
   for (const endpoint of endpoints) {
     if (endpointFields.has(endpoint.field)) {
       throw invalid(`relationship "${name}" endpoint fields must differ`)
     }
     endpointFields.add(endpoint.field)
-    if (endpoint.inverse !== undefined) {
-      if (endpoints.length !== 2) {
-        throw invalid(`relationship "${name}" inverse navigations require exactly two endpoints`)
-      }
-      if (inverseNames.has(endpoint.inverse)) {
-        throw invalid(`relationship "${name}" endpoint inverse names must differ`)
-      }
-      inverseNames.add(endpoint.inverse)
-    }
   }
   if (!Array.isArray(value.fields)) {
     throw invalid(`relationship "${name}" must define a fields array`)
@@ -1733,15 +1706,9 @@ function parseRelationshipEndpoint(
   if (!isRecord(value)) {
     throw invalid(`relationship "${relationshipName}" endpoint must be an object`)
   }
-  assertKnownKeys(value, ['field', 'inverse', 'target'], 'relationship endpoint')
+  assertKnownKeys(value, ['field', 'target'], 'relationship endpoint')
   if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
     throw invalid(`relationship "${relationshipName}" endpoint field must be a camelCase identifier`)
-  }
-  if (
-    value.inverse !== undefined
-    && (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse))
-  ) {
-    throw invalid(`relationship "${relationshipName}" endpoint inverse must be a camelCase identifier`)
   }
   if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
     throw invalid(`relationship "${relationshipName}" endpoint target must be a PascalCase entity name`)
@@ -1757,7 +1724,6 @@ function parseRelationshipEndpoint(
   validatePhysicalIdentifier(`${relationshipName}_${value.field}_idx`, `relationship "${relationshipName}" index`)
   return {
     field: value.field,
-    ...(value.inverse === undefined ? {} : { inverse: value.inverse as string }),
     target: value.target,
   }
 }
@@ -1791,6 +1757,215 @@ function parseRelationshipField(
     throw invalid(`relationship "${relationshipName}" may not declare a field named "id"`)
   }
   return parsed.field
+}
+
+/**
+ * Normalize one full `via` filter expression against a relationship record view.
+ * @param owner - Entity declaring the collection.
+ * @param field - Collection field.
+ * @param relationship - Relationship traversed by the collection.
+ * @param source - Authored filter text.
+ * @returns The owner endpoint and any remaining record filter.
+ */
+function normalizeViaFilter(
+  owner: string,
+  field: CollectionFieldDefinition,
+  relationship: RelationshipDefinition,
+  source: string,
+): { filter?: Filter, ownerEndpoint: RelationshipEndpointDefinition } {
+  const view = relationshipEntity(relationship)
+  const resolve = (name: string): QueryFieldDefinition => {
+    if (name === '@' || name === '@.id') {
+      return { name, type: FieldType.ID }
+    }
+    const candidate = view.effectiveFields.find(fieldDefinition => fieldDefinition.name === name)
+    if (!candidate) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via references unknown field ` +
+        `"${relationship.name}.${name}"`,
+      )
+    }
+    return candidate.type === FieldType.Entity
+      ? { name: candidate.name, type: FieldType.ID }
+      : candidate
+  }
+  let normalized: Filter | undefined
+  try {
+    normalized = QueryNormalizer.normalize(
+      view,
+      source,
+      resolve,
+      () => undefined,
+      () => undefined,
+    )
+  } catch (error) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" has an invalid via filter: ` +
+      `${(error as Error).message}`,
+    )
+  }
+  if (normalized === undefined) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" via filter must identify its owner endpoint with @`,
+    )
+  }
+  const extracted = extractViaOwner(normalized, relationship)
+  if (extracted.owners.length !== 1 || extracted.ownerEndpoint === undefined) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" via filter must identify exactly one ` +
+      'owner endpoint with @',
+    )
+  }
+  return {
+    ...(extracted.filter === undefined ? {} : { filter: extracted.filter }),
+    ownerEndpoint: extracted.ownerEndpoint,
+  }
+}
+
+/**
+ * Normalize an additional filter attached to an intermediate collection alias.
+ * @param owner - Entity declaring the outer collection.
+ * @param field - Outer collection field.
+ * @param relationship - Relationship traversed by the collection.
+ * @param source - Authored filter text.
+ * @returns The normalized additional predicate, or undefined.
+ */
+function normalizeViaAdditionalFilter(
+  owner: string,
+  field: CollectionFieldDefinition,
+  relationship: RelationshipDefinition,
+  source: string,
+): Filter | undefined {
+  const view = relationshipEntity(relationship)
+  const resolve = (name: string): QueryFieldDefinition => {
+    const candidate = view.effectiveFields.find(fieldDefinition => fieldDefinition.name === name)
+    if (!candidate) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via references unknown field ` +
+        `"${relationship.name}.${name}"`,
+      )
+    }
+    return candidate.type === FieldType.Entity
+      ? { name: candidate.name, type: FieldType.ID }
+      : candidate
+  }
+  let normalized: Filter | undefined
+  try {
+    normalized = QueryNormalizer.normalize(
+      view,
+      source,
+      resolve,
+      () => undefined,
+      () => undefined,
+    )
+  } catch (error) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" has an invalid via filter: ` +
+      `${(error as Error).message}`,
+    )
+  }
+  if (normalized !== undefined && containsOwnerField(normalized)) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" via alias filter cannot repeat @`,
+    )
+  }
+  return normalized ?? undefined
+}
+
+/**
+ * Combine two optional via predicates.
+ * @param left - Existing predicate.
+ * @param right - Added predicate.
+ * @returns The combined predicate, or undefined.
+ */
+function combineViaFilters(left: Filter | undefined, right: Filter | undefined): Filter | undefined {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return { filters: [left, right], operator: Operator.Logical.And }
+}
+
+/**
+ * Remove the owner-identity comparison from a normalized via filter.
+ * @param filter - Normalized filter.
+ * @param relationship - Relationship traversed by the collection.
+ * @returns The owner endpoint and remaining record filter.
+ */
+function extractViaOwner(
+  filter: Filter,
+  relationship: RelationshipDefinition,
+): { filter?: Filter, ownerEndpoint?: RelationshipEndpointDefinition, owners: readonly string[] } {
+  const owners: string[] = []
+  const direct = ownerEndpointOf(filter, relationship)
+  if (direct !== undefined) return { ownerEndpoint: direct, owners: [direct.field] }
+  if ('filters' in filter && filter.operator === Operator.Logical.And) {
+    const remaining: Filter[] = []
+    let ownerEndpoint: RelationshipEndpointDefinition | undefined
+    for (const child of filter.filters) {
+      const result = extractViaOwner(child, relationship)
+      owners.push(...result.owners)
+      if (result.ownerEndpoint !== undefined) {
+        if (ownerEndpoint !== undefined) {
+          throw invalid('collection via filter must contain exactly one owner identity comparison')
+        }
+        ownerEndpoint = result.ownerEndpoint
+      }
+      if (result.filter !== undefined) remaining.push(result.filter)
+    }
+    const rest = remaining.length === 0
+      ? undefined
+      : remaining.length === 1
+        ? remaining[0]
+        : { filters: remaining, operator: Operator.Logical.And }
+    return {
+      ...(rest === undefined ? {} : { filter: rest }),
+      ...(ownerEndpoint === undefined ? {} : { ownerEndpoint }),
+      owners,
+    }
+  }
+  if (containsOwnerField(filter)) {
+    throw invalid('collection via @ must appear in a top-level $and owner identity comparison')
+  }
+  return { filter, owners }
+}
+
+/**
+ * Resolve a direct owner-identity comparison.
+ * @param filter - Candidate filter.
+ * @param relationship - Relationship traversed by the collection.
+ * @returns Matching endpoint, when the filter compares it with `@`.
+ */
+function ownerEndpointOf(
+  filter: Filter,
+  relationship: RelationshipDefinition,
+): RelationshipEndpointDefinition | undefined {
+  if (!('field' in filter) || !('value' in filter)
+    || filter.operator !== Operator.Comparison.Equal) return undefined
+  const value = filter.value
+  if (isFieldOperand(value)) {
+    const path = value.$field
+    if (path === '@' || path === '@.id') {
+      return relationship.between.find(endpoint => endpoint.field === filter.field)
+    }
+    const endpoint = relationship.between.find(candidate => candidate.field === path)
+    if (endpoint && (filter.field === '@' || filter.field === '@.id')) return endpoint
+  }
+  return undefined
+}
+
+/**
+ * Whether a filter contains a remaining `@` field operand.
+ * @param filter - Candidate filter.
+ * @returns `true` when `@` remains outside a direct owner comparison.
+ */
+function containsOwnerField(filter: Filter): boolean {
+  if ('field' in filter) {
+    if (filter.field === '@' || filter.field === '@.id') return true
+    return 'value' in filter
+      && isFieldOperand(filter.value)
+      && (filter.value.$field === '@' || filter.value.$field === '@.id')
+  }
+  if ('filters' in filter) return filter.filters.some(containsOwnerField)
+  return false
 }
 
 /** One parsed segment of a `via` Graph path. */
@@ -1935,24 +2110,6 @@ function deriveNavigations(
       }
     }
   }
-  for (const relationship of relationships) {
-    const endpoints = relationship.between
-    for (const [index, endpoint] of endpoints.entries()) {
-      if (endpoint.inverse !== undefined) {
-        const remote = endpoints[index === 0 ? 1 : 0]
-        if (remote === undefined) {
-          throw invalid(`relationship "${relationship.name}" inverse requires two endpoints`)
-        }
-        addDirect(endpoint.target, {
-          endpoint: index as 0 | 1,
-          kind: 'relationship',
-          name: endpoint.inverse,
-          relationship,
-          target: remote.target,
-        })
-      }
-    }
-  }
   const relationshipsByName = new Map(
     relationships.map(relationship => [relationship.name, relationship]),
   )
@@ -2013,28 +2170,23 @@ function deriveNavigations(
     let ownerEndpoint: RelationshipEndpointDefinition
     let projection: readonly string[]
     const directRelationship = relationshipsByName.get(first.name)
+    let viaFilter: Filter | undefined
     if (directRelationship) {
       if (first.filter === undefined) {
         throw invalid(
           `collection field "${owner}.${field.name}" via relationship must identify its owner endpoint with @`,
         )
       }
-      const match = /^\s*([a-z][A-Za-z0-9]*)\s*=\s*@(?:\.id)?\s*$/u.exec(first.filter)
-      if (!match) {
-        throw invalid(
-          `collection field "${owner}.${field.name}" via filter must be "endpoint = @"`,
-        )
-      }
-      const endpoint = directRelationship.between.find(candidate => candidate.field === match[1])
-      if (!endpoint) {
-        throw invalid(
-          `collection field "${owner}.${field.name}" via uses unknown endpoint ` +
-          `"${match[1]}" on relationship "${directRelationship.name}"`,
-        )
-      }
-      validateOwnerEndpoint(owner, field, endpoint, directRelationship)
+      const parsedFilter = normalizeViaFilter(
+        owner,
+        field,
+        directRelationship,
+        first.filter,
+      )
+      validateOwnerEndpoint(owner, field, parsedFilter.ownerEndpoint, directRelationship)
       relationship = directRelationship
-      ownerEndpoint = endpoint
+      ownerEndpoint = parsedFilter.ownerEndpoint
+      viaFilter = parsedFilter.filter
       projection = segments.slice(1).map(segment => {
         if (segment.filter !== undefined) {
           throw invalid(`collection field "${owner}.${field.name}" via cannot filter a projection`)
@@ -2049,10 +2201,15 @@ function deriveNavigations(
           `or collection "${first.name}"`,
         )
       }
-      if (first.filter !== undefined) {
-        throw invalid(`collection field "${owner}.${field.name}" via cannot filter an intermediate collection`)
-      }
       const resolvedSource = resolveCollection(source.owner, source.field)
+      if (first.filter !== undefined) {
+        viaFilter = combineViaFilters(
+          resolvedSource.viaFilter,
+          normalizeViaAdditionalFilter(owner, field, resolvedSource.relationship, first.filter),
+        )
+      } else {
+        viaFilter = resolvedSource.viaFilter
+      }
       validateOwnerEndpoint(owner, field, resolvedSource.ownerEndpoint, resolvedSource.relationship)
       relationship = resolvedSource.relationship
       ownerEndpoint = resolvedSource.ownerEndpoint
@@ -2102,6 +2259,7 @@ function deriveNavigations(
       ...(targetEndpoint === undefined ? {} : { targetEndpoint }),
       target,
       via: field.via,
+      ...(viaFilter === undefined ? {} : { viaFilter }),
     }
     resolvingCollections.delete(cacheKey)
     resolvedCollections.set(cacheKey, resolved)

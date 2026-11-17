@@ -197,20 +197,36 @@ describe('Graph', () => {
     const membershipGraph = new Graph({
       entities: [
         {
-          fields: [{ field: 'title', type: 'String' }],
+          fields: [{
+            field: 'title',
+            type: 'String',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'WorkspaceMembership[workspace = @].user',
+          }],
           name: 'Workspace',
           security: {
             [Action.Read]: {
               where: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
             },
           },
+        }, {
+          fields: [{
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -249,15 +265,30 @@ describe('Graph', () => {
     const source = 'members $contains (id = $me)'
     const relationships = [{
       between: [
-        { field: 'workspace', inverse: 'members', target: 'Workspace' },
-        { field: 'user', inverse: 'workspaces', target: 'User' },
+        { field: 'workspace', target: 'Workspace' },
+        { field: 'user', target: 'User' },
       ],
       fields: [{ field: 'role', type: 'String' }],
       name: 'WorkspaceMembership',
     }] as const
     const withSecurity = (where: string | Readonly<Record<string, unknown>>) => [
-      { fields: [{ field: 'title', type: 'String' }], name: 'Workspace', security: { [Action.Read]: { where } } },
-      { fields: [], name: 'User' },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'members', target: 'User', type: 'Collection', via: 'WorkspaceMembership[workspace = @].user' },
+        ],
+        name: 'Workspace',
+        security: { [Action.Read]: { where } },
+      },
+      {
+        fields: [{
+          field: 'workspaces',
+          target: 'Workspace',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
+        name: 'User',
+      },
     ] as const
     const stringGraph = new Graph({
       entities: withSecurity(source),
@@ -310,16 +341,32 @@ describe('Graph', () => {
     const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
       entities: [
         {
-          fields: [{ field: 'title', type: 'String' }],
+          fields: [{
+            field: 'title',
+            type: 'String',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'WorkspaceMembership[workspace = @].user',
+          }],
           name: 'Workspace',
           security: { [action]: { where: predicate } },
+        }, {
+          fields: [{
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -340,19 +387,35 @@ describe('Graph', () => {
     const membershipGraph = new Graph({
       entities: [
         {
-          fields: [{ field: 'title', type: 'String' }],
+          fields: [{
+            field: 'title',
+            type: 'String',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'WorkspaceMembership[workspace = @].user',
+          }],
           name: 'Workspace',
           security: {
             [Action.Create]: { where: 'members $contains (id = $me)' },
             [Action.Read]: Security.Public,
           },
+        }, {
+          fields: [{
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [],
         name: 'WorkspaceMembership',
@@ -372,16 +435,32 @@ describe('Graph', () => {
     const emptyGraph = new Graph({
       entities: [
         {
-          fields: [{ field: 'title', type: 'String' }],
+          fields: [{
+            field: 'title',
+            type: 'String',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'WorkspaceMembership[workspace = @].user',
+          }],
           name: 'Workspace',
           security: { [Action.Read]: { where: 'members $empty' } },
+        }, {
+          fields: [{
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -396,18 +475,30 @@ describe('Graph', () => {
     const combined = new Graph({
       entities: [
         {
-          fields: [],
+          fields: [{
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'WorkspaceMembership[workspace = @].user',
+          }],
           name: 'Workspace',
           security: {
             [Action.Read]: { where: 'members $empty $or members $contains (id = $me)' },
           },
+        }, {
+          fields: [{
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -419,25 +510,42 @@ describe('Graph', () => {
 
   test('composes inherited membership and direct owner grants', () => {
     const composed = new Graph({
-      entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Resource' },
-        {
-          extends: 'Resource',
-          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
-          name: 'Workspace',
-          security: {
-            [Action.Read]: [
-              { where: 'owner = $me' },
-              { where: 'members $contains (id = $me)' },
-            ],
-          },
+      entities: [{
+        fields: [{
+          field: 'title',
+          type: 'String',
         },
-        { fields: [], name: 'User' },
-      ],
+        {
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @].user',
+        }],
+        name: 'Resource',
+      },
+      {
+        extends: 'Resource',
+        fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+        name: 'Workspace',
+        security: {
+          [Action.Read]: [
+            { where: 'owner = $me' },
+            { where: 'members $contains (id = $me)' },
+          ],
+        },
+      }, {
+        fields: [{
+          field: 'workspaces',
+          target: 'Resource',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
+        name: 'User',
+      }],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Resource' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Resource' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -491,18 +599,36 @@ describe('Graph', () => {
       [Action.Update]: { grant: Capability.Manage },
     }
     const capabilityGraph = new Graph({
-      entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace', security },
-        { fields: [], name: 'User' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'title',
+          type: 'String',
+        },
+        {
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @].user',
+        }],
+        name: 'Workspace',
+        security,
+      }, {
+        fields: [{
+          field: 'workspaces',
+          target: 'Workspace',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
+        name: 'User',
+      }],
       grants: {
         [Capability.Manage]: { description: 'Manage campaigns' },
         [Capability.View]: { description: 'View campaigns' },
       },
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -663,6 +789,7 @@ describe('Graph', () => {
               target: 'Project',
               type: 'Inverse',
             },
+            { field: 'members', target: 'User', type: 'Collection', via: 'WorkspaceMembership[workspace = @].user' },
           ],
           name: 'Workspace',
           security: {
@@ -692,13 +819,20 @@ describe('Graph', () => {
           ],
           name: 'Task',
           security: { [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' } },
+        }, {
+          fields: [{
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [],
         name: 'WorkspaceMembership',
@@ -721,7 +855,12 @@ describe('Graph', () => {
     }
     const whereOnly = new Graph({
       entities: [{
-        fields: [],
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @].user',
+        }],
         name: 'Workspace',
         security: {
           [Action.Read]: {
@@ -742,11 +881,20 @@ describe('Graph', () => {
             },
           },
         },
-      }, { fields: [], name: 'User' }],
+      },
+      {
+        fields: [{
+          field: 'workspaces',
+          target: 'Workspace',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
+        name: 'User',
+      }],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -767,14 +915,27 @@ describe('Graph', () => {
 
   test('applies explicit public security to named relationship tables', () => {
     const relationshipSecurity = new Graph({
-      entities: [
-        { fields: [], name: 'Workspace' },
-        { fields: [], name: 'User' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @].user',
+        }],
+        name: 'Workspace',
+      }, {
+        fields: [{
+          field: 'workspaces',
+          target: 'Workspace',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
+        name: 'User',
+      }],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -789,24 +950,50 @@ describe('Graph', () => {
 
   test('compiles relationship membership policies against composite endpoint columns', () => {
     const relationshipSecurity = new Graph({
-      entities: [
-        { fields: [], name: 'Deck' },
-        { fields: [], name: 'User' },
-        { fields: [], name: 'Printing' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'printings',
+          target: 'Printing',
+          type: 'Collection',
+          via: 'DeckPrinting[deck = @].printing',
+        },
+        {
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'DeckMembership[deck = @].user',
+        }],
+        name: 'Deck',
+      }, {
+        fields: [{
+          field: 'decks',
+          target: 'Deck',
+          type: 'Collection',
+          via: 'DeckMembership[user = @].deck',
+        }],
+        name: 'User',
+      }, {
+        fields: [{
+          field: 'decks',
+          target: 'Deck',
+          type: 'Collection',
+          via: 'DeckPrinting[printing = @].deck',
+        }],
+        name: 'Printing',
+      }],
       relationships: [
         {
           between: [
-            { field: 'deck', inverse: 'members', target: 'Deck' },
-            { field: 'user', inverse: 'decks', target: 'User' },
+            { field: 'deck', target: 'Deck' },
+            { field: 'user', target: 'User' },
           ],
           fields: [],
           name: 'DeckMembership',
         },
         {
           between: [
-            { field: 'deck', inverse: 'printings', target: 'Deck' },
-            { field: 'printing', inverse: 'decks', target: 'Printing' },
+            { field: 'deck', target: 'Deck' },
+            { field: 'printing', target: 'Printing' },
           ],
           fields: [{ field: 'quantity', type: 'Number' }],
           name: 'DeckPrinting',

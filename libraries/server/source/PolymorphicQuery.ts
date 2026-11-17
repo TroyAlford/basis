@@ -1,6 +1,7 @@
 import { collectionSqlRelation } from './CollectionSql'
-import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition } from './EntityDefinitions'
+import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
+import { Operator } from './Operator'
 import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
@@ -31,6 +32,8 @@ const PUBLIC_PROJECTION_BUDGET: ProjectionBudget = {
 
 /** Options accepted by a polymorphic entity query. */
 export interface PolymorphicQueryOptions {
+  /** Additional normalized predicates combined with `where`. */
+  readonly additionalWhere?: readonly Filter[],
   /** Internal unique alias prefix for correlated projected collections. */
   readonly aliasPrefix?: string,
   /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
@@ -43,6 +46,8 @@ export interface PolymorphicQueryOptions {
   readonly orderBy?: OrderBy,
   /** Internal full-record projection budget; public queries use the standard budget. */
   readonly projectionBudget?: ProjectionBudget,
+  /** Internal fully-qualified order expressions for record collections. */
+  readonly rawOrder?: readonly string[],
   /** Internal raw root condition used to correlate a projected collection. */
   readonly rawWhere?: string,
   /**
@@ -700,8 +705,7 @@ class QueryProjection {
     if (targetName !== 'Entity' && !target) throw new Error(`Unknown target entity "${targetName}"`)
     const targetAlias = targetName === 'Entity' ? undefined : this.#nextAlias('ct')
     const rootAlias = this.#nextAlias('cr')
-    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
-    const relationshipAlias = collection.kind === 'relationship' || collection.kind === 'explicit'
+    const relationshipAlias = collection.kind === 'explicit'
       ? this.#nextAlias('cj')
       : undefined
     const sql = collectionSqlRelation(collection, `"${parentAlias}".${quote('id')}`, {
@@ -711,20 +715,11 @@ class QueryProjection {
     })
     const relation = sql.relation
     const condition = sql.condition
-    let parentId: string
-    if (collection.kind === 'inverse') {
-      parentId = targetAlias === undefined
+    const parentId = collection.kind === 'inverse'
+      ? targetAlias === undefined
         ? `"${rootAlias}".${quote('id')}`
         : `"${targetAlias}".${quote(collection.reference.column)}`
-    } else if (collection.kind === 'explicit') {
-      parentId = targetAlias === undefined
-        ? `"${rootAlias}".${quote('id')}`
-        : `"${targetAlias}".${quote('id')}`
-    } else {
-      parentId = `"${relationshipAlias as string}".${quote(
-        `${relationship?.between[collection.endpoint].field as string}.id`,
-      )}`
-    }
+      : `"${relationshipAlias as string}".${quote(`${collection.ownerEndpoint.field}.id`)}`
     const plan: CollectionRelationPlan = {
       collection,
       condition,
@@ -768,17 +763,19 @@ class QueryProjection {
     collection: DerivedCollectionDefinition,
     target: EntityDefinition,
   ): NonNullable<PolymorphicQueryOptions['relationship']> | undefined {
-    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
+    const relationship = collection.kind === 'explicit' && collection.targetEndpoint
+      ? collection.relationship
+      : undefined
     const relationshipAlias = plan.relationshipAlias
     if (relationship === undefined || relationshipAlias === undefined) return undefined
-    const endpoint = collection.kind === 'relationship' ? collection.endpoint : 0
+    const endpoint = collection.kind === 'explicit' ? collection.targetEndpoint : undefined
+    if (endpoint === undefined) return undefined
     return {
       expression: (field: string, targetAlias: string): string => {
         const prefix = `${lowerFirst(relationship.name)}.`
         const property = field.startsWith(prefix) ? field.slice(prefix.length) : field
-        const remote = relationship.between[endpoint === 0 ? 1 : 0]
         return `(SELECT ${quote(relationshipAlias)}.${quote(property)} FROM ${plan.relation} ` +
-          `WHERE ${plan.condition} AND ${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
+          `WHERE ${plan.condition} AND ${quote(relationshipAlias)}.${quote(`${endpoint.field}.id`)} = ` +
           `${quote(targetAlias)}.${quote('id')})`
       },
       fields: new Map(relationship.fields
@@ -816,6 +813,9 @@ class QueryProjection {
       ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
       rootAlias: childAlias,
       where: filter,
+      ...(collection.kind === 'explicit' && collection.viaFilter !== undefined
+        ? { additionalWhere: [collection.viaFilter] }
+        : {}),
     })
     const values = child.values as readonly BoundScalar[]
     return bind => {
@@ -899,7 +899,9 @@ class QueryProjection {
   ): CollectionScope {
     const plan = this.#collectionPlan(resolved.collection, resolved.parentAlias, name)
     this.#consume(plan.work)
-    const relationship = plan.collection.kind === 'relationship' ? plan.collection.relationship : undefined
+    const relationship = plan.collection.kind === 'explicit' && plan.collection.targetEndpoint
+      ? plan.collection.relationship
+      : undefined
     const relationshipAlias = plan.relationshipAlias
     const condition = plan.condition
     if (root) {
@@ -1226,7 +1228,7 @@ class QueryProjection {
         if (directives.orderBy !== undefined) spec.orderBy = directives.orderBy
       }
       if (rest.length === 0) return
-      if (collection.kind === 'relationship') {
+      if (collection.kind === 'explicit' && collection.targetEndpoint) {
         const edge = relationshipProperty(this.#entities, collection, rest[0], path)
         if (edge !== undefined) {
           if (rest.length > 1) {
@@ -1494,6 +1496,59 @@ class QueryProjection {
   }
 
   /**
+   * Resolve deterministic record ordering and composite endpoint tie-breakers.
+   * @param relationship - Relationship record source.
+   * @param orderBy - Requested collection ordering.
+   * @returns Qualified columns and directions.
+   */
+  #recordOrderings(
+    relationship: RelationshipDefinition,
+    orderBy: OrderBy | undefined,
+  ): readonly { column: string, direction: 'ASC' | 'DESC', endpoint: boolean, field: string }[] {
+    const requested = orderBy === undefined ? [] : Array.isArray(orderBy) ? [...orderBy] : [orderBy]
+    const orderings = requested.map(entry => {
+      const descending = typeof entry === 'string'
+        ? entry.startsWith('-')
+        : entry.direction === 'desc'
+      const name = typeof entry === 'string'
+        ? descending ? entry.slice(1) : entry
+        : entry.field
+      const property = relationship.fields.find(field => field.name === name)
+      if (property) {
+        if (property.type === FieldType.Array || property.type === FieldType.JSON) {
+          throw new Error(`Relationship record order field "${name}" is not a scalar field`)
+        }
+        return {
+          column: property.name,
+          direction: descending ? 'DESC' as const : 'ASC' as const,
+          endpoint: false,
+          field: property.name,
+        }
+      }
+      const endpoint = relationship.between.find(candidate => candidate.field === name)
+      if (endpoint) {
+        return {
+          column: `${endpoint.field}.id`,
+          direction: descending ? 'DESC' as const : 'ASC' as const,
+          endpoint: true,
+          field: endpoint.field,
+        }
+      }
+      throw new Error(`Unknown relationship record order field "${relationship.name}.${name}"`)
+    })
+    for (const endpoint of relationship.between) {
+      if (orderings.some(order => order.endpoint && order.field === endpoint.field)) continue
+      orderings.push({
+        column: `${endpoint.field}.id`,
+        direction: 'ASC',
+        endpoint: true,
+        field: endpoint.field,
+      })
+    }
+    return orderings
+  }
+
+  /**
    * Add one explicit relationship-record collection as a correlated child query.
    * @param node - Projection occurrence owning the collection.
    * @param spec - Relationship-record collection request.
@@ -1510,6 +1565,7 @@ class QueryProjection {
     const offset = spec.offset ?? 0
     const endpoint = collection.ownerEndpoint
     const childAlias = this.#nextAlias('cr')
+    const orderings = this.#recordOrderings(relationship, spec.orderBy)
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields: [...new Set([
@@ -1519,6 +1575,9 @@ class QueryProjection {
       ])],
       limit: null,
       offset: 0,
+      rawOrder: orderings.map(order => (
+        `${quote(childAlias)}.${quote(order.column)} ${order.direction}`
+      )),
       rawWhere:
         `${quote(childAlias)}.${quote(`${endpoint.field}.id`)} = ` +
         `${quote(node.context.baseAlias)}.${quote('id')}`,
@@ -1526,6 +1585,7 @@ class QueryProjection {
       ...(spec.filters.size === 0
         ? {}
         : { where: [...spec.filters].map(value => `(${value})`).join(' $and ') }),
+      ...(collection.viaFilter === undefined ? {} : { additionalWhere: [collection.viaFilter] }),
     })
     const base = this.#valueStart + this.values.length
     const childSql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
@@ -1544,10 +1604,14 @@ class QueryProjection {
         ])],
         limit: null,
         offset: 0,
+        rawOrder: orderings.map(order => (
+          `${quote(totalChildAlias)}.${quote(order.column)} ${order.direction}`
+        )),
         rawWhere:
           `${quote(totalChildAlias)}.${quote(`${endpoint.field}.id`)} = ` +
           `${quote(node.context.baseAlias)}.${quote('id')}`,
         rootAlias: totalChildAlias,
+        ...(collection.viaFilter === undefined ? {} : { additionalWhere: [collection.viaFilter] }),
       })
       const totalBase = this.#valueStart + this.values.length
       totalSql = totalChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
@@ -1567,9 +1631,14 @@ class QueryProjection {
       ? `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched"`
       : `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched", ` +
         `(SELECT count(*) FROM (${totalSql}) AS "__total") AS "__total"`
+    const aggregateOrder = orderings.map(order => (
+      order.endpoint
+        ? `${quote('__item')}.${quote(`${order.field}__id`)} ${order.direction}`
+        : `${quote('__item')}.${quote(order.field)} ${order.direction}`
+    )).join(', ')
     this.joins.push(
       'LEFT JOIN LATERAL (SELECT ' +
-      'COALESCE((SELECT json_agg(row_to_json("__item")) ' +
+      `COALESCE((SELECT json_agg(row_to_json("__item") ORDER BY ${aggregateOrder}) ` +
       `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), '[]'::json) AS "__items", ` +
       counts +
       `) AS ${quote(lateralAlias)} ON TRUE`,
@@ -1676,6 +1745,9 @@ class QueryProjection {
       ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
       rootAlias: childAlias,
       ...(filter === undefined ? {} : { where: filter }),
+      ...(spec.collection.kind === 'explicit' && spec.collection.viaFilter !== undefined
+        ? { additionalWhere: [spec.collection.viaFilter] }
+        : {}),
     })
     const base = this.#valueStart + this.values.length
     const childSql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
@@ -1693,6 +1765,9 @@ class QueryProjection {
         offset: 0,
         rawWhere: this.#collectionCorrelation(plan, availableAlias),
         rootAlias: availableAlias,
+        ...(spec.collection.kind === 'explicit' && spec.collection.viaFilter !== undefined
+          ? { additionalWhere: [spec.collection.viaFilter] }
+          : {}),
       })
       const totalBase = this.#valueStart + this.values.length
       totalSql = availableChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
@@ -2066,12 +2141,20 @@ export function compilePolymorphicQuery(
     },
     filterField: name => resolveRelationship(name) ?? baseScope.filterField?.(name) ?? baseScope.field(name),
   }
-  const where = typeof options.where === 'string'
+  const normalizedWhere = typeof options.where === 'string'
     ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
     : options.where
+  const additional = options.additionalWhere ?? []
+  const where = additional.length === 0
+    ? normalizedWhere
+    : normalizedWhere === undefined
+      ? { filters: additional, operator: Operator.Logical.And }
+      : { filters: [normalizedWhere, ...additional], operator: Operator.Logical.And }
   const predicate = SQL.where(entities, definition.name, where, scope)
   let ordering = ''
-  if (options.orderBy !== undefined) {
+  if (options.rawOrder !== undefined && options.rawOrder.length > 0) {
+    ordering = `ORDER BY ${options.rawOrder.join(', ')}`
+  } else if (options.orderBy !== undefined) {
     ordering = SQL.orderBy(entities, definition.name, options.orderBy, scope).sql
     if (ordering !== '' && definition.abstract) ordering += `, ${projection.root.rootAlias}."id" ASC`
   }
@@ -2303,9 +2386,9 @@ function collectionKey(path: readonly string[], name: string): string {
 }
 
 /**
- * Resolve one flattened relationship-owned property.
+ * Resolve one flattened relationship-owned property on a projected collection.
  * @param entities - Canonical definitions.
- * @param collection - Relationship collection navigation.
+ * @param collection - Collection navigation.
  * @param name - Flattened property name.
  * @param path - Full requested path for diagnostics.
  * @returns The relationship property, or undefined when the name is target-owned.
@@ -2317,7 +2400,7 @@ function relationshipProperty(
   name: string,
   path: string,
 ): QueryFieldDefinition | undefined {
-  if (collection.kind !== 'relationship') return undefined
+  if (collection.kind !== 'explicit' || collection.targetEndpoint === undefined) return undefined
   const property = collection.relationship.fields.find(field => field.name === name)
   if (property === undefined) return undefined
   const target = collection.target === 'Entity'

@@ -115,7 +115,6 @@ export type {
   JSONFieldDefinition,
   QueryFieldDefinition,
   RelationshipDefinition,
-  RelationshipDerivedCollectionDefinition,
   RelationshipEndpointDefinition,
   RelationshipFieldDefinition,
   ScalarArrayElementDefinition,

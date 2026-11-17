@@ -165,7 +165,18 @@ const fixtureGraph = new Graph({
         fields: [
           { field: 'id', format: 'UUID' },
           { field: 'label', type: 'String' },
-          { field: 'email', type: 'String' },
+          { field: 'email', type: 'String' }, {
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          },
+          {
+            field: 'guardedWorkspaces',
+            target: 'GuardedWorkspace',
+            type: 'Collection',
+            via: 'GuardedMembership[user = @].workspace',
+          },
         ],
         name: 'User',
         security: { [Action.Read]: Security.Public },
@@ -259,7 +270,22 @@ const fixtureGraph = new Graph({
         security: { [Action.Read]: { where: '$me = null' } },
       },
       {
-        fields: [{ field: 'title', type: 'String' }],
+        fields: [{
+          field: 'title',
+          type: 'String',
+        },
+        {
+          field: 'relatedLinks',
+          target: 'MemberNote',
+          type: 'Collection',
+          via: 'ActorLink[related = @].note',
+        },
+        {
+          field: 'links',
+          target: 'MemberNote',
+          type: 'Collection',
+          via: 'ActorLink[note = @].related',
+        }],
         name: 'MemberNote',
         security: { [Action.Read]: { where: '$me != null' } },
       },
@@ -296,6 +322,7 @@ const fixtureGraph = new Graph({
             target: 'Project',
             type: 'Inverse',
           },
+          { field: 'members', target: 'User', type: 'Collection', via: 'WorkspaceMembership[workspace = @].user' },
         ],
         name: 'Workspace',
         security: {
@@ -443,6 +470,7 @@ const fixtureGraph = new Graph({
         fields: [
           { field: 'flag', type: 'Boolean' },
           { field: 'title', type: 'String' },
+          { field: 'members', target: 'User', type: 'Collection', via: 'GuardedMembership[workspace = @].user' },
         ],
         name: 'GuardedWorkspace',
         security: {
@@ -456,8 +484,8 @@ const fixtureGraph = new Graph({
     relationships: [
       {
         between: [
-          { field: 'workspace', inverse: 'members', target: 'GuardedWorkspace' },
-          { field: 'user', inverse: 'guardedWorkspaces', target: 'User' },
+          { field: 'workspace', target: 'GuardedWorkspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [],
         name: 'GuardedMembership',
@@ -465,8 +493,8 @@ const fixtureGraph = new Graph({
       },
       {
         between: [
-          { field: 'note', inverse: 'links', target: 'MemberNote' },
-          { field: 'related', inverse: 'relatedLinks', target: 'MemberNote' },
+          { field: 'note', target: 'MemberNote' },
+          { field: 'related', target: 'MemberNote' },
         ],
         fields: [],
         name: 'ActorLink',
@@ -474,8 +502,8 @@ const fixtureGraph = new Graph({
       },
       {
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',

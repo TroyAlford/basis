@@ -813,10 +813,17 @@ describe('Server database lifecycle', () => {
             inverse: 'author',
             target: 'Article',
             type: 'Inverse',
-          }],
+          }, { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' }],
           name: 'User',
+        }, {
+          fields: [{
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'Membership[campaign = @].user',
+          }],
+          name: 'Campaign',
         },
-        { fields: [], name: 'Campaign' },
         {
           fields: [
             { field: 'author', inverse: 'articles', target: 'User', type: 'Entity' },
@@ -828,8 +835,8 @@ describe('Server database lifecycle', () => {
       ],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [
           { field: 'role', type: 'String' },
@@ -1080,6 +1087,7 @@ describe('Server database lifecycle', () => {
               target: 'Article',
               type: 'Inverse',
             },
+            { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' },
           ],
           name: 'User',
         },
@@ -1087,8 +1095,15 @@ describe('Server database lifecycle', () => {
           extends: 'User',
           fields: [{ field: 'permissions', type: 'String' }],
           name: 'SystemUser',
+        }, {
+          fields: [{
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'Membership[campaign = @].user',
+          }],
+          name: 'Campaign',
         },
-        { fields: [], name: 'Campaign' },
         {
           fields: [{ field: 'author', inverse: 'articles', target: 'User', type: 'Entity' }],
           name: 'Article',
@@ -1096,8 +1111,8 @@ describe('Server database lifecycle', () => {
       ],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [
           { field: 'role', type: 'String' },
@@ -1262,14 +1277,31 @@ describe('Server database lifecycle', () => {
 
   isolatedTest('caps projected collections, reports totals and applies collection filters', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
-        { fields: [], name: 'Campaign' },
-      ],
+      entities: [{
+        fields: [{
+          field: 'id',
+          format: 'UUID',
+        },
+        {
+          field: 'campaigns',
+          target: 'Campaign',
+          type: 'Collection',
+          via: 'Membership[user = @].campaign',
+        }],
+        name: 'User',
+      }, {
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'Membership[campaign = @].user',
+        }],
+        name: 'Campaign',
+      }],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'Membership',
@@ -1365,15 +1397,23 @@ describe('Server database lifecycle', () => {
             { field: 'id', format: 'UUID' },
             { field: 'active', type: 'Boolean' },
             { field: 'partner', target: 'User', type: 'Entity' },
+            { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' },
           ],
           name: 'User',
+        }, {
+          fields: [{
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'Membership[campaign = @].user',
+          }],
+          name: 'Campaign',
         },
-        { fields: [], name: 'Campaign' },
       ],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'Membership',
@@ -1560,15 +1600,23 @@ describe('Server database lifecycle', () => {
           fields: [
             { field: 'id', format: 'UUID' },
             { field: 'email', type: 'String' },
+            { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[user = @].campaign' },
           ],
           name: 'User',
+        }, {
+          fields: [{
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'Membership[campaign = @].user',
+          }],
+          name: 'Campaign',
         },
-        { fields: [], name: 'Campaign' },
       ],
       relationships: [{
         between: [
-          { field: 'user', inverse: 'campaigns', target: 'User' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'user', target: 'User' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'Membership',
@@ -1980,6 +2028,136 @@ describe('Server database lifecycle', () => {
     })).toMatchObject({ errno: '23505' })
   })
 
+  isolatedTest('orders and pages relationship-record collections deterministically', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]',
+            },
+            {
+              field: 'largeEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 2]',
+            },
+            {
+              field: 'largePrintings',
+              target: 'Printing',
+              type: 'Collection',
+              via: 'largeEntries.printing',
+            },
+            {
+              field: 'hugePrintings',
+              target: 'Printing',
+              type: 'Collection',
+              via: 'largeEntries[quantity > 5].printing',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Card' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    await database.use(entities)
+    const deck = '00000000-0000-4000-8000-000000000d01'
+    const cards = [
+      '00000000-0000-4000-8000-000000000d11',
+      '00000000-0000-4000-8000-000000000d12',
+      '00000000-0000-4000-8000-000000000d13',
+      '00000000-0000-4000-8000-000000000d14',
+    ]
+    const printings = [
+      '00000000-0000-4000-8000-000000000d21',
+      '00000000-0000-4000-8000-000000000d22',
+      '00000000-0000-4000-8000-000000000d23',
+      '00000000-0000-4000-8000-000000000d24',
+    ]
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${deck}, 'Deck', 'Deck'),
+        (${cards[0]}, 'Card 1', 'Card'),
+        (${cards[1]}, 'Card 2', 'Card'),
+        (${cards[2]}, 'Card 3', 'Card'),
+        (${cards[3]}, 'Card 4', 'Card'),
+        (${printings[0]}, 'Printing 1', 'Printing'),
+        (${printings[1]}, 'Printing 2', 'Printing'),
+        (${printings[2]}, 'Printing 3', 'Printing'),
+        (${printings[3]}, 'Printing 4', 'Printing')
+    `
+    await database.sql`
+      INSERT INTO "Deck" ("id")
+      VALUES
+        (${deck})
+    `
+    for (const [index, card] of cards.entries()) {
+      await database.sql`
+        INSERT INTO "Card" ("id")
+        VALUES
+          (${card})
+      `
+      await database.sql`
+        INSERT INTO "Printing" ("id")
+        VALUES
+          (${printings[index]})
+      `
+    }
+    const quantities = [7, 2, 9, 4]
+    for (const [index, quantity] of quantities.entries()) {
+      await database.sql`
+        INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+        VALUES
+          (${deck}, ${cards[index]}, ${printings[index]}, ${quantity})
+      `
+    }
+    const query = (path: string) => queryEntity<{
+      entries: { $matched: number, $total: number, items: { quantity: number }[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', path],
+      where: { id: deck },
+    })
+    const first = await query('entries{$orderBy:-quantity,$limit:2}')
+    expect(first[0]?.entries.items.map(item => item.quantity)).toEqual([9, 7])
+    expect(first[0]?.entries.$matched).toBe(4)
+    expect(first[0]?.entries.$total).toBe(4)
+    const second = await query('entries{$orderBy:-quantity,$limit:2,$offset:2}')
+    expect(second[0]?.entries.items.map(item => item.quantity)).toEqual([4, 2])
+    expect(second[0]?.entries.$matched).toBe(4)
+    expect(second[0]?.entries.$total).toBe(4)
+    expect((await query('entries{$orderBy:-quantity,$limit:2}'))[0]?.entries.items)
+      .toEqual(first[0]?.entries.items)
+    const filtered = await queryEntity<{
+      hugePrintings: { $matched: number, $total: number, items: { id: string }[] },
+      largeEntries: { $matched: number, $total: number, items: { quantity: number }[] },
+      largePrintings: { $matched: number, $total: number, items: { id: string }[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'largeEntries{$orderBy:-quantity}', 'largePrintings', 'hugePrintings'],
+      where: { id: deck },
+    })
+    expect(filtered[0]?.largeEntries.items.map(item => item.quantity)).toEqual([9, 7, 4])
+    expect(filtered[0]?.largeEntries.$matched).toBe(3)
+    expect(filtered[0]?.largeEntries.$total).toBe(3)
+    expect(filtered[0]?.largePrintings.items).toHaveLength(3)
+    expect(filtered[0]?.hugePrintings.$matched).toBe(2)
+    expect(filtered[0]?.hugePrintings.items).toHaveLength(2)
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
@@ -2165,6 +2343,7 @@ describe('Server database lifecycle', () => {
               target: 'Pet',
               type: 'Inverse',
             },
+            { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[person = @].campaign' },
           ],
           name: 'Person',
         },
@@ -2179,13 +2358,24 @@ describe('Server database lifecycle', () => {
             { field: 'vet', target: 'Person', type: 'Entity' },
           ],
           name: 'Pet',
+        }, {
+          fields: [{
+            field: 'id',
+            format: 'UUID',
+          },
+          {
+            field: 'members',
+            target: 'Person',
+            type: 'Collection',
+            via: 'Membership[campaign = @].person',
+          }],
+          name: 'Campaign',
         },
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
       ],
       relationships: [{
         between: [
-          { field: 'person', inverse: 'campaigns', target: 'Person' },
-          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'person', target: 'Person' },
+          { field: 'campaign', target: 'Campaign' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'Membership',

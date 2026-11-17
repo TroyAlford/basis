@@ -37,97 +37,116 @@ function compare(field: string, operator: Operator.Comparison, value: unknown) {
 }
 
 const graph = new Graph({
-  entities: [
-    { fields: [{ field: 'email', type: 'String' }], name: 'User' },
-    {
-      fields: [
-        { field: 'owner', target: 'User', type: 'Entity' },
-        { field: 'rank', type: 'Number' },
-        { field: 'score', maximum: Score.Maximum, minimum: Score.Minimum, type: 'Number' },
-        { field: 'title', type: 'String' },
-      ],
-      name: 'Article',
-      security: {
-        [Action.Read]: Security.Public,
-        [Action.Create]: [
-          { role: 'admin' },
-          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, Score.Minimum) },
-        ],
-        [Action.Update]: [
-          { role: 'admin' },
-          { role: 'updater', where: compare('rank', Operator.Comparison.LessThan, Limit.Update) },
-        ],
-        [Action.Delete]: [
-          { role: 'admin' },
-          { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, Limit.Delete) },
-        ],
-      },
+  entities: [{
+    fields: [{
+      field: 'email',
+      type: 'String',
     },
     {
-      fields: [
-        { field: 'rank', type: 'Number' },
-        { field: 'score', maximum: Score.Maximum, minimum: Score.Minimum, type: 'Number' },
-        { field: 'title', type: 'String' },
+      field: 'workspaces',
+      target: 'Workspace',
+      type: 'Collection',
+      via: 'WorkspaceMembership[user = @].workspace',
+    }],
+    name: 'User',
+  },
+  {
+    fields: [
+      { field: 'owner', target: 'User', type: 'Entity' },
+      { field: 'rank', type: 'Number' },
+      { field: 'score', maximum: Score.Maximum, minimum: Score.Minimum, type: 'Number' },
+      { field: 'title', type: 'String' },
+    ],
+    name: 'Article',
+    security: {
+      [Action.Read]: Security.Public,
+      [Action.Create]: [
+        { role: 'admin' },
+        { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, Score.Minimum) },
       ],
-      name: 'Draft',
-      security: {
-        [Action.Read]: [
-          { role: 'admin' },
-          { role: 'reader', where: compare('rank', Operator.Comparison.LessThan, Limit.Read) },
-        ],
-        [Action.Create]: [
-          { role: 'admin' },
-          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, Score.Minimum) },
-        ],
-        [Action.Update]: [
-          { role: 'admin' },
-          { role: 'updater', where: compare('rank', Operator.Comparison.LessThan, Limit.Update) },
-        ],
-        [Action.Delete]: [
-          { role: 'admin' },
-          { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, Limit.DeleteAction) },
-        ],
-      },
+      [Action.Update]: [
+        { role: 'admin' },
+        { role: 'updater', where: compare('rank', Operator.Comparison.LessThan, Limit.Update) },
+      ],
+      [Action.Delete]: [
+        { role: 'admin' },
+        { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, Limit.Delete) },
+      ],
+    },
+  },
+  {
+    fields: [
+      { field: 'rank', type: 'Number' },
+      { field: 'score', maximum: Score.Maximum, minimum: Score.Minimum, type: 'Number' },
+      { field: 'title', type: 'String' },
+    ],
+    name: 'Draft',
+    security: {
+      [Action.Read]: [
+        { role: 'admin' },
+        { role: 'reader', where: compare('rank', Operator.Comparison.LessThan, Limit.Read) },
+      ],
+      [Action.Create]: [
+        { role: 'admin' },
+        { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, Score.Minimum) },
+      ],
+      [Action.Update]: [
+        { role: 'admin' },
+        { role: 'updater', where: compare('rank', Operator.Comparison.LessThan, Limit.Update) },
+      ],
+      [Action.Delete]: [
+        { role: 'admin' },
+        { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, Limit.DeleteAction) },
+      ],
+    },
+  },
+  {
+    fields: [{
+      field: 'title',
+      type: 'String',
     },
     {
-      fields: [{ field: 'title', type: 'String' }],
-      name: 'Workspace',
-      security: {
-        [Action.Read]: [
-          { role: 'admin' },
-          {
-            where: {
-              field: 'members',
-              filters: [compare('id', Operator.Comparison.Equal, '$me')],
-              operator: Operator.Comparison.Contains,
-            },
-          },
-        ],
-        [Action.Create]: { role: 'admin' },
-        [Action.Update]: {
+      field: 'members',
+      target: 'User',
+      type: 'Collection',
+      via: 'WorkspaceMembership[workspace = @].user',
+    }],
+    name: 'Workspace',
+    security: {
+      [Action.Read]: [
+        { role: 'admin' },
+        {
           where: {
             field: 'members',
-            filters: [
-              {
-                filters: [
-                  compare('id', Operator.Comparison.Equal, '$me'),
-                  compare('workspaceMembership.role', Operator.Comparison.Equal, MembershipRole.Owner),
-                ],
-                operator: Operator.Logical.And,
-              },
-            ],
+            filters: [compare('id', Operator.Comparison.Equal, '$me')],
             operator: Operator.Comparison.Contains,
           },
         },
-        [Action.Delete]: { role: 'admin' },
+      ],
+      [Action.Create]: { role: 'admin' },
+      [Action.Update]: {
+        where: {
+          field: 'members',
+          filters: [
+            {
+              filters: [
+                compare('id', Operator.Comparison.Equal, '$me'),
+                compare('workspaceMembership.role', Operator.Comparison.Equal, MembershipRole.Owner),
+              ],
+              operator: Operator.Logical.And,
+            },
+          ],
+          operator: Operator.Comparison.Contains,
+        },
       },
+      [Action.Delete]: { role: 'admin' },
     },
-    { extends: 'Workspace', fields: [{ field: 'code', type: 'String' }], name: 'Project' },
-  ],
+  },
+  { extends: 'Workspace', fields: [{ field: 'code', type: 'String' }], name: 'Project' }],
   relationships: [{
     between: [
-      { field: 'workspace', inverse: 'members', target: 'Workspace' },
-      { field: 'user', inverse: 'workspaces', target: 'User' },
+      { field: 'workspace', target: 'Workspace' },
+      { field: 'user', target: 'User' },
     ],
     fields: [{ field: 'role', type: 'String' }],
     name: 'WorkspaceMembership',

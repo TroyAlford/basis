@@ -12,21 +12,36 @@ const viewer = '00000000-0000-4000-8000-000000000202'
 const workspace = '00000000-0000-4000-8000-000000000203'
 
 const graph = new Graph({
-  entities: [
-    { fields: [], name: 'Workspace' },
-    {
-      fields: [{ field: 'workspace', nullable: false, target: 'Workspace', type: 'Entity' }],
-      name: 'Resource',
-      security: {
-        create: { where: 'workspace.members $contains (id = $me and workspaceMembership.role = "owner")' },
-        read: { where: 'workspace.members $contains (id = $me and workspaceMembership.role = "owner")' },
-      },
+  entities: [{
+    fields: [{
+      field: 'members',
+      target: 'User',
+      type: 'Collection',
+      via: 'WorkspaceMembership[workspace = @].user',
+    }],
+    name: 'Workspace',
+  },
+  {
+    fields: [{
+      field: 'workspaces',
+      target: 'Workspace',
+      type: 'Collection',
+      via: 'WorkspaceMembership[user = @].workspace',
+    }],
+    name: 'User',
+  },
+  {
+    fields: [{ field: 'workspace', nullable: false, target: 'Workspace', type: 'Entity' }],
+    name: 'Resource',
+    security: {
+      create: { where: 'workspace.members $contains (id = $me and workspaceMembership.role = "owner")' },
+      read: { where: 'workspace.members $contains (id = $me and workspaceMembership.role = "owner")' },
     },
-  ],
+  }],
   relationships: [{
     between: [
-      { field: 'workspace', inverse: 'members', target: 'Workspace' },
-      { field: 'user', inverse: 'workspaces', target: 'User' },
+      { field: 'workspace', target: 'Workspace' },
+      { field: 'user', target: 'User' },
     ],
     fields: [{ field: 'role', type: 'String' }],
     name: 'WorkspaceMembership',

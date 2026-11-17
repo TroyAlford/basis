@@ -23,6 +23,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
         { field: 'scores', items: { type: 'Number' }, type: 'Array' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
         { field: 'payload', type: 'JSON' },
+        { field: 'campaigns', target: 'Campaign', type: 'Collection', via: 'Membership[person = @].campaign' },
       ],
       name: 'Person',
     },
@@ -64,14 +65,15 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'id', format: 'UUID' },
         { field: 'title', type: 'String' },
+        { field: 'members', target: 'Person', type: 'Collection', via: 'Membership[campaign = @].person' },
       ],
       name: 'Campaign',
     },
   ],
   relationships: [{
     between: [
-      { field: 'person', inverse: 'campaigns', target: 'Person' },
-      { field: 'campaign', inverse: 'members', target: 'Campaign' },
+      { field: 'person', target: 'Person' },
+      { field: 'campaign', target: 'Campaign' },
     ],
     fields: [{ field: 'role', type: 'String' }],
     name: 'Membership',

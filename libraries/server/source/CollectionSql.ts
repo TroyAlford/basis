@@ -43,27 +43,26 @@ export function collectionSqlRelation(
   if (collection.kind === 'explicit') {
     const relationship = collection.relationship
     const ownerColumn = `${collection.ownerEndpoint.field}.id`
+    const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
     if (collection.targetEndpoint === undefined) {
       return {
         condition: `${quote(aliases.relationship)}.${quote(ownerColumn)} = ${parentId}`,
-        relation: `${quote(relationship.name)} ${quote(aliases.relationship)}`,
+        relation: relationshipSource,
         relationshipAlias: aliases.relationship,
         rootAlias: aliases.relationship,
       }
     }
     const targetColumn = `${collection.targetEndpoint.field}.id`
-    const condition =
-      `EXISTS (SELECT 1 FROM ${quote(relationship.name)} ${quote(aliases.relationship)} ` +
-      `WHERE ${quote(aliases.relationship)}.${quote(ownerColumn)} = ${parentId} ` +
-      `AND ${quote(aliases.relationship)}.${quote(targetColumn)} = ` +
-      (targetName === 'Entity'
-        ? `${quote(aliases.root)}.${quote('id')}`
-        : `${quote(aliases.target)}.${quote('id')}`) +
-      ')'
+    const condition = `${quote(aliases.relationship)}.${quote(ownerColumn)} = ${parentId}`
     if (targetName === 'Entity') {
+      const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
       return {
         condition,
-        relation: `${quote('Entity')} ${quote(aliases.root)}`,
+        relation:
+          `${relationshipSource} JOIN ${rootSource} ON ` +
+          `${quote(aliases.root)}.${quote('id')} = ` +
+          `${quote(aliases.relationship)}.${quote(targetColumn)}`,
+        relationshipAlias: aliases.relationship,
         rootAlias: aliases.root,
       }
     }
@@ -72,8 +71,11 @@ export function collectionSqlRelation(
     return {
       condition,
       relation:
-        `${targetSource} JOIN ${rootSource} ON ` +
+        `${relationshipSource} JOIN ${targetSource} ON ` +
+        `${quote(aliases.target)}.${quote('id')} = ` +
+        `${quote(aliases.relationship)}.${quote(targetColumn)} JOIN ${rootSource} ON ` +
         `${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`,
+      relationshipAlias: aliases.relationship,
       rootAlias: aliases.root,
       targetAlias: aliases.target,
     }
@@ -97,33 +99,8 @@ export function collectionSqlRelation(
       targetAlias: aliases.target,
     }
   }
-  const relationship = collection.relationship
-  const local = relationship.between[collection.endpoint]
-  const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
-  const remoteColumn = quote(`${remote.field}.id`)
-  const condition = `${quote(aliases.relationship)}.${quote(`${local.field}.id`)} = ${parentId}`
-  const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
-  const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
-  const rootId = `${quote(aliases.root)}.${quote('id')}`
-  const remoteId = `${quote(aliases.relationship)}.${remoteColumn}`
-  if (targetName === 'Entity') {
-    return {
-      condition,
-      relation: `${relationshipSource} JOIN ${rootSource} ON ${rootId} = ${remoteId}`,
-      relationshipAlias: aliases.relationship,
-      rootAlias: aliases.root,
-    }
-  }
-  const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
-  const targetId = `${quote(aliases.target)}.${quote('id')}`
-  const targetJoin = `${relationshipSource} JOIN ${targetSource} ON ${targetId} = ${remoteId}`
-  return {
-    condition,
-    relation: `${targetJoin} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
-    relationshipAlias: aliases.relationship,
-    rootAlias: aliases.root,
-    targetAlias: aliases.target,
-  }
+
+  throw new Error('Unsupported collection kind')
 }
 
 /**

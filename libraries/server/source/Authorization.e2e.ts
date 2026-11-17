@@ -636,7 +636,16 @@ describe('Authorization RLS', () => {
     const membershipGraph = new Graph({
       entities: [
         {
-          fields: [{ field: 'title', type: 'String' }],
+          fields: [{
+            field: 'title',
+            type: 'String',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'WorkspaceMembership[workspace = @].user',
+          }],
           name: 'Workspace',
           security: {
             [Action.Read]: { where: 'members $contains (id = $me)' },
@@ -645,13 +654,24 @@ describe('Authorization RLS', () => {
               { where: "members $contains (id = $me $and workspaceMembership.role = 'Editor')" },
             ],
           },
+        }, {
+          fields: [{
+            field: 'email',
+            type: 'String',
+          },
+          {
+            field: 'workspaces',
+            target: 'Workspace',
+            type: 'Collection',
+            via: 'WorkspaceMembership[user = @].workspace',
+          }],
+          name: 'User',
         },
-        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
       ],
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
@@ -785,17 +805,37 @@ describe('Authorization RLS', () => {
     const abstractGraph = new Graph({
       entities: [
         {
-          fields: [{ field: 'title', type: 'String' }],
+          fields: [{
+            field: 'title',
+            type: 'String',
+          },
+          {
+            field: 'members',
+            target: 'User',
+            type: 'Collection',
+            via: 'ResourceMembership[resource = @].user',
+          }],
           name: 'Resource',
           security: { [Action.Read]: { where: 'members $contains (id = $me)' } },
         },
-        { extends: 'Resource', fields: [], name: 'Workspace' },
-        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'Resource', fields: [], name: 'Workspace' }, {
+          fields: [{
+            field: 'email',
+            type: 'String',
+          },
+          {
+            field: 'workspaces',
+            target: 'Resource',
+            type: 'Collection',
+            via: 'ResourceMembership[user = @].resource',
+          }],
+          name: 'User',
+        },
       ],
       relationships: [{
         between: [
-          { field: 'resource', inverse: 'members', target: 'Resource' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'resource', target: 'Resource' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'ResourceMembership',
@@ -992,7 +1032,12 @@ describe('Authorization RLS', () => {
     }
     const whereOnlyGraph = new Graph({
       entities: [{
-        fields: [],
+        fields: [{
+          field: 'members',
+          target: 'User',
+          type: 'Collection',
+          via: 'WorkspaceMembership[workspace = @].user',
+        }],
         name: 'Workspace',
         security: {
           [Action.Read]: [
@@ -1000,14 +1045,27 @@ describe('Authorization RLS', () => {
             { grant: Capability.Manage },
           ],
         },
-      }, { fields: [{ field: 'email', type: 'String' }], name: 'User' }],
+      },
+      {
+        fields: [{
+          field: 'email',
+          type: 'String',
+        },
+        {
+          field: 'workspaces',
+          target: 'Workspace',
+          type: 'Collection',
+          via: 'WorkspaceMembership[user = @].workspace',
+        }],
+        name: 'User',
+      }],
       grants: {
         [Capability.Manage]: { description: 'Manage workspaces' },
       },
       relationships: [{
         between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
