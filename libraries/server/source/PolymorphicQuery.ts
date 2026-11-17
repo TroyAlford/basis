@@ -45,6 +45,20 @@ export interface PolymorphicQueryOptions {
   readonly projectionBudget?: ProjectionBudget,
   /** Internal raw root condition used to correlate a projected collection. */
   readonly rawWhere?: string,
+  /**
+   * Internal relationship metadata for flattened relationship-owned fields.
+   * Only used by a collection child query.
+   */
+  readonly relationship?: {
+    /** Correlated scalar expression for one relationship-owned field. */
+    readonly expression: (field: string, targetAlias: string) => string,
+    /** Scalar relationship-owned fields by flattened name. */
+    readonly fields: ReadonlyMap<string, QueryFieldDefinition>,
+    /** Relationship name used by explicit `membership.role` paths. */
+    readonly name: string,
+    /** Target effective field names that make a flattened path ambiguous. */
+    readonly targetFields: ReadonlySet<string>,
+  },
   /** Internal root alias used by correlated projected collections. */
   readonly rootAlias?: string,
   /** Effective-field predicate. */
@@ -1062,7 +1076,7 @@ class QueryProjection {
       }
       if (rest.length === 0) return
       if (collection.kind === 'relationship') {
-        const edge = collection.relationship.fields.find(field => field.name === rest[0])
+        const edge = relationshipProperty(this.#entities, collection, rest[0], path)
         if (edge !== undefined) {
           if (rest.length > 1) {
             throw new Error(`Cannot traverse relationship property "${path}"`)
@@ -1354,19 +1368,66 @@ class QueryProjection {
     if (!Number.isInteger(offset) || offset < 0) {
       throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
     }
+    const requestedOrder = spec.orderBy === undefined
+      ? ['id']
+      : Array.isArray(spec.orderBy) ? [...spec.orderBy] : [spec.orderBy]
+    const orderings = requestedOrder.map(entry => {
+      if (typeof entry === 'string') {
+        const descending = entry.startsWith('-')
+        return {
+          direction: descending ? 'DESC' : 'ASC',
+          name: descending ? entry.slice(1) : entry,
+        }
+      }
+      return {
+        direction: entry.direction === 'desc' ? 'DESC' : 'ASC',
+        name: entry.field,
+      }
+    })
+    if (!orderings.some(order => order.name === 'id')) {
+      orderings.push({ direction: 'ASC', name: 'id' })
+    }
     const filter = spec.filters.size === 0
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
+    const relationship = spec.collection.kind === 'relationship' ? spec.collection.relationship : undefined
+    const endpoint = spec.collection.kind === 'relationship' ? spec.collection.endpoint : 0
+    const relationshipAlias = plan.relationshipAlias
+    let relationshipOptions: NonNullable<PolymorphicQueryOptions['relationship']> | undefined
+    if (relationship !== undefined && relationshipAlias !== undefined) {
+      relationshipOptions = {
+        expression: (field: string, targetAlias: string): string => {
+          const prefix = `${lowerFirst(relationship.name)}.`
+          const property = field.startsWith(prefix) ? field.slice(prefix.length) : field
+          const remote = relationship.between[endpoint === 0 ? 1 : 0]
+          return `(SELECT ${quote(relationshipAlias)}.${quote(property)} FROM ${plan.relation} ` +
+            `WHERE ${plan.condition} AND ${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
+            `${quote(targetAlias)}.${quote('id')})`
+        },
+        fields: new Map(relationship.fields
+          .filter(field => field.type !== FieldType.Array && field.type !== FieldType.JSON)
+          .map(field => [field.name, field])),
+        name: relationship.name,
+        targetFields: new Set(target.effectiveFields.map(field => field.name)),
+      }
+    }
     const childAlias = this.#nextAlias('c')
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
-      fields: [...new Set(['id', 'name', 'entity', ...spec.fields])],
+      fields: [...new Set([
+        'id',
+        'name',
+        'entity',
+        ...spec.fields,
+        ...orderings.map(order => order.name),
+      ])],
       limit: null,
       offset: 0,
-      orderBy: spec.orderBy ?? 'id',
+      orderBy: orderings.map(order => (order.direction === 'DESC' ? `-${order.name}` : order.name)),
       rawWhere:
         `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
         `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`,
+      ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
       rootAlias: childAlias,
       ...(filter === undefined ? {} : { where: filter }),
     })
@@ -1391,10 +1452,14 @@ class QueryProjection {
       ...(limit === null ? [] : [`LIMIT ${limit}`]),
       ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
     ].join(' ')
+    const aggregateOrder = orderings
+      .map(order => `${quote('__item')}.${quote(order.name)} ${order.direction}`)
+      .join(', ')
     this.joins.push(
       'LEFT JOIN LATERAL (SELECT ' +
       'COALESCE((SELECT json_agg(json_build_object(\'item\', row_to_json("__item"), ' +
-      `'edge', ${edgeObject})) FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), ` +
+      `'edge', ${edgeObject}) ORDER BY ${aggregateOrder}) ` +
+      `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), ` +
       '\'[]\'::json) AS "__items", ' +
       `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__total"` +
       `) AS ${quote(lateralAlias)} ON TRUE`,
@@ -1680,7 +1745,7 @@ export function compilePolymorphicQuery(
     }
     return value
   }
-  const scope: QueryScope = {
+  const baseScope: QueryScope = {
     array: name => projection.arrayScope(name),
     collection: name => projection.collectionScope(name),
     definition: synthetic,
@@ -1690,6 +1755,38 @@ export function compilePolymorphicQuery(
     filterField: name => projection.filterField(name),
     filterKind: name => projection.filterKind(name),
     orderField: name => projection.orderField(name),
+  }
+  const relationship = options.relationship
+  const relationshipPrefix = relationship === undefined
+    ? ''
+    : `${lowerFirst(relationship.name)}.`
+  const resolveRelationship = (name: string): QueryFieldDefinition | undefined => {
+    if (relationship === undefined) return undefined
+    if (name.startsWith(relationshipPrefix)) {
+      const property = relationship.fields.get(name.slice(relationshipPrefix.length))
+      if (property === undefined) throw new Error(`Unknown relationship field "${name}"`)
+      return { ...property, name }
+    }
+    const property = relationship.fields.get(name)
+    if (property === undefined) return undefined
+    if (relationship.targetFields.has(name)) {
+      throw new Error(
+        `Ambiguous collection field "${name}": target.${name} and ` +
+        `${relationship.name}.${name} both exist`,
+      )
+    }
+    return property
+  }
+  const scope: QueryScope = relationship === undefined ? baseScope : {
+    ...baseScope,
+    expression: value => {
+      if (value.name.startsWith(relationshipPrefix)
+        || (relationship.fields.has(value.name) && !relationship.targetFields.has(value.name))) {
+        return relationship.expression(value.name, projection.root.baseAlias)
+      }
+      return baseScope.expression(value)
+    },
+    filterField: name => resolveRelationship(name) ?? baseScope.filterField?.(name) ?? baseScope.field(name),
   }
   const where = typeof options.where === 'string'
     ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
@@ -1926,6 +2023,36 @@ function collectionKey(path: readonly string[], name: string): string {
   return [...path.map(segment => segment.replace(/__v\d+$/u, '')), name].join('.')
 }
 
+/**
+ * Resolve one flattened relationship-owned property.
+ * @param entities - Canonical definitions.
+ * @param collection - Relationship collection navigation.
+ * @param name - Flattened property name.
+ * @param path - Full requested path for diagnostics.
+ * @returns The relationship property, or undefined when the name is target-owned.
+ * @throws {Error} When the target and relationship both declare the same name.
+ */
+function relationshipProperty(
+  entities: EntityDefinitions,
+  collection: DerivedCollectionDefinition,
+  name: string,
+  path: string,
+): QueryFieldDefinition | undefined {
+  if (collection.kind !== 'relationship') return undefined
+  const property = collection.relationship.fields.find(field => field.name === name)
+  if (property === undefined) return undefined
+  const target = collection.target === 'Entity'
+    ? identityDefinition()
+    : entities.entity(collection.target)
+  if (target?.effectiveFields.some(field => field.name === name)) {
+    throw new Error(
+      `Ambiguous collection field "${path}": ${collection.target}.${name} and ` +
+      `${collection.relationship.name}.${name} both exist`,
+    )
+  }
+  return property
+}
+
 /** Parsed collection-context directives on one path segment. */
 interface CollectionDirectives {
   /** Collection filter, relative to each item. */
@@ -2085,12 +2212,14 @@ function parseOrderByField(value: string): string {
  */
 function parseCollectionOptions(content: string): Pick<CollectionDirectives, 'limit' | 'offset' | 'orderBy'> {
   const options: { limit?: number | null, offset?: number, orderBy?: OrderBy } = {}
+  const seen = new Set<string>()
   for (const entry of splitTopLevel(content, ',')) {
     const separator = entry.indexOf(':')
     if (separator === -1) throw new Error(`Collection option "${entry}" must be a key:value pair`)
     const key = entry.slice(0, separator).trim()
     const value = entry.slice(separator + 1).trim()
-    if (Object.hasOwn(options, key)) throw new Error(`Collection option "${key}" is repeated`)
+    if (seen.has(key)) throw new Error(`Collection option "${key}" is repeated`)
+    seen.add(key)
     if (key === '$limit') {
       if (value === 'null') {
         options.limit = null

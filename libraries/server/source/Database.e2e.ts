@@ -1388,6 +1388,146 @@ describe('Server database lifecycle', () => {
     expect(paged[0]?.members.total).toBe(5)
   })
 
+  isolatedTest('enforces the complete collection projection contract', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'active', type: 'Boolean' },
+          ],
+          name: 'User',
+        },
+        { fields: [], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    await database.use(entities)
+
+    expect(() => compileEntityQuery(entities, 'Campaign', {
+      fields: ['id', 'members{$limit:1,$limit:2}'],
+    })).toThrow('repeated')
+    expect(() => compileEntityQuery(entities, 'Campaign', {
+      fields: ['id', 'members{$offset:1,$offset:2}'],
+    })).toThrow('repeated')
+    expect(() => compileEntityQuery(entities, 'Campaign', {
+      fields: ['id', 'members{$orderBy:name,$orderBy:-name}'],
+    })).toThrow('repeated')
+
+    const idFor = (index: number): string => (
+      `00000000-0000-4000-8000-${String(1000 + index).padStart(12, '0')}`
+    )
+    const campaign = '00000000-0000-4000-8000-000000000901'
+    const tiedCampaign = '00000000-0000-4000-8000-000000000902'
+    const members = Array.from({ length: 30 }, (_, index) => ({
+      active: index < 12,
+      id: idFor(index),
+      name: `M${String(index).padStart(2, '0')}`,
+      role: index < 12 ? 'GM' : 'Player',
+    }))
+    const tied = Array.from({ length: 5 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(2000 + index).padStart(12, '0')}`,
+      name: 'Tie',
+      role: 'Player',
+    }))
+    for (const [id, name] of [[campaign, 'Contract Campaign'], [tiedCampaign, 'Tied Campaign']] as const) {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, ${name}, 'Campaign')
+      `
+      await database.sql`
+        INSERT INTO "Campaign" ("id")
+        VALUES (${id})
+      `
+    }
+    for (const member of members) {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${member.id}, ${member.name}, 'User')
+      `
+      await database.sql`
+        INSERT INTO "User" ("id", "active")
+        VALUES (${member.id}, ${member.active})
+      `
+      await database.sql`
+        INSERT INTO "Membership" ("user.id", "campaign.id", "role")
+        VALUES (${member.id}, ${campaign}, ${member.role})
+      `
+    }
+    for (const member of tied) {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${member.id}, ${member.name}, 'User')
+      `
+      await database.sql`
+        INSERT INTO "User" ("id", "active")
+        VALUES (${member.id}, TRUE)
+      `
+      await database.sql`
+        INSERT INTO "Membership" ("user.id", "campaign.id", "role")
+        VALUES (${member.id}, ${tiedCampaign}, ${member.role})
+      `
+    }
+
+    interface Member { id: string, name: string, role: string }
+    interface Envelope { items: Member[], total: number }
+    const query = (campaignId: string, fields: string[]) => queryEntity<{
+      id: string,
+      members: Envelope,
+    }>(database.sql, entities, 'Campaign', { fields, where: { id: campaignId } })
+
+    const flattened = await query(campaign, [
+      'id',
+      "members[role = 'GM']{$limit:null}",
+      'members.name',
+      'members.role',
+    ])
+    expect(flattened[0]?.members.total).toBe(12)
+    expect(flattened[0]?.members.items).toHaveLength(12)
+    expect(flattened[0]?.members.items.every(member => member.role === 'GM')).toBe(true)
+
+    const descending = await query(campaign, [
+      'id',
+      'members{$orderBy:-name,$limit:null}',
+      'members.name',
+    ])
+    expect(descending[0]?.members.items.map(member => member.name)).toEqual(
+      Array.from({ length: 30 }, (_, index) => `M${String(29 - index).padStart(2, '0')}`),
+    )
+
+    const pages = await Promise.all([0, 2, 4].map(async offset => (
+      await query(tiedCampaign, [
+        'id',
+        `members{$orderBy:name,$limit:2,$offset:${offset}}`,
+        'members.name',
+      ])
+    )))
+    const paged = pages.flatMap(page => page[0]?.members.items ?? [])
+    expect(paged).toHaveLength(5)
+    expect(new Set(paged.map(member => member.id)).size).toBe(5)
+    expect(paged.map(member => member.id)).toEqual([...tied.map(member => member.id)].sort())
+
+    const filtered = await query(campaign, [
+      'id',
+      'members[active = true]{$orderBy:name,$offset:5,$limit:4}',
+      'members.name',
+    ])
+    expect(filtered[0]?.members.total).toBe(12)
+    expect(filtered[0]?.members.items.map(member => member.name)).toEqual([
+      'M05',
+      'M06',
+      'M07',
+      'M08',
+    ])
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

@@ -1052,6 +1052,120 @@ describe('Authorization RLS', () => {
     }
   })
 
+  test('excludes unauthorized collection rows from items and total', async () => {
+    const collectionGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              cardinality: 'Many',
+              field: 'items',
+              inverse: 'workspace',
+              target: 'Item',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Workspace',
+          security: { [Action.Read]: Security.Public },
+        },
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'active', type: 'Boolean' },
+            { field: 'workspace', inverse: 'items', target: 'Workspace', type: 'Entity' },
+          ],
+          name: 'Item',
+          security: {
+            [Action.Read]: [
+              { role: 'admin' },
+              { where: 'active = true' },
+            ],
+          },
+        },
+      ],
+    })
+    const install = tempDirectory('basis-authorization-collection-')
+    const server = await start(install, collectionGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const actor = await authorization.enrollIdentity('test', 'member', { email: 'member@example.com' })
+      if (!actor) throw new Error('member identity was not enrolled')
+      const workspace = randomUUID()
+      const items = Array.from({ length: 30 }, (_, index) => {
+        const title = index < 12 || index >= 20
+          ? `Match ${String(index).padStart(2, '0')}`
+          : `Other ${String(index).padStart(2, '0')}`
+        return {
+          active: index < 20,
+          id: randomUUID(),
+          title,
+        }
+      })
+      await admin.sql.begin(async tx => {
+        await tx`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${workspace}, 'Visible Workspace', 'Workspace')
+        `
+        await tx`
+          INSERT INTO "Workspace" ("id", "title")
+          VALUES (${workspace}, 'Visible Workspace')
+        `
+        for (const item of items) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${item.id}, ${item.title}, 'Item')
+          `
+          await tx`
+            INSERT INTO "Item" ("id", "title", "active", "workspace.id")
+            VALUES (${item.id}, ${item.title}, ${item.active}, ${workspace})
+          `
+        }
+      })
+      const asActor = <T>(actorId: string | null, work: () => T): T => runAsActor({ id: actorId }, work)
+      const query = (actorId: string | null, fields: string[]) => asActor(actorId, () => (
+        server.db.query<{ id: string, items: { items: { title: string }[], total: number } }>(
+          'Workspace',
+          { fields, where: { id: workspace } },
+        )
+      ))
+
+      const authorized = await query(actor, ['id', 'items{$limit:null}', 'items.title'])
+      expect(authorized[0]?.items.total).toBe(20)
+      expect(authorized[0]?.items.items).toHaveLength(20)
+
+      const page = await query(actor, [
+        'id',
+        "items[title ~= 'Match']{$orderBy:title,$offset:5,$limit:4}",
+        'items.title',
+      ])
+      expect(page[0]?.items.total).toBe(12)
+      expect(page[0]?.items.items.map(item => item.title)).toEqual([
+        'Match 05',
+        'Match 06',
+        'Match 07',
+        'Match 08',
+      ])
+
+      const administrator = await query(bootstrap.userId, ['id', 'items{$limit:null}', 'items.title'])
+      expect(administrator[0]?.items.total).toBe(30)
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 60_000)
+
   test('enforces explicit actor presence on the shared authorization fixture', async () => {
     const noteRows = [{ id: fixtureRows.linkedNote }, { id: fixtureRows.memberNote }]
     const verify = async (actor: string | null, label: string, expected: {

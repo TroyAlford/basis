@@ -662,6 +662,63 @@ describe('SQL.where', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:1}', 'members{$offset:1}'],
     })).toThrow('more than one directive path')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'members{$limit:1,$limit:2}'],
+    })).toThrow('repeated')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'members{$offset:1,$offset:2}'],
+    })).toThrow('repeated')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'members{$orderBy:name,$orderBy:-name}'],
+    })).toThrow('repeated')
+  })
+
+  test('filters and projects relationship-owned scalar fields by flattened path', () => {
+    const compiled = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', "members[role = 'GM']", 'members.name', 'members.role'],
+    })
+    expect(compiled.sql).toMatch(/"cj\d+"\."role" FROM "Membership"/u)
+    expect(compiled.sql).toContain('"Membership"')
+    expect(compiled.sql).toContain('json_build_object(\'role\'')
+    expect(compiled.values).toContain('GM')
+  })
+
+  test('rejects ambiguous target and relationship field names', () => {
+    const ambiguousDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'role', type: 'String' },
+          ],
+          name: 'User',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    expect(() => compileEntityQuery(ambiguousDefinitions, 'Campaign', {
+      fields: ['id', 'members.role'],
+    })).toThrow('Ambiguous collection field "members.role"')
+    expect(() => compileEntityQuery(ambiguousDefinitions, 'Campaign', {
+      fields: ['id', "members[role = 'GM']"],
+    })).toThrow('Ambiguous collection field "role"')
+  })
+
+  test('guarantees requested collection ordering with an identity tie-break', () => {
+    const compiled = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'members{$limit:2,$orderBy:-name}'],
+    })
+    expect(compiled.sql).toContain('json_agg(')
+    expect(compiled.sql).toMatch(/ORDER BY "__item"\."name" DESC, "__item"\."id" ASC/u)
+    expect(compiled.sql).toMatch(/ORDER BY \w+\."name" DESC, \w+\."id" ASC/u)
   })
 
   test('accepts root orderBy shorthand', () => {
