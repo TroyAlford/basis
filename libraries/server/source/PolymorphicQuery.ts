@@ -677,6 +677,25 @@ class QueryProjection {
     const planKey = `${key}\u0000${parentAlias}`
     const cached = this.#collectionPlans.get(planKey)
     if (cached) return cached
+    if (collection.kind === 'relationship-records') {
+      const relationship = collection.relationship
+      const endpoint = relationship.between[collection.endpoint]
+      if (!endpoint) throw new Error(`Unknown relationship endpoint ${collection.endpoint}`)
+      const alias = this.#nextAlias('cr')
+      const plan: CollectionRelationPlan = {
+        collection,
+        condition: `${quote(alias)}.${quote(`${endpoint.field}.id`)} = "${parentAlias}".${quote('id')}`,
+        parentAlias,
+        parentId: `${quote(alias)}.${quote(`${endpoint.field}.id`)}`,
+        relation: `${quote(relationship.name)} ${quote(alias)}`,
+        rootAlias: alias,
+        target: this.#entities.relationshipRecord(relationship.name),
+        targetAlias: alias,
+        work: 1,
+      }
+      this.#collectionPlans.set(planKey, plan)
+      return plan
+    }
     const targetName = collection.target
     const target = targetName === 'Entity' ? undefined : this.#entities.entity(targetName)
     if (targetName !== 'Entity' && !target) throw new Error(`Unknown target entity "${targetName}"`)
