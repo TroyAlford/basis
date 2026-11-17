@@ -398,6 +398,13 @@ function formatExpression(tokens: readonly Token[], indent: string): string[] {
   const inline = `${formatInline(expression)}${alias}`
   if (`${indent}${inline}`.length <= 80) return [`${indent}${inline}`]
 
+  const chains = splitOperator(expression, '||')
+  if (chains.length > 1) {
+    const lines = chains.map(chain => `${indent}${formatInline(chain)}`)
+    lines[lines.length - 1] = `${lines[lines.length - 1]}${alias}`
+    return lines
+  }
+
   const open = expression[1]?.text === '(' ? 1 : -1
   if (open === -1 || expression[0]?.kind !== 'word') return [`${indent}${inline}`]
   const close = matchingParen(expression, open)
@@ -415,6 +422,30 @@ function formatExpression(tokens: readonly Token[], indent: string): string[] {
   })
   lines.push(`${indent})${alias}`)
   return lines
+}
+
+/**
+ * Split tokens on one top-level binary operator.
+ * @param tokens - Expression tokens.
+ * @param operator - Binary operator text.
+ * @returns Token groups; later groups keep the operator prefix.
+ */
+function splitOperator(tokens: readonly Token[], operator: string): Token[][] {
+  const groups: Token[][] = []
+  let current: Token[] = []
+  let depth = 0
+  for (const candidate of tokens) {
+    if (candidate.text === '(') depth += 1
+    if (candidate.text === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && candidate.text === operator) {
+      groups.push(current)
+      current = [candidate]
+      continue
+    }
+    current.push(candidate)
+  }
+  if (current.length > 0) groups.push(current)
+  return groups
 }
 
 /**
@@ -634,7 +665,19 @@ function formatBlock(
     const statement = tokens.slice(index, end)
     const semicolon = statement[statement.length - 1]?.text === ';'
     const text = semicolon ? statement.slice(0, -1) : statement
-    if (text.length > 0) lines.push(`${indent}${format(text)}${semicolon ? ';' : ''}`)
+    if (text.length > 0) {
+      const inline = `${indent}${format(text)}${semicolon ? ';' : ''}`
+      if (text[0]?.upper === 'return' && text.length > 1 && inline.length > 100) {
+        lines.push(`${indent}RETURN`)
+        const expression = formatExpression(text.slice(1), `${indent}  `)
+        if (semicolon && expression.length > 0) {
+          expression[expression.length - 1] = `${expression[expression.length - 1]};`
+        }
+        lines.push(...expression)
+      } else {
+        lines.push(inline)
+      }
+    }
     index = end
   }
   return { lines, next: index }

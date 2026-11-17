@@ -183,6 +183,26 @@ describe('formatSQL', () => {
       `)
     })
 
+    test('wraps long RETURN chains', () => {
+      expect(formatSQL(`
+        create or replace function f() returns trigger as $$
+        begin
+          return setweight(to_tsvector('english', coalesce(new.name, '')), 'A')
+            || setweight(to_tsvector('english', coalesce(new.slug, '')), 'B')
+            || setweight(to_tsvector('english', coalesce(new.body, '')), 'C');
+        end $$ language plpgsql;
+      `)).toMatchSql(`
+        CREATE OR REPLACE FUNCTION f() RETURNS TRIGGER AS $$
+        BEGIN
+          RETURN
+            SETWEIGHT(TO_TSVECTOR('english', COALESCE(NEW.name, '')), 'A')
+            || SETWEIGHT(TO_TSVECTOR('english', COALESCE(NEW.slug, '')), 'B')
+            || SETWEIGHT(TO_TSVECTOR('english', COALESCE(NEW.body, '')), 'C');
+        END
+        $$ LANGUAGE plpgsql;
+      `)
+    })
+
     test('preserves PL/pgSQL assignment operators and array types', () => {
       expect(formatSQL(`
         create or replace function compute() returns trigger as $$
