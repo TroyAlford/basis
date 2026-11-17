@@ -1,4 +1,5 @@
-import { tempDirectory } from 'basis/testing'
+import { startApplication, tempDirectory } from 'basis/testing'
+import { runAsync } from 'basis/utilities'
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -38,10 +39,10 @@ const fixture = join(fixtureRoot, 'serve.ts')
 const active = new Set<ServerHarness>()
 
 /**
- * Spawns the managed-application fixture and waits for its listening line.
+ * Starts the managed-application fixture through the Basis application fixture.
  * @param mode The server mode to run the fixture in.
  * @param extraEnv Additional environment for the child.
- * @param entry The fixture entrypoint module to spawn.
+ * @param entry The fixture entrypoint module to start.
  * @returns A harness exposing the bound port and an idempotent stop.
  */
 const startServer = async (
@@ -49,57 +50,17 @@ const startServer = async (
   extraEnv: Record<string, string> = {},
   entry: string = fixture,
 ): Promise<ServerHarness> => {
-  const proc = Bun.spawn([process.execPath, entry], {
+  const application = await startApplication({
     cwd: repoRoot,
-    env: {
-      ...process.env,
-      HOST: '127.0.0.1',
-      MODE: mode,
-      PORT: '0',
-      VERSION: 'test-version',
-      ...extraEnv,
-    },
-    stderr: 'pipe',
-    stdout: 'pipe',
+    development: mode === 'development',
+    entry,
+    env: { MODE: mode, VERSION: 'test-version', ...extraEnv },
+    readyPath: '/api/health',
+    readyStatus: status => status === 200 || status === 503,
   })
-
-  const reader = proc.stdout.getReader()
-  const decoder = new TextDecoder()
-  let output = ''
-  let port: number | null = null
-  const deadline = Date.now() + 30_000
-
-  while (port === null && Date.now() < deadline) {
-    const { done, value } = await reader.read()
-    if (done) break
-    output += decoder.decode(value)
-    const match = output.match(/listening http:\/\/[^:]+:(\d+)/)
-    if (match) port = Number(match[1])
-  }
-
-  if (port === null) {
-    proc.kill()
-    const stderr = await new Response(proc.stderr).text()
-    throw new Error(`server fixture did not start (${mode}):\n${output}\n${stderr}`)
-  }
-
-  // Keep draining stdout so the child never blocks on a full pipe.
-  void (async () => {
-    for (;;) {
-      const { done } = await reader.read()
-      if (done) break
-    }
-  })()
-
-  let exit: Promise<number> | null = null
   const harness: ServerHarness = {
-    port,
-    stop: async () => {
-      if (exit) return exit
-      proc.kill('SIGTERM')
-      exit = proc.exited
-      return exit
-    },
+    port: Number(new URL(application.url).port),
+    stop: application.stop,
   }
 
   active.add(harness)
@@ -318,13 +279,11 @@ ws.onerror = () => { console.log('ERROR'); process.exit(1) }
 setTimeout(() => process.exit(0), 8000)
       `.trim()
 
-      const proc = Bun.spawn([process.execPath, '-e', script], { stderr: 'pipe', stdout: 'pipe' })
-      const stdout = await new Response(proc.stdout).text()
-      const exit = await proc.exited
+      const result = await runAsync(process.execPath, ['-e', script])
 
-      expect(stdout).toContain('OPEN')
-      expect(stdout).toMatch(/MESSAGE object \d+/)
-      expect(exit).toBe(0)
+      expect(result.stdout).toContain('OPEN')
+      expect(result.stdout).toMatch(/MESSAGE object \d+/)
+      expect(result.exitCode).toBe(0)
 
       expect(await server.stop()).toBe(0)
     } finally {
@@ -631,12 +590,10 @@ ws.onerror = () => { console.log('failed'); process.exit(1) }
 setTimeout(() => { console.log('timeout'); process.exit(2) }, 5000)
     `.trim()
 
-    const proc = Bun.spawn([process.execPath, '-e', script], { stderr: 'pipe', stdout: 'pipe' })
-    const stdout = await new Response(proc.stdout).text()
-    const code = await proc.exited
+    const result = await runAsync(process.execPath, ['-e', script])
 
-    expect(stdout).toContain('connected')
-    expect(code).toBe(0)
+    expect(result.stdout).toContain('connected')
+    expect(result.exitCode).toBe(0)
 
     expect(await server.stop()).toBe(0)
   })

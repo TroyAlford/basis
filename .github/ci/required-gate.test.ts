@@ -1,9 +1,9 @@
 /* eslint-disable camelcase -- GitHub's check-run API uses snake_case keys. */
+import { tempDirectory } from 'basis/testing'
 import { run } from 'basis/utilities'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ImpactDecision } from '../actions/change-impact/main'
@@ -125,7 +125,7 @@ function impact(suites: Record<string, boolean>): { impactDecision: ImpactDecisi
  * @returns The process result and the fake `gh` call log.
  */
 async function runGate(options: GateOptions): Promise<GateResult> {
-  const directory = await mkdtemp(join(tmpdir(), 'basis-required-gate-'))
+  const directory = tempDirectory('basis-required-gate')
   directories.push(directory)
 
   const bin = join(directory, 'bin')

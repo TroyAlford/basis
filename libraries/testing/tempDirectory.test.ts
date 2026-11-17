@@ -3,9 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
-const modulePath = join(import.meta.dir, 'temp.ts')
+const modulePath = join(import.meta.dir, 'tempDirectory.ts')
 
 describe('isolated temp directory', () => {
   test('the preload points os.tmpdir() at a run-scoped root', () => {

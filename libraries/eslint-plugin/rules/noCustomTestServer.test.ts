@@ -1,0 +1,82 @@
+import { describe, expect, test } from 'bun:test'
+import { lintRule } from './complianceTestUtils'
+import { noCustomTestServer } from './noCustomTestServer'
+
+const lint = (code: string) => lintRule(noCustomTestServer, code, 'fixture.test.ts')
+
+const expectsReport = (code: string): void => {
+  const messages = lint(code)
+  expect(messages).toHaveLength(1)
+  expect(messages[0]?.messageId).toBe('noCustomTestServer')
+  expect(messages[0]?.message).toContain('useApplication')
+}
+
+describe('noCustomTestServer', () => {
+  test('reports Bun.serve', () => {
+    expectsReport('Bun.serve({ fetch: () => new Response(\'ok\') })')
+  })
+
+  test('reports a bracketed Bun.serve', () => {
+    expectsReport('Bun[\'serve\']({ fetch: () => new Response(\'ok\') })')
+  })
+
+  test('reports an aliased Bun.serve', () => {
+    expectsReport('const serve = Bun.serve\nserve({ fetch: () => new Response(\'ok\') })')
+  })
+
+  test('reports destructured Bun.serve', () => {
+    expectsReport('const { serve } = Bun\nserve({ fetch: () => new Response(\'ok\') })')
+  })
+
+  test('reports a named http createServer', () => {
+    expectsReport('import { createServer } from \'node:http\'\ncreateServer()')
+  })
+
+  test('reports an aliased createServer', () => {
+    expectsReport('import { createServer as serve } from \'http\'\nserve()')
+  })
+
+  test('reports a namespace https createServer', () => {
+    expectsReport('import * as https from \'node:https\'\nhttps.createServer()')
+  })
+
+  test('reports http2 createSecureServer', () => {
+    expectsReport('import { createSecureServer } from \'node:http2\'\ncreateSecureServer()')
+  })
+
+  test('reports net.createServer', () => {
+    expectsReport('import * as net from \'node:net\'\nnet.createServer()')
+  })
+
+  test('reports a manual server launcher through Bun.spawn', () => {
+    expectsReport('Bun.spawn([\'bun\', \'./server.ts\'])')
+  })
+
+  test('reports a manual server launcher through runAsync', () => {
+    expectsReport('import { runAsync } from \'basis/utilities\'\nrunAsync(\'bun\', [\'run\', \'start\'])')
+  })
+
+  test('reports a manual dev server launcher through run', () => {
+    expectsReport('import { run } from \'basis/utilities\'\nrun`bun run dev`')
+  })
+
+  test('reports a port-bound launcher', () => {
+    expectsReport('Bun.spawn([\'bun\', \'./scripts/start.ts\', \'--port\', \'3000\'])')
+  })
+
+  test('allows an ordinary test command', () => {
+    expect(lint('Bun.spawn([\'bun\', \'test\', \'./server.test.ts\'])')).toHaveLength(0)
+  })
+
+  test('allows an ordinary Basis runner command', () => {
+    expect(lint('import { run } from \'basis/utilities\'\nrun(\'git\', [\'status\'])')).toHaveLength(0)
+  })
+
+  test('allows a build script', () => {
+    expect(lint('Bun.spawn([\'bun\', \'./scripts/build.ts\'])')).toHaveLength(0)
+  })
+
+  test('allows a container port publish', () => {
+    expect(lint('Bun.spawn([\'docker\', \'run\', \'-p\', \'127.0.0.1::5432\', \'postgres\'])')).toHaveLength(0)
+  })
+})

@@ -1,7 +1,7 @@
+import { tempDirectory } from 'basis/testing'
 import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { gitFile, gitFiles, resolveRevision } from '../../scripts/migration-git'
 
@@ -11,7 +11,7 @@ import { gitFile, gitFiles, resolveRevision } from '../../scripts/migration-git'
  */
 async function withRepository(work: (root: string) => Promise<void>): Promise<void> {
   const previous = process.cwd()
-  const root = await mkdtemp(join(tmpdir(), 'basis-migration-git-'))
+  const root = tempDirectory('basis-migration-git')
   process.chdir(root)
   try {
     run('git', ['init', '-q'])

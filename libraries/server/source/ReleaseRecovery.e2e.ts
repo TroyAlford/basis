@@ -1,4 +1,5 @@
 import { tempDirectory } from 'basis/testing'
+import { runAsync } from 'basis/utilities'
 import { SQL as BunSQL } from 'bun'
 import { describe, expect, test } from 'bun:test'
 import { rm, stat, writeFile } from 'node:fs/promises'
@@ -16,7 +17,6 @@ describe('interrupted database cutover recovery', () => {
 
   test('recovers the original database after process death beyond source detachment', async () => {
     const install = tempDirectory('basis-cutover-recovery-')
-    let child: ReturnType<typeof Bun.spawn> | null = null
     try {
       const previous = process.cwd()
       const graph = new Graph({
@@ -66,17 +66,11 @@ describe('interrupted database cutover recovery', () => {
         }, new KillingService())
         await operations.upgrade('postgres:17-alpine')
       `
-      child = Bun.spawn([process.execPath, '-e', code], {
+      const result = await runAsync(process.execPath, ['-e', code], {
         cwd: install,
-        env: {
-          ...process.env,
-          BASIS_ARTIFACT: artifactPath,
-        },
-        stderr: 'pipe',
-        stdout: 'pipe',
+        env: { BASIS_ARTIFACT: artifactPath },
       })
-      const exit = await child.exited
-      if (exit === 0) throw new Error('cutover child unexpectedly completed')
+      if (result.exitCode === 0) throw new Error('cutover child unexpectedly completed')
       process.chdir(install)
       const service = new ManagedPostgresService()
       const connection = await service.ensure(false)
@@ -91,10 +85,6 @@ describe('interrupted database cutover recovery', () => {
         .rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       process.chdir(originalCwd)
-      if (child && child.exitCode === null) {
-        child.kill()
-        await child.exited.catch(() => undefined)
-      }
       const clean = removeService(install)
       await rm(install, { force: true, recursive: true })
       expect(clean).toBe(true)

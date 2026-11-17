@@ -19,6 +19,12 @@ export interface StartApplicationOptions {
   env?: Record<string, string>,
   /** HTTP path polled for readiness. Defaults to `/api/health`. */
   readyPath?: string,
+  /**
+   * Decide whether a probed HTTP status means the application is ready.
+   * Defaults to any 2xx or 3xx response. Error-state fixtures can accept a
+   * known 5xx readiness response without bypassing the fixture lifecycle.
+   */
+  readyStatus?: (status: number) => boolean,
   /** Readiness timeout in milliseconds. Defaults to `30000`. */
   timeoutMs?: number,
 }
@@ -36,8 +42,8 @@ export type VisitCallback<T> = (page: Page) => Promise<T> | T
 
 /** A running application under test. */
 export interface ApplicationHandle {
-  /** Stop the application; idempotent. */
-  stop: () => Promise<void>,
+  /** Stop the application and return its child exit code; idempotent. */
+  stop: () => Promise<number>,
   /** The base URL of the running application. */
   url: string,
   /**
@@ -88,15 +94,21 @@ function httpStatus(url: string): Promise<number> {
  * @param url - URL to poll.
  * @param timeoutMs - Readiness timeout.
  * @param output - Captured process output, included in the failure message.
+ * @param ready - Predicate for an acceptable readiness status.
  */
-async function waitForReady(url: string, timeoutMs: number, output: () => string): Promise<void> {
+async function waitForReady(
+  url: string,
+  timeoutMs: number,
+  output: () => string,
+  ready: (status: number) => boolean,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
   let lastError = 'no response'
 
   while (Date.now() < deadline) {
     try {
       const status = await httpStatus(url)
-      if (status >= 200 && status < 400) return
+      if (ready(status)) return
       lastError = `HTTP ${status}`
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error)
@@ -130,6 +142,7 @@ export async function startApplication(
     entry,
     env = {},
     readyPath = '/api/health',
+    readyStatus = status => status >= 200 && status < 400,
     timeoutMs = 30_000,
   } = options
   const port = await freePort()
@@ -155,16 +168,16 @@ export async function startApplication(
   void drain(proc.stderr)
 
   const url = `http://127.0.0.1:${port}`
-  let stopped = false
-  const stop = async (): Promise<void> => {
-    if (stopped) return
-    stopped = true
+  let exit: Promise<number> | null = null
+  const stop = async (): Promise<number> => {
+    if (exit) return exit
     proc.kill()
-    await proc.exited
+    exit = proc.exited
+    return exit
   }
 
   try {
-    await waitForReady(`${url}${readyPath}`, timeoutMs, () => output)
+    await waitForReady(`${url}${readyPath}`, timeoutMs, () => output, readyStatus)
   } catch (error) {
     await stop()
     throw error

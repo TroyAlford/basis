@@ -1,12 +1,11 @@
 import { generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from 'basis/codegen'
 import * as serverSurface from 'basis/server'
 import { Graph } from 'basis/server'
-import { withIsolatedDatabase } from 'basis/testing'
+import { tempDirectory, withIsolatedDatabase } from 'basis/testing'
 import { checksum } from 'basis/utilities'
 import { generateErd } from 'basis/visualization'
 import { expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const graph = new Graph({
@@ -34,7 +33,7 @@ test('consumer codegen and visualization surfaces resolve', () => {
 })
 
 test('consumer codegen emitters resolve and write independent outputs', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'basis-consumer-codegen-'))
+  const directory = tempDirectory('basis-consumer-codegen')
   try {
     await Promise.all([
       TypeScriptEmitter(graph, directory),

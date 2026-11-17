@@ -53,7 +53,6 @@ const logger = new Logger({ colors: false })
 
 /** The closed CLI command vocabulary. */
 enum Command {
-  Check = 'check',
   Compliance = 'compliance',
   Docs = 'docs',
   Doctor = 'doctor',
@@ -190,12 +189,12 @@ const runLint = (fix: boolean): number => {
 }
 
 /**
- * Runs the focused, report-only Basis architecture policy.
+ * Runs the authoritative, report-only Basis paradigm policy.
  *
  * Compliance always uses the Basis-owned configuration so the check is
  * available and identical even when a consumer repository carries its own
- * ESLint config. It applies the same `@basis/component-architecture` rule
- * `basis lint` and `basis check` run, with no formatting rules.
+ * ESLint config. It applies the architecture and infrastructure rules without
+ * duplicating the style policy, which `basis lint` already ran.
  * @returns The child process exit code.
  */
 const runCompliance = (): number => runBin('eslint', 'eslint', [
@@ -229,6 +228,28 @@ const spawnBunCheck = (): number => writeResult(run(
  * @returns The child process exit code.
  */
 const runTypecheck = (): number => (requireBunCheck() ? spawnBunCheck() : 1)
+
+/**
+ * Runs the complete repository check: emit, style lint, optional paradigm
+ * compliance, and typecheck.
+ *
+ * `basis lint` and `basis compliance` are the two supported entry points.
+ * Compliance is the authoritative gate; lint omits only the paradigm rules.
+ * @param paradigm Whether to run the compliance rule set.
+ * @returns The first non-zero child process exit code, or `0`.
+ */
+const runCompleteCheck = async (paradigm: boolean): Promise<number> => {
+  if (!requireBunCheck()) return 1
+  const emitCode = await runEmit()
+  if (emitCode !== 0) return emitCode
+  const lintCode = runLint(false)
+  if (lintCode !== 0) return lintCode
+  if (paradigm) {
+    const complianceCode = runCompliance()
+    if (complianceCode !== 0) return complianceCode
+  }
+  return spawnBunCheck()
+}
 
 /**
  * Runs the conventional application emit lifecycle.
@@ -321,7 +342,7 @@ const doctor = (): number => {
 const usage = (): void => {
   logger.info([
     'usage: basis <compliance|docs build [--out <dir>] [--base <path>]',
-    '|docs check|doctor|emit|format|lint|typecheck|check>',
+    '|docs check|doctor|emit|format|lint|typecheck>',
   ].join(''))
 }
 
@@ -334,19 +355,12 @@ const main = async (): Promise<void> => {
 
   if (command === Command.Doctor) process.exit(doctor())
   if (command === Command.Emit) process.exit(await runEmit())
-  if (command === Command.Lint) process.exit(runLint(false))
+  if (command === Command.Lint) process.exit(await runCompleteCheck(false))
   if (command === Command.Format) process.exit(runLint(true))
-  if (command === Command.Compliance) process.exit(runCompliance())
+  if (command === Command.Compliance) process.exit(await runCompleteCheck(true))
   if (command === Command.Typecheck) {
     const emitCode = await runEmit()
     process.exit(emitCode === 0 ? runTypecheck() : emitCode)
-  }
-  if (command === Command.Check) {
-    if (!requireBunCheck()) process.exit(1)
-    const emitCode = await runEmit()
-    if (emitCode !== 0) process.exit(emitCode)
-    const lintCode = runLint(false)
-    process.exit(lintCode === 0 ? spawnBunCheck() : lintCode)
   }
 
   if (command === Command.Docs) {

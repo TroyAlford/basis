@@ -90,8 +90,7 @@ console.log(`
 No hosted GitHub Actions run was triggered.
 
 Run the repository's real checks locally before pushing:
-  bun run lint
-  bun run lint:ts
+  bun run compliance
   bun run test:unit
   bun run test:database
   bun run test:e2e

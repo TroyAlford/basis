@@ -23,7 +23,7 @@ export default createConfig({
 })
 ```
 
-The policy includes repository conventions such as import ordering, JSDoc requirements, class-based React architecture, and the no-paragraph-line-breaks documentation rule. `@basis/component-architecture` is the rule that rejects function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source while leaving tests, fixtures, and generated files outside its scope.
+The policy includes repository style conventions such as import ordering, JSDoc requirements, object and interface ordering, and the no-paragraph-line-breaks documentation rule. It is a style policy: architecture and infrastructure opinions live in `basis compliance`, not in `basis/eslint`.
 
 Database-facing policy:
 
@@ -31,4 +31,4 @@ Database-facing policy:
 - `@basis/sql-template-format` formats recognized Bun SQL tagged templates with uppercase SQL keywords, clause-per-line layout, controlled indentation, and no trailing semicolon. Quoted text, comments, dollar-quoted bodies and template interpolations are preserved.
 - `@basis/entity-definition-format` applies to `**/*.entities.json`, enforcing canonical entity key order and the exact canonical field vocabulary. The same validator checks entity JSON examples in the documentation tree.
 
-`basis lint` applies the full policy; `basis format` applies the autofixes. `basis compliance` runs the architecture rule alone and always uses the Basis-owned configuration.
+`basis lint` applies the style policy and runs the typechecker; `basis format` applies the autofixes. `basis compliance` runs the same style/typecheck surface plus the architecture and infrastructure rules, and always uses the Basis-owned compliance configuration.

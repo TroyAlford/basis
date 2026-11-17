@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 /*
  * Lifecycle proof for `useApplication`.

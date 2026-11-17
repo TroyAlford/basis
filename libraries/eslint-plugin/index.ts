@@ -28,6 +28,9 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
       ecmaVersion: 'latest',
       sourceType: 'module',
     },
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
     plugins: {
       ...plugins,
     },
@@ -56,7 +59,6 @@ export default pluginTypescript.config(
   ...pluginTypescript.configs.stylistic,
   plugin({
     rules: {
-      '@basis/component-architecture': 'error',
       '@basis/import-extensions': 'error',
       '@basis/no-default-export': 'error',
       '@basis/no-extraneous-dependencies': 'error',

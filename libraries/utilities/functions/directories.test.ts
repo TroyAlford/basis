@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { directories } from './directories'
 
@@ -10,7 +10,7 @@ import { directories } from './directories'
  */
 async function inDirectory(work: (root: string) => Promise<void>): Promise<void> {
   const previous = process.cwd()
-  const root = await mkdtemp(join(tmpdir(), 'basis-directories-'))
+  const root = tempDirectory('basis-directories')
   process.chdir(root)
   try {
     await work(root)
