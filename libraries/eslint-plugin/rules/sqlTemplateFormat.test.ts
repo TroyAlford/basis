@@ -581,6 +581,32 @@ describe('parser-backed formatting', () => {
     `)
   })
 
+  test('distinguishes built-in and application function casing', () => {
+    expect(formatSQL(`
+      select set_config('app.name', custom_function(id), true) as setting from widgets
+    `)).toMatchIndented(`
+      SELECT SET_CONFIG('app.name', custom_function("id"), true) AS "setting"
+      FROM "widgets"
+    `)
+  })
+
+  test('wraps a long EXISTS subquery at clause boundaries', () => {
+    expect(formatSQL(`
+      select exists (
+        select 1 from widgets w
+        where w.active = true and w.owner_id = $1 and w.name = 'x'
+      ) as present
+    `)).toMatchIndented(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM "widgets" "w"
+        WHERE "w"."active" = true
+          AND "w"."owner_id" = $1
+          AND "w"."name" = 'x'
+      ) AS "present"
+    `)
+  })
+
   test('quotes unquoted camelCase identifiers', () => {
     expect(formatSQL('select widgetId as displayName from widgetTable where widgetId = 1')).toMatchIndented(`
       SELECT "widgetId" AS "displayName"
