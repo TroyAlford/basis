@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { IsolatedDatabase } from '../testing/DatabaseIsolation'
-import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import type { LifecycleDatabase } from '../testing/DatabaseLifecycle'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -113,7 +113,7 @@ const toyTwo = '00000000-0000-4000-8000-000000000032'
  * Seed the parity fixture.
  * @param database - Isolated PostgreSQL database.
  */
-async function seed(database: IsolatedDatabase): Promise<void> {
+async function seed(database: LifecycleDatabase): Promise<void> {
   await database.use(definitions)
   await database.sql`
     INSERT INTO "Entity" ("id", "name", "entity")
@@ -186,7 +186,7 @@ async function seed(database: IsolatedDatabase): Promise<void> {
  * @returns Both result arrays.
  */
 async function execute(
-  database: IsolatedDatabase,
+  database: LifecycleDatabase,
   queryCase: ParityCase,
 ): Promise<{ source: { id: string }[], structured: { id: string }[] }> {
   const options = queryCase.options ?? {}
@@ -524,7 +524,7 @@ const cases: readonly ParityCase[] = [
 
 describe('Query parity gate', () => {
   test('matches source and structured filters against real PostgreSQL', async () => {
-    await withIsolatedDatabase('query-parity', async database => {
+    await withLifecycleDatabase('query-parity', async database => {
       await seed(database)
       for (const queryCase of cases) {
         const result = await execute(database, queryCase)

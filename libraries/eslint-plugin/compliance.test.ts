@@ -60,8 +60,39 @@ describe('createComplianceConfig', () => {
       'import { chromium } from \'playwright\'',
       'await chromium.launch()',
       'await page.screenshot()',
+      'await page.goto(\'/workspace\')',
     ].join('\n')
     expect(messageIds(code, 'src/example.ts')).toEqual([])
+  })
+
+  test('requires application visits for navigation in test source', () => {
+    const code = 'await page.goto(\'/workspace\')'
+    expect(messageIds(code, 'src/example.e2e.ts')).toEqual(['noDirectApplicationNavigation'])
+  })
+
+  test('allows application visits in test source', () => {
+    const code = [
+      'import { useApplication } from \'basis/testing\'',
+      'const app = await useApplication({ entry: \'./serve.ts\' })',
+      'await app.visit(\'/workspace\', async page => page.click(\'button\'))',
+    ].join('\n')
+    expect(messageIds(code, 'src/example.e2e.ts')).toEqual([])
+  })
+
+  test('requires auto-rollback database tests', () => {
+    const code = [
+      'import { withDurableDatabase } from \'basis/testing\'',
+      'await withDurableDatabase(\'test\', () => undefined)',
+    ].join('\n')
+    expect(messageIds(code, 'src/example.test.ts')).toEqual(['noCommittedTestDatabaseWrite'])
+  })
+
+  test('allows withDatabase', () => {
+    const code = [
+      'import { withDatabase } from \'basis/testing\'',
+      'await withDatabase(\'test\', null, database => database.query(\'Note\', { fields: [\'id\'] }))',
+    ].join('\n')
+    expect(messageIds(code, 'src/example.test.ts')).toEqual([])
   })
 
   test('reports both process and server rules for a manual server launcher', () => {

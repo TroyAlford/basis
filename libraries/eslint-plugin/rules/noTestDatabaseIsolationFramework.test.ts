@@ -60,11 +60,12 @@ describe('noTestDatabaseIsolationFramework', () => {
     expectsReport('import Database from \'better-sqlite3\'\nnew Database(\':memory:\')')
   })
 
-  test('allows the Basis fixture and isolation helpers', () => {
+  test('allows the internal Basis fixture and lifecycle helpers', () => {
     expect(lint([
-      'import { useDatabaseFixture, withIsolatedDatabase } from \'basis/testing\'',
+      'import { useDatabaseFixture } from \'../testing/DatabaseFixture\'',
+      'import { withLifecycleDatabase } from \'../testing/DatabaseLifecycle\'',
       'await useDatabaseFixture(\'test\')',
-      'await withIsolatedDatabase(\'test\', () => undefined)',
+      'await withLifecycleDatabase(\'test\', () => undefined)',
     ].join('\n'))).toHaveLength(0)
   })
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import type { IsolatedDatabase } from '../testing/DatabaseIsolation'
-import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import type { LifecycleDatabase } from '../testing/DatabaseLifecycle'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -93,7 +93,7 @@ function planNodeCount(plan: Readonly<Record<string, unknown>>): number {
  * @returns Plan timings and top-level row count.
  */
 async function measure(
-  database: IsolatedDatabase,
+  database: LifecycleDatabase,
   name: string,
   sql: string,
   values: readonly unknown[] = [],
@@ -164,7 +164,7 @@ function correlatedCountSql(threshold: number, parentId?: string): string {
  * @returns Parent identities in insertion order.
  */
 async function seedFixture(
-  database: IsolatedDatabase,
+  database: LifecycleDatabase,
   parentCount: number,
   childrenFor: (index: number) => number,
 ): Promise<readonly string[]> {
@@ -211,7 +211,7 @@ async function seedFixture(
 
 describe('Query planning', () => {
   test.serial('measures correlated and CTE count strategies on representative parents and children', async () => {
-    await withIsolatedDatabase('query-planning', async database => {
+    await withLifecycleDatabase('query-planning', async database => {
       await database.use(definitions)
       const people = await seedFixture(database, 24, index => (index % 5) + 1)
       const allMetrics: MeasuredPlan[] = []
@@ -327,7 +327,7 @@ describe('Query planning', () => {
   })
 
   test.serial('measures count strategies at a larger parent/child scale', async () => {
-    await withIsolatedDatabase('query-planning-scale', async database => {
+    await withLifecycleDatabase('query-planning-scale', async database => {
       await database.use(definitions)
       await seedFixture(database, 120, index => (index % 8) + 1)
       const threshold = 4
@@ -389,7 +389,7 @@ describe('Query planning', () => {
         },
       ],
     }))
-    await withIsolatedDatabase('query-planning-variants', async database => {
+    await withLifecycleDatabase('query-planning-variants', async database => {
       await database.use(variantDefinitions)
       const alpha = '00000000-0000-4000-8000-000000000001'
       const beta = '00000000-0000-4000-8000-000000000002'

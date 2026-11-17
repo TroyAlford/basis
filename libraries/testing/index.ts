@@ -19,11 +19,5 @@ export { toMatchIndented } from './matchers/toMatchIndented'
 export { comparePng } from './snapshots'
 export type { ScreenshotComparison, ScreenshotOptions } from './snapshots'
 
-export { useDatabaseFixture, withDatabase } from '../server/testing/DatabaseFixture'
-export type { DatabaseContext, DatabaseFixture, DatabaseTestOptions } from '../server/testing/DatabaseFixture'
-export { withDurableDatabase, withIsolatedDatabase } from '../server/testing/DatabaseIsolation'
-export type {
-  DurableDatabase,
-  IsolatedDatabase,
-  IsolatedDatabaseOptions,
-} from '../server/testing/DatabaseIsolation'
+export { withDatabase } from '../server/testing/DatabaseFixture'
+export type { DatabaseContext, DatabaseTestOptions } from '../server/testing/DatabaseFixture'

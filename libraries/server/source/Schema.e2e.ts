@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { installSchema } from '../testing/Schema'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Action, Graph, Security } from './Graph'
@@ -75,7 +75,7 @@ describe('DDL schema planning', () => {
 
   test('reports no operations for an unchanged live model', async () => {
     const model = definitions()
-    await withIsolatedDatabase('schema-plan-unchanged', async database => {
+    await withLifecycleDatabase('schema-plan-unchanged', async database => {
       await installSchema(database.sql, model)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired: model, includeAuthorization: false })
@@ -92,7 +92,7 @@ describe('DDL schema planning', () => {
         { fields: [{ field: 'label', type: 'String' }], name: 'Tag' },
       ],
     }))
-    await withIsolatedDatabase('schema-plan-additive', async database => {
+    await withLifecycleDatabase('schema-plan-additive', async database => {
       await installSchema(database.sql, previous)
       const before = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual: before, desired, includeAuthorization: false, previous })
@@ -105,7 +105,7 @@ describe('DDL schema planning', () => {
   test('reports ambiguous table rename candidates instead of guessing', async () => {
     const previous = definitions('OldNote')
     const desired = definitions('NewNote')
-    await withIsolatedDatabase('schema-plan-ambiguous', async database => {
+    await withLifecycleDatabase('schema-plan-ambiguous', async database => {
       await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
@@ -131,7 +131,7 @@ describe('DDL schema planning', () => {
         },
       },
     }))
-    await withIsolatedDatabase('schema-enum-check', async database => {
+    await withLifecycleDatabase('schema-enum-check', async database => {
       await installSchema(database.sql, model)
       const id = randomUUID()
       await database.sql.unsafe(
@@ -174,7 +174,7 @@ describe('DDL schema planning', () => {
     }))
     const first = model(['owner', 'editor'])
     const added = model(['owner', 'editor', 'viewer'])
-    await withIsolatedDatabase('schema-enum-value-add', async database => {
+    await withLifecycleDatabase('schema-enum-value-add', async database => {
       await installSchema(database.sql, first)
       const installed = await DDL.introspect(database.sql)
       const plan = DDL.plan({
@@ -224,7 +224,7 @@ describe('DDL schema planning', () => {
     }))
     const first = model(['owner', 'editor'])
     const removed = model(['owner'])
-    await withIsolatedDatabase('schema-enum-value-remove', async database => {
+    await withLifecycleDatabase('schema-enum-value-remove', async database => {
       await installSchema(database.sql, first)
       const installed = await DDL.introspect(database.sql)
       const plan = DDL.plan({
@@ -276,7 +276,7 @@ describe('DDL schema planning', () => {
       }],
       enums: { AccessLevel: { editor: 'Editor access.', owner: 'Owner access.' } },
     }))
-    await withIsolatedDatabase('schema-enum-tamper', async database => {
+    await withLifecycleDatabase('schema-enum-tamper', async database => {
       await installSchema(database.sql, model)
       await database.sql
         .unsafe('ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"')
@@ -325,7 +325,7 @@ describe('DDL schema planning', () => {
     const first = model('Can manage resources.')
     const second = model('Can administer resources.')
     expect(first.ddl).toEqual(second.ddl)
-    await withIsolatedDatabase('schema-enum-description', async database => {
+    await withLifecycleDatabase('schema-enum-description', async database => {
       await installSchema(database.sql, first)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
@@ -353,7 +353,7 @@ describe('DDL schema planning', () => {
         name: 'ArrayDefaults',
       }],
     }))
-    await withIsolatedDatabase('schema-empty-array-defaults', async database => {
+    await withLifecycleDatabase('schema-empty-array-defaults', async database => {
       await installSchema(database.sql, model)
       const id = randomUUID()
       await database.sql.unsafe(
@@ -393,7 +393,7 @@ describe('DDL schema planning', () => {
     const first = model('a')
     const second = model('b')
     const removed = model()
-    await withIsolatedDatabase('schema-default-evolution', async database => {
+    await withLifecycleDatabase('schema-default-evolution', async database => {
       await installSchema(database.sql, first)
       const installed = await DDL.introspect(database.sql)
       const stable = DDL.plan({
@@ -470,7 +470,7 @@ describe('DDL schema planning', () => {
     }))
     const first = model('a', 'admin')
     const changed = model('a::text', 'admin::text')
-    await withIsolatedDatabase('schema-default-literals', async database => {
+    await withLifecycleDatabase('schema-default-literals', async database => {
       await installSchema(database.sql, first)
       const installed = await DDL.introspect(database.sql)
       expect(DDL.plan({
@@ -527,7 +527,7 @@ describe('DDL schema planning', () => {
     const plain = EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
     }))
-    await withIsolatedDatabase('schema-unique-evolution', async database => {
+    await withLifecycleDatabase('schema-unique-evolution', async database => {
       await installSchema(database.sql, unique)
       const actual = await DDL.introspect(database.sql)
       const remove = DDL.plan({
@@ -596,7 +596,7 @@ describe('DDL schema planning', () => {
         },
       ],
     }))
-    await withIsolatedDatabase('schema-unique', async database => {
+    await withLifecycleDatabase('schema-unique', async database => {
       await installSchema(database.sql, model)
       const userId = randomUUID()
       const otherUserId = randomUUID()
@@ -693,7 +693,7 @@ describe('DDL schema planning', () => {
         name: 'Membership',
       }],
     }))
-    await withIsolatedDatabase('schema-plan-relationship', async database => {
+    await withLifecycleDatabase('schema-plan-relationship', async database => {
       await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
@@ -712,7 +712,7 @@ describe('DDL schema planning', () => {
         { extends: 'Profile', fields: [], name: 'Employee' },
       ],
     }))
-    await withIsolatedDatabase('schema-plan-mti', async database => {
+    await withLifecycleDatabase('schema-plan-mti', async database => {
       await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
@@ -729,7 +729,7 @@ describe('DDL schema planning', () => {
     const desired = EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ field: 'amount', type: 'Number' }], name: 'Note' }],
     }))
-    await withIsolatedDatabase('schema-plan-column-change', async database => {
+    await withLifecycleDatabase('schema-plan-column-change', async database => {
       await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
@@ -748,7 +748,7 @@ describe('DDL schema planning', () => {
         { fields: [{ field: 'title', type: 'String' }], name: 'Tag', security: publicRead },
       ],
     })
-    await withIsolatedDatabase('schema-plan-new-auth-table', async database => {
+    await withLifecycleDatabase('schema-plan-new-auth-table', async database => {
       await installSchema(database.sql, previous.definitions)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, appRole: 'basis_app', desired, previous, superuser: true })
@@ -763,7 +763,7 @@ describe('DDL schema planning', () => {
 
   test('treats a missing previously deployed table as drift, not an addition', async () => {
     const model = definitions()
-    await withIsolatedDatabase('schema-plan-missing-deployed', async database => {
+    await withLifecycleDatabase('schema-plan-missing-deployed', async database => {
       await installSchema(database.sql, model)
       await database.sql`
         DROP TABLE "Note"
@@ -784,7 +784,7 @@ describe('DDL schema planning', () => {
       ],
     }))
     const desired = definitions('Note')
-    await withIsolatedDatabase('schema-plan-remove', async database => {
+    await withLifecycleDatabase('schema-plan-remove', async database => {
       await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
@@ -798,7 +798,7 @@ describe('DDL schema planning', () => {
 
   test('reports live catalog drift as a blocker', async () => {
     const model = definitions()
-    await withIsolatedDatabase('schema-plan-drift', async database => {
+    await withLifecycleDatabase('schema-plan-drift', async database => {
       await installSchema(database.sql, model)
       await database.sql`
         CREATE TABLE "Unexpected" (
@@ -816,7 +816,7 @@ describe('DDL schema planning', () => {
     const model = new Graph({
       entities: [noteEntity()],
     })
-    await withIsolatedDatabase('schema-plan-rls', async database => {
+    await withLifecycleDatabase('schema-plan-rls', async database => {
       await installSchema(database.sql, model.definitions)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
@@ -1045,7 +1045,7 @@ describe('DDL schema planning', () => {
   })
 
   test.serial('plans real catalog policy and role changes', async () => {
-    await withIsolatedDatabase('schema-plan-catalog-policy', async database => {
+    await withLifecycleDatabase('schema-plan-catalog-policy', async database => {
       const appRole = `basis_plan_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
       const previous = new Graph({
@@ -1126,7 +1126,7 @@ describe('DDL schema planning', () => {
   })
 
   test.serial('executes the ordered policy/helper replacement sequence in PostgreSQL', async () => {
-    await withIsolatedDatabase('schema-plan-catalog-helper', async database => {
+    await withLifecycleDatabase('schema-plan-catalog-helper', async database => {
       const appRole = `basis_plan_helper_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
       const previous = new Graph({
@@ -1247,7 +1247,7 @@ describe('DDL schema planning', () => {
 
   test.serial('revokes public schema CREATE through the reviewed graph plan', async () => {
     const appRole = `basis_public_${randomUUID().replaceAll('-', '').slice(0, 12)}`
-    await withIsolatedDatabase('schema-public-create', async database => {
+    await withLifecycleDatabase('schema-public-create', async database => {
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
       await database.sql.unsafe('GRANT CREATE ON SCHEMA public TO PUBLIC').simple()
       const model = new Graph({
@@ -1268,7 +1268,7 @@ describe('DDL schema planning', () => {
 
   test('detects a nondefault operator class on a canonical default B-tree', async () => {
     const model = definitions()
-    await withIsolatedDatabase('schema-index-opclass', async database => {
+    await withLifecycleDatabase('schema-index-opclass', async database => {
       await installSchema(database.sql, model)
       await database.sql`
         DROP INDEX "Entity_name_id_idx"
@@ -1284,7 +1284,7 @@ describe('DDL schema planning', () => {
 
   test('detects a same-name index with the wrong access method', async () => {
     const model = definitions()
-    await withIsolatedDatabase('schema-index-method', async database => {
+    await withLifecycleDatabase('schema-index-method', async database => {
       await installSchema(database.sql, model)
       await database.sql`
         DROP INDEX "Entity_name_trgm_idx"
