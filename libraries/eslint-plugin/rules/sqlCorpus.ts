@@ -13,6 +13,28 @@ const ROOTS = ['libraries', 'consumer', 'testing', 'scripts']
 const EXCLUDED = /(?:^|[/.])(?:node_modules|dist|\.cache|generated)(?:[/.]|$)/
 const TEST_FILE = /\.(?:test|e2e|screenshot|lifecycle|hmr)\.(?:ts|tsx)$/u
 
+/** Representative runtime SQL for call sites assembled from query-builder values. */
+const RUNTIME_SQL_FIXTURES: Readonly<Record<string, readonly string[]>> = {
+  'compiled.sql': [
+    'SELECT "id", "name" FROM "Entity" WHERE "id" = $1',
+    'INSERT INTO "Entity" ("id", "name") VALUES ($1, $2) RETURNING "id"',
+  ],
+  'operation.sql': [
+    'ALTER TABLE "Entity" ADD CONSTRAINT "Entity_pkey" PRIMARY KEY ("id")',
+    'ALTER TABLE "Entity" ADD COLUMN "created.at" TIMESTAMPTZ',
+    'ALTER TABLE "Entity" DROP COLUMN "obsolete"',
+    'ALTER TABLE "Entity" ALTER COLUMN "name" TYPE TEXT',
+  ],
+  'prepared.query.sql': [
+    'SELECT "id" FROM "Entity" WHERE "id" = $1',
+    'UPDATE "Entity" SET "name" = $1 WHERE "id" = $2',
+  ],
+  'statement.sql': [
+    'INSERT INTO "Entity" ("id") VALUES ($1)',
+    'DELETE FROM "Entity" WHERE "id" = $1',
+  ],
+}
+
 /** One discovered corpus SQL string. */
 export interface CorpusCandidate {
   file: string,
@@ -36,6 +58,8 @@ export interface CorpusReport {
   parseFailures: CorpusIssue[],
   plNodes: Set<string>,
   plSemanticFailures: CorpusIssue[],
+  runtimeFixtures: number,
+  runtimeSites: string[],
   semanticFailures: CorpusIssue[],
   sources: number,
   unresolved: CorpusIssue[],
@@ -110,6 +134,27 @@ export function sqlSemantics(value: unknown): unknown {
 }
 
 /**
+ * Canonicalize a PL/pgSQL executable expression.
+ * @param query - Raw expression SQL.
+ * @returns Normalized expression text.
+ */
+function canonicalPlQuery(query: string): string {
+  for (const candidate of [query, `SELECT ${query}`]) {
+    try {
+      const parsed: any = parseSync(candidate)
+      if (parsed.stmts?.length) return JSON.stringify(sqlSemantics(parsed.stmts.map((stmt: any) => stmt.stmt)))
+    } catch {
+      // Try the next expression shape, then fall back to lexical normalization.
+    }
+  }
+  const assignment = /^(.*?)\s*(:=|=)\s*([\s\S]*)$/u.exec(query)
+  if (assignment) {
+    return `${assignment[1]?.trim().toLowerCase()} ${assignment[2]} ${canonicalPlQuery(assignment[3] ?? '')}`
+  }
+  return query.replace(/\s+/gu, ' ').trim().toLowerCase()
+}
+
+/**
  * Normalize PL/pgSQL meaning for structural equivalence checks.
  * @param value - PL/pgSQL AST value.
  * @returns AST without source and expression-text metadata.
@@ -120,10 +165,14 @@ export function plSemantics(value: unknown): unknown {
     const result: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(value)) {
       if (key === 'location' || key === 'lineno' || key === 'stmt_location' || key === 'stmt_len'
-        || key === 'query' || key === 'dno' || key === 'varno' || key === 't_varno'
+        || key === 'dno' || key === 'varno' || key === 't_varno'
         || key === 'retvarno' || key === 'old_varno' || key === 'new_varno'
         || key === 'found_varno' || key === 'out_param_varno'
         || key.endsWith('_start') || key.endsWith('_end')) continue
+      if (key === 'query' && typeof child === 'string') {
+        result[key] = canonicalPlQuery(child)
+        continue
+      }
       if (key === 'datums' && Array.isArray(child)) {
         result[key] = child
           .filter((datum: any) => !/^__case__variable_\d+__$/iu.test(datum?.PLpgSQL_var?.refname ?? ''))
@@ -179,9 +228,12 @@ function collectNodes(
 
 /**
  * Discover and verify the production SQL corpus.
+ * @param extra - Additional candidates used by coverage regression tests.
  * @returns Executable corpus report.
  */
-export async function scanProductionCorpus(): Promise<CorpusReport> {
+export async function scanProductionCorpus(
+  extra: readonly CorpusCandidate[] = [],
+): Promise<CorpusReport> {
   await loadModule()
   const report: CorpusReport = {
     candidates: 0,
@@ -191,6 +243,8 @@ export async function scanProductionCorpus(): Promise<CorpusReport> {
     parseFailures: [],
     plNodes: new Set(),
     plSemanticFailures: [],
+    runtimeFixtures: 0,
+    runtimeSites: [],
     semanticFailures: [],
     sources: 0,
     unresolved: [],
@@ -210,6 +264,7 @@ export async function scanProductionCorpus(): Promise<CorpusReport> {
     candidates.push({ file, source, sql })
   }
   for (const sql of generatedFixtures) add('generated-fixture', sql, 'fixture')
+  for (const candidate of extra) add(candidate.file, candidate.sql, candidate.source)
   for (const file of ROOTS.flatMap(sourceFiles)) {
     report.sources += 1
     if (file.endsWith('.sql')) {
@@ -225,8 +280,18 @@ export async function scanProductionCorpus(): Promise<CorpusReport> {
       } else if (ts.isCallExpression(node) && /\.(?:unsafe|raw)$/u.test(node.expression.getText())) {
         const argument = node.arguments[0]
         const sql = argument ? staticSql(argument) : null
-        if (sql !== null) add(file, sql, 'call')
-        else report.unresolved.push({ file, sql: node.getText().slice(0, 240) })
+        if (sql !== null) {
+          add(file, sql, 'call')
+        } else {
+          const fixtures = RUNTIME_SQL_FIXTURES[argument?.getText() ?? '']
+          if (fixtures) {
+            for (const fixture of fixtures) add(file, fixture, 'fixture')
+            report.runtimeFixtures += fixtures.length
+            report.runtimeSites.push(argument?.getText() ?? '')
+          } else {
+            report.unresolved.push({ file, sql: node.getText().slice(0, 240) })
+          }
+        }
       }
       ts.forEachChild(node, visit)
     }
