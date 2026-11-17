@@ -62,7 +62,7 @@ test('custom Graph fixtures install app-role RLS and select an actor', async () 
 test('asOwner swaps role and exposes the same fixture context', async () => {
   await withInternalDatabase('custom-graph-owner-api', owner, async database => {
     const appRole = await database.sql<{ role: string }[]>`
-      SELECT current_role AS role
+      SELECT CURRENT_ROLE AS "role"
     `
     expect(appRole[0]?.role).toBe('basis_app')
     const schema = database.schema
@@ -84,7 +84,7 @@ test('asOwner swaps role and exposes the same fixture context', async () => {
     })
 
     const restored = await database.sql<{ role: string }[]>`
-      SELECT current_role AS role
+      SELECT CURRENT_ROLE AS "role"
     `
     expect(restored[0]?.role).toBe('basis_app')
   }, options)
@@ -107,13 +107,13 @@ describe('Public database fixture isolation', () => {
   test('runs both public overloads as the restricted application role', async () => {
     await withDatabase('public-overload-callback', async database => {
       const [role] = await database.sql<{ role: string }[]>`
-        SELECT current_role AS role
+        SELECT CURRENT_ROLE AS "role"
       `
       expect(role?.role).toBe('basis_app')
     })
     await withDatabase('public-overload-actor', null, async database => {
       const [role] = await database.sql<{ role: string }[]>`
-        SELECT current_role AS role
+        SELECT CURRENT_ROLE AS "role"
       `
       expect(role?.role).toBe('basis_app')
     })
@@ -196,8 +196,8 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
-          FUNCTION "resolve_invoice_status"()
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION
+          "resolve_invoice_status"()
       `
       await installBasis(database.sql)
       await database.sql`
@@ -211,11 +211,11 @@ describe('Basis substrate installation', () => {
       `)
         .toEqual([{ status: 'resolved' }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
-) AS present
+        SELECT EXISTS (SELECT 1 FROM "pg_trigger" "TRIGGER"
+        JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
+        JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace" WHERE "namespace"."nspname" =
+          CURRENT_SCHEMA()   AND "relation"."relname" = 'Invoice'   AND "TRIGGER"."tgname" = 'resolve_invoice_status')
+          AS "present"
       `).toEqual([{ present: true }])
     })
   })
@@ -236,8 +236,8 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
-          FUNCTION "resolve_invoice_status"()
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION
+          "resolve_invoice_status"()
       `
       await database.sql.unsafe(`
         CREATE OR REPLACE FUNCTION basis.enroll_identity(
@@ -269,11 +269,11 @@ describe('Basis substrate installation', () => {
           TO_REGPROCEDURE('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
       `).toEqual([{ enroll: true, resolve: true, role: true, triggerFunction: true }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
-) AS present
+        SELECT EXISTS (SELECT 1 FROM "pg_trigger" "TRIGGER"
+        JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
+        JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace" WHERE "namespace"."nspname" =
+          CURRENT_SCHEMA()   AND "relation"."relname" = 'Invoice'   AND "TRIGGER"."tgname" = 'resolve_invoice_status')
+          AS "present"
       `).toEqual([{ present: true }])
       await database.sql`
         INSERT INTO "Invoice" ("id")

@@ -80,7 +80,7 @@ describe('Server database lifecycle', () => {
   isolatedTest('exposes Bun SQL parameterization and error semantics', async database => {
     const injected = "Robert'); drop table users; --"
     const rows = await database.sql<{ text: string, value: number }[]>`
-      SELECT ${injected} AS text, ${7} AS value
+      SELECT ${injected} AS "text", ${7} AS "value"
     `
     expect(rows[0]?.text).toBe(injected)
     expect(rows[0]?.value).toBe(7)
@@ -88,7 +88,7 @@ describe('Server database lifecycle', () => {
     const failure = await database.captureError(async db => {
       await db.sql`
         SELECT *
-        FROM basis_missing_relation
+        FROM "basis_missing_relation"
       `
     })
     expect(failure).toMatchObject({ errno: '42P01' })
@@ -97,15 +97,15 @@ describe('Server database lifecycle', () => {
   durableTest('commits and rolls back through pooled Bun transactions', async database => {
     await database.tx(async sql => {
       await sql`
-        CREATE TABLE tx_probe (
-          value TEXT
+        CREATE TABLE "tx_probe" (
+          "value" TEXT
         )
       `
     })
 
     const result = await database.tx(async sql => {
       await sql`
-        INSERT INTO tx_probe
+        INSERT INTO "tx_probe"
         VALUES
           ('committed')
       `
@@ -116,8 +116,8 @@ describe('Server database lifecycle', () => {
     const count = async (): Promise<number | undefined> => (
       await database.tx(async sql => {
         const rows = await sql<{ count: number }[]>`
-          SELECT COUNT(*)::int AS count
-          FROM tx_probe
+          SELECT COUNT(*)::int AS "count"
+          FROM "tx_probe"
         `
         return rows[0]?.count
       })
@@ -126,7 +126,7 @@ describe('Server database lifecycle', () => {
 
     await expect(database.tx(async sql => {
       await sql`
-        INSERT INTO tx_probe
+        INSERT INTO "tx_probe"
         VALUES
           ('thrown')
       `
@@ -136,13 +136,13 @@ describe('Server database lifecycle', () => {
 
     await expect(database.tx(async sql => {
       await sql`
-        INSERT INTO tx_probe
+        INSERT INTO "tx_probe"
         VALUES
           ('failed')
       `
       await sql`
         SELECT *
-        FROM basis_missing_tx_relation
+        FROM "basis_missing_tx_relation"
       `
     })).rejects.toMatchObject({ errno: '42P01' })
     expect(await count()).toBe(1)
@@ -162,14 +162,14 @@ describe('Server database lifecycle', () => {
       tableName: string,
     }[]>`
       SELECT
-        table_name AS "tableName",
-        column_name AS "columnName",
-        data_type AS "dataType",
-        is_nullable AS "isNullable"
-      FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = ${'Note'}
-      ORDER BY ordinal_position
+        "table_name" AS "tableName",
+        "column_name" AS "columnName",
+        "data_type" AS "dataType",
+        "is_nullable" AS "isNullable"
+      FROM "information_schema"."columns"
+      WHERE "table_schema" = CURRENT_SCHEMA()
+        AND "table_name" = ${'Note'}
+      ORDER BY "ordinal_position"
     `
     const accountColumns = await database.sql<{
       columnName: string,
@@ -178,14 +178,14 @@ describe('Server database lifecycle', () => {
       tableName: string,
     }[]>`
       SELECT
-        table_name AS "tableName",
-        column_name AS "columnName",
-        data_type AS "dataType",
-        is_nullable AS "isNullable"
-      FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = ${'Account'}
-      ORDER BY ordinal_position
+        "table_name" AS "tableName",
+        "column_name" AS "columnName",
+        "data_type" AS "dataType",
+        "is_nullable" AS "isNullable"
+      FROM "information_schema"."columns"
+      WHERE "table_schema" = CURRENT_SCHEMA()
+        AND "table_name" = ${'Account'}
+      ORDER BY "ordinal_position"
     `
     expect([...noteColumns, ...accountColumns]).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
@@ -199,12 +199,12 @@ describe('Server database lifecycle', () => {
     ])
 
     const primaryKeys = await database.sql<{ tableName: string }[]>`
-      SELECT tc.table_name AS "tableName"
-      FROM information_schema.table_constraints tc
-      WHERE tc.constraint_type = 'PRIMARY KEY'
-        AND tc.table_schema = CURRENT_SCHEMA()
-        AND tc.table_name IN (${'Note'}, ${'Account'})
-      ORDER BY tc.table_name
+      SELECT "tc"."table_name" AS "tableName"
+      FROM "information_schema"."table_constraints" "tc"
+      WHERE "tc"."constraint_type" = 'PRIMARY KEY'
+        AND "tc"."table_schema" = CURRENT_SCHEMA()
+        AND "tc"."table_name" IN (${'Note'}, ${'Account'})
+      ORDER BY "tc"."table_name"
     `
     expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
 
@@ -228,12 +228,12 @@ describe('Server database lifecycle', () => {
     `
     await installSchema(database.sql, entities)
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::int AS "count"
       FROM "Note"
     `)
       .toEqual([{ count: 1 }])
     expect(await database.sql<{ id: string }[]>`
-      SELECT id
+      SELECT "id"
       FROM "Account"
     `)
       .toEqual([{ id: accountId }])
@@ -259,7 +259,8 @@ describe('Server database lifecycle', () => {
       await sql`
         INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "favorite.id")
         VALUES
-          (${userId}, ${'User'}, ${'user@example.test'}, ${'admin'}, ${novelId})
+          (${userId}, ${'User'}, ${'user@example.test'}, ${'admin'},
+            ${novelId})
       `
       await sql`
         INSERT INTO "Book" ("id", "title")
@@ -272,7 +273,7 @@ describe('Server database lifecycle', () => {
           (${novelId}, ${'Genre'})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     })
 
@@ -292,10 +293,11 @@ describe('Server database lifecycle', () => {
       await sql`
         INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "manager.id")
         VALUES
-          (${invalidId}, ${'Invalid user'}, ${'invalid@example.test'}, ${'admin'}, ${randomUUID()})
+          (${invalidId}, ${'Invalid user'}, ${'invalid@example.test'},
+            ${'admin'}, ${randomUUID()})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     }).catch((error: unknown) => error)
     expect((invalid as { errno?: string }).errno).toMatch(/^(23503|P0001)$/)
@@ -721,8 +723,7 @@ describe('Server database lifecycle', () => {
     const failure = await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error)
     expect(failure).toMatchObject({ message: expect.stringContaining('Migration plan has blocking drift') })
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
-      SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
-        to_regclass('"Good"') IS NOT NULL AS good
+      SELECT TO_REGCLASS('"Entity"') IS NOT NULL AS "entity", TO_REGCLASS('"Good"') IS NOT NULL AS "good"
     `)).toEqual([{ entity: false, good: false }])
   })
 
@@ -732,11 +733,11 @@ describe('Server database lifecycle', () => {
     await installSchema(database.sql, entities)
 
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
-      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
-      FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = 'Entity'
-      ORDER BY ordinal_position
+      SELECT "column_name" AS "columnName", "data_type" AS "dataType", "is_nullable" AS "isNullable"
+      FROM "information_schema"."columns"
+      WHERE "table_schema" = CURRENT_SCHEMA()
+        AND "table_name" = 'Entity'
+      ORDER BY "ordinal_position"
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO' },
       { columnName: 'name', dataType: 'text', isNullable: 'NO' },
@@ -745,12 +746,12 @@ describe('Server database lifecycle', () => {
       { columnName: 'lastUpdatedAt', dataType: 'timestamp with time zone', isNullable: 'YES' },
     ])
     expect(await database.sql<{ indexName: string }[]>`
-      SELECT indexname AS "indexName"
-      FROM pg_indexes
-      WHERE schemaname = CURRENT_SCHEMA()
-        AND tablename = 'Entity'
-        AND indexname LIKE 'Entity_name%'
-      ORDER BY indexname
+      SELECT "indexname" AS "indexName"
+      FROM "pg_indexes"
+      WHERE "schemaname" = CURRENT_SCHEMA()
+        AND "tablename" = 'Entity'
+        AND "indexname" LIKE 'Entity_name%'
+      ORDER BY "indexname"
     `).toEqual([
       { indexName: 'Entity_name_id_idx' },
       { indexName: 'Entity_name_trgm_idx' },
@@ -847,14 +848,14 @@ describe('Server database lifecycle', () => {
       udtName: string,
     }[]>`
       SELECT
-        column_name AS "columnName",
-        data_type AS "dataType",
-        is_nullable AS "isNullable",
-        udt_name AS "udtName"
-      FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = 'Article'
-      ORDER BY ordinal_position
+        "column_name" AS "columnName",
+        "data_type" AS "dataType",
+        "is_nullable" AS "isNullable",
+        "udt_name" AS "udtName"
+      FROM "information_schema"."columns"
+      WHERE "table_schema" = CURRENT_SCHEMA()
+        AND "table_name" = 'Article'
+      ORDER BY "ordinal_position"
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO', udtName: 'text' },
       { columnName: 'author.id', dataType: 'text', isNullable: 'YES', udtName: 'text' },
@@ -862,11 +863,11 @@ describe('Server database lifecycle', () => {
       { columnName: 'payload', dataType: 'jsonb', isNullable: 'NO', udtName: 'jsonb' },
     ])
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
-      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
-      FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = 'Membership'
-      ORDER BY ordinal_position
+      SELECT "column_name" AS "columnName", "data_type" AS "dataType", "is_nullable" AS "isNullable"
+      FROM "information_schema"."columns"
+      WHERE "table_schema" = CURRENT_SCHEMA()
+        AND "table_name" = 'Membership'
+      ORDER BY "ordinal_position"
     `).toEqual([
       { columnName: 'user.id', dataType: 'text', isNullable: 'NO' },
       { columnName: 'campaign.id', dataType: 'text', isNullable: 'NO' },
@@ -874,27 +875,27 @@ describe('Server database lifecycle', () => {
       { columnName: 'favorites', dataType: 'text', isNullable: 'NO' },
     ])
     expect(await database.sql<{ definition: string }[]>`
-      SELECT PG_GET_CONSTRAINTDEF(oid) AS definition
-      FROM pg_constraint
-      WHERE conrelid = '"Membership"'::regclass
-        AND contype = 'p'
+      SELECT PG_GET_CONSTRAINTDEF("oid") AS "definition"
+      FROM "pg_constraint"
+      WHERE "conrelid" = '"Membership"'::regclass
+        AND "contype" = 'p'
     `).toEqual([{ definition: 'PRIMARY KEY ("user.id", "campaign.id")' }])
     expect(await database.sql<{ definition: string }[]>`
-      SELECT PG_GET_CONSTRAINTDEF(oid) AS definition
-      FROM pg_constraint
-      WHERE conrelid = '"Membership"'::regclass
-        AND contype = 'f'
-      ORDER BY conname
+      SELECT PG_GET_CONSTRAINTDEF("oid") AS "definition"
+      FROM "pg_constraint"
+      WHERE "conrelid" = '"Membership"'::regclass
+        AND "contype" = 'f'
+      ORDER BY "conname"
     `).toEqual([
       { definition: 'FOREIGN KEY ("campaign.id") REFERENCES "Campaign"(id) DEFERRABLE' },
       { definition: 'FOREIGN KEY ("user.id") REFERENCES "User"(id) DEFERRABLE' },
     ])
     expect((await database.sql<{ indexName: string }[]>`
-      SELECT indexname AS "indexName"
-      FROM pg_indexes
-      WHERE schemaname = CURRENT_SCHEMA()
-        AND tablename = 'Membership'
-      ORDER BY indexname
+      SELECT "indexname" AS "indexName"
+      FROM "pg_indexes"
+      WHERE "schemaname" = CURRENT_SCHEMA()
+        AND "tablename" = 'Membership'
+      ORDER BY "indexname"
     `).map(row => row.indexName)).toEqual([
       'Membership_campaign_idx',
       'Membership_pkey',
@@ -945,7 +946,7 @@ describe('Server database lifecycle', () => {
         (${grace}, ${campaign}, 'Player', 'cards')
     `
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::int AS "count"
       FROM "Entity"
       WHERE "entity" = 'Membership'
     `).toEqual([{ count: 0 }])
@@ -1460,13 +1461,11 @@ describe('Server database lifecycle', () => {
     }
 
     await database.sql`
-      UPDATE "User"
-      SET "partner.id" = ${members[1]?.id}
+      UPDATE "User" SET "partner.id" = ${members[1]?.id}
       WHERE "id" = ${members[0]?.id}
     `
     await database.sql`
-      UPDATE "User"
-      SET "partner.id" = ${members[20]?.id}
+      UPDATE "User" SET "partner.id" = ${members[20]?.id}
       WHERE "id" = ${members[2]?.id}
     `
 
@@ -1691,15 +1690,15 @@ describe('Server database lifecycle', () => {
     await installSchema(database.sql, entities)
 
     expect(await database.sql<{ indexName: string, isUnique: boolean }[]>`
-      SELECT indexname AS "indexName", indisunique AS "isUnique"
-      FROM pg_indexes
-      JOIN pg_class ON pg_class.relname = indexname
-        AND pg_class.relnamespace = current_schema()::regnamespace
-      JOIN pg_index ON pg_index.indexrelid = pg_class.oid
-      WHERE schemaname = current_schema()
-        AND tablename = 'Pet'
-        AND indexname LIKE 'Pet_%_fk_idx'
-      ORDER BY indexname
+      SELECT "indexname" AS "indexName", "indisunique" AS "isUnique"
+      FROM "pg_indexes"
+      JOIN "pg_class" ON ("pg_class"."relname" = "indexname" AND "pg_class"."relnamespace" =
+        CURRENT_SCHEMA()::regnamespace)
+      JOIN "pg_index" ON "pg_index"."indexrelid" = "pg_class"."oid"
+      WHERE "schemaname" = CURRENT_SCHEMA()
+        AND "tablename" = 'Pet'
+        AND "indexname" LIKE 'Pet_%_fk_idx'
+      ORDER BY "indexname"
     `).toEqual([
       { indexName: 'Pet_guardian_fk_idx', isUnique: true },
       { indexName: 'Pet_owner_fk_idx', isUnique: false },
@@ -2436,7 +2435,7 @@ describe('Server database lifecycle', () => {
           (${id}, ${'admin'}, ${id})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     })
 
@@ -2448,7 +2447,7 @@ describe('Server database lifecycle', () => {
           (${incompleteId}, ${'Incomplete'}, ${'MtiSystemUser'})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     }).catch((error: unknown) => error)
     expect(incomplete).toMatchObject({ errno: 'P0001' })
@@ -2466,7 +2465,7 @@ describe('Server database lifecycle', () => {
           (${missingParentId}, ${'admin'}, ${missingParentId})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     }).catch((error: unknown) => error)
     expect(missingParent).toMatchObject({ errno: 'P0001' })
@@ -2477,7 +2476,7 @@ describe('Server database lifecycle', () => {
         WHERE "id" = ${id}
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     }).catch((error: unknown) => error)
     expect(deleteFailure).toMatchObject({ errno: 'P0001' })
@@ -2489,18 +2488,18 @@ describe('Server database lifecycle', () => {
     }))
     await database.use(entities)
     await database.sql`
-      WITH rows AS (
-        SELECT gen_random_uuid()::text AS id, value
-        FROM generate_series(1, 10) AS series(value)
+      WITH "rows" AS (
+        SELECT GEN_RANDOM_UUID()::text AS "id", "value"
+        FROM GENERATE_SERIES(1, 10) "series" ("value")
       ),
-      roots AS (
-        INSERT INTO "Entity"("id", "name", "entity")
-        SELECT id, 'Number ' || value, 'NumberRow'
-        FROM rows
+       "roots" AS (
+        INSERT INTO "Entity" ("id", "name", "entity")
+        SELECT "id", 'Number ' || "value", 'NumberRow'
+        FROM "rows"
       )
-      INSERT INTO "NumberRow"("id", "value")
-      SELECT id, value
-      FROM rows
+      INSERT INTO "NumberRow" ("id", "value")
+      SELECT "id", "value"
+      FROM "rows"
     `
 
     const query = (where: Filter | Readonly<Record<string, unknown>>) => (
@@ -2611,7 +2610,7 @@ describe('Server database lifecycle', () => {
     })
     expect(blockedDelete).toMatchObject({ errno: '23503' })
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::int AS "count"
       FROM "Post"
     `).toEqual([{ count: 1 }])
   })
@@ -2650,7 +2649,7 @@ describe('Server database lifecycle', () => {
     const carId = randomUUID()
     await database.tx(async sql => {
       await sql`
-        SET constraints ALL deferred
+        SET CONSTRAINTS ALL DEFERRED
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
@@ -2669,10 +2668,10 @@ describe('Server database lifecycle', () => {
           (${carId}, ${userId})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
       expect(await sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS count
+        SELECT COUNT(*)::int AS "count"
         FROM "CycleUser"
       `).toEqual([{ count: 1 }])
     })
@@ -2681,7 +2680,7 @@ describe('Server database lifecycle', () => {
     const invalidUserId = randomUUID()
     const invalid = await database.tx(async sql => {
       await sql`
-        SET constraints ALL deferred
+        SET CONSTRAINTS ALL DEFERRED
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
@@ -2700,7 +2699,7 @@ describe('Server database lifecycle', () => {
           (${invalidCarId}, ${randomUUID()})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
@@ -2710,7 +2709,7 @@ describe('Server database lifecycle', () => {
     const nodeId = randomUUID()
     await database.tx(async sql => {
       await sql`
-        SET constraints ALL deferred
+        SET CONSTRAINTS ALL DEFERRED
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
@@ -2724,14 +2723,14 @@ describe('Server database lifecycle', () => {
       `
     })
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::int AS "count"
       FROM "TreeNode"
     `)).toEqual([{ count: 1 }])
 
     const invalidNodeId = randomUUID()
     const invalid = await database.tx(async sql => {
       await sql`
-        SET constraints ALL deferred
+        SET CONSTRAINTS ALL DEFERRED
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
@@ -2744,7 +2743,7 @@ describe('Server database lifecycle', () => {
           (${invalidNodeId}, ${randomUUID()})
       `
       await sql`
-        SET constraints ALL immediate
+        SET CONSTRAINTS ALL IMMEDIATE
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
@@ -2967,7 +2966,7 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('rollback-success-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT TO_REGCLASS(${`"${schema}"."NumberRow"`}) IS NOT NULL AS present
+      SELECT TO_REGCLASS(${`"${schema}"."NumberRow"`}) IS NOT NULL AS "present"
     `).toEqual([{ present: false }])
   })
 
@@ -2985,7 +2984,7 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('rollback-failure-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT TO_REGCLASS(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS present
+      SELECT TO_REGCLASS(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS "present"
     `).toEqual([{ present: false }])
   })
 
@@ -3032,9 +3031,9 @@ describe('Server database lifecycle', () => {
     expect(new Set(schemas).size).toBe(2)
     const { database } = await useDatabaseFixture('concurrent-check')
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
-      FROM pg_catalog.pg_namespace
-      WHERE nspname IN (${schemas[0]}, ${schemas[1]})
+      SELECT COUNT(*)::int AS "count"
+      FROM "pg_catalog"."pg_namespace"
+      WHERE "nspname" IN (${schemas[0]}, ${schemas[1]})
     `).toEqual([{ count: 0 }])
   })
 
@@ -3054,16 +3053,16 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('durable-failure-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+      SELECT EXISTS (SELECT 1 FROM "pg_catalog"."pg_namespace" WHERE "nspname" = ${schema}) AS "present"
     `).toEqual([{ present: false }])
   })
 
   test.serial('leaves no isolated database schemas behind', async () => {
     const { database } = await useDatabaseFixture('schema-leak-check')
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
-      FROM pg_catalog.pg_namespace
-      WHERE nspname LIKE 'basis_test_%'
+      SELECT COUNT(*)::int AS "count"
+      FROM "pg_catalog"."pg_namespace"
+      WHERE "nspname" LIKE 'basis_test_%'
     `).toEqual([{ count: 0 }])
   })
 

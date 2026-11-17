@@ -1,95 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- AST printer boundary over PostgreSQL nodes. */
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
-import { loadModule, parseSync, scanSync } from 'libpg-query'
+import { loadModule, parsePlPgSQLSync, parseSync, scanSync } from 'libpg-query'
 
 await loadModule()
 
-/** Token kinds produced by the SQL tokenizer. */
-type TokenKind =
-  | 'block-comment'
-  | 'dollar'
-  | 'line-comment'
-  | 'number'
-  | 'operator'
-  | 'placeholder'
-  | 'punctuation'
-  | 'quoted'
-  | 'string'
-  | 'word'
-
-/** One lexical SQL token. */
-interface Token {
-  kind: TokenKind,
-  ownLine?: boolean,
-  text: string,
-  upper: string,
-}
-
-/** SQL and PL/pgSQL keywords normalized to uppercase outside literals. */
-const KEYWORDS = new Set([
-  'add', 'all', 'alter', 'and', 'as', 'asc', 'begin', 'between', 'by', 'case',
-  'check', 'column', 'constraint', 'create', 'declare', 'default', 'deferrable',
-  'delete', 'desc', 'distinct', 'do', 'drop', 'else', 'elsif', 'end', 'exception',
-  'execute', 'exists', 'for', 'foreign', 'from', 'function', 'gin', 'group',
-  'having', 'if', 'in', 'index', 'initially', 'insert', 'into', 'is', 'join',
-  'key', 'language', 'left', 'limit', 'loop', 'new', 'not', 'notice', 'null',
-  'offset', 'old', 'on', 'or', 'order', 'outer', 'perform',
-  'precision', 'primary', 'raise', 'recursive', 'references', 'replace', 'return',
-  'rename', 'returning', 'returns', 'right', 'select', 'set', 'table', 'then',
-  'to', 'trigger', 'union', 'unique', 'update', 'using', 'values', 'view',
-  'when', 'where', 'while', 'with',
-  'abs', 'array_length', 'array_position', 'array_remove', 'array_to_string',
-  'avg', 'cast', 'coalesce', 'count', 'extract', 'jsonb_agg',
-  'jsonb_build_object', 'length', 'lower', 'max', 'min', 'now', 'round',
-  'setweight', 'string_to_array', 'sum', 'to_tsvector', 'trim', 'unaccent',
-  'upper',
-])
-
-/** SQL type names normalized to uppercase inside column definitions. */
-const TYPE_WORDS = new Set([
-  'bigint', 'boolean', 'character', 'date', 'double', 'integer', 'jsonb',
-  'numeric', 'precision', 'real', 'serial', 'smallint', 'text', 'time',
-  'timestamp', 'uuid', 'varchar', 'varying', 'zone',
-])
-
-/** Keywords that keep a space before an opening parenthesis. */
-const SPACE_BEFORE_PAREN = new Set([
-  'as', 'exists', 'in', 'on', 'table', 'then', 'using', 'values', 'view',
-])
-
-/** Multi-word clause openings, longest first. */
-const CLAUSE_PHRASES: readonly (readonly string[])[] = [
-  ['full', 'outer', 'join'],
-  ['left', 'outer', 'join'],
-  ['right', 'outer', 'join'],
-  ['delete', 'from'],
-  ['insert', 'into'],
-  ['group', 'by'],
-  ['order', 'by'],
-  ['union', 'all'],
-  ['inner', 'join'],
-  ['left', 'join'],
-  ['right', 'join'],
-  ['select'],
-  ['from'],
-  ['where'],
-  ['having'],
-  ['limit'],
-  ['offset'],
-  ['returning'],
-  ['join'],
-  ['set'],
-  ['values'],
-  ['update'],
-  ['with'],
-  ['union'],
-]
-
 /**
- * Whether a template tag is a known Bun SQL tag.
- * @param tag - Template tag.
- * @returns `true` for recognized SQL tags.
+ * Check whether a tag expression is a recognized SQL tag.
+ * @param tag - Tag expression.
+ * @returns Whether the tag is `sql` or a database SQL member.
  */
 function isSqlTag(tag: ESTree.Expression): boolean {
   const generic = tag as unknown as { expression?: ESTree.Expression, type: string }
@@ -105,1019 +24,69 @@ function isSqlTag(tag: ESTree.Expression): boolean {
 }
 
 /**
- * Split SQL text into tokens while preserving literals, comments, and dollar bodies.
+ * Collect SQL comments with their source locations.
  * @param sql - SQL text.
- * @returns Tokens in source order.
+ * @returns Comments in source order.
  */
-function tokenize(sql: string): Token[] {
-  const tokens: Token[] = []
-  let index = 0
-  while (index < sql.length) {
-    const character = sql[index] as string
-    if (/\s/u.test(character)) {
-      index += 1
-      continue
-    }
-    if (character === '-' && sql[index + 1] === '-') {
-      const end = sql.indexOf('\n', index)
-      const stop = end === -1 ? sql.length : end
-      const lineStart = sql.lastIndexOf('\n', index) + 1
-      const comment = token('line-comment', sql.slice(index, stop))
-      comment.ownLine = /^\s*$/u.test(sql.slice(lineStart, index))
-      tokens.push(comment)
-      index = stop
-      continue
-    }
-    if (character === '/' && sql[index + 1] === '*') {
-      const end = sql.indexOf('*/', index + 2)
-      const stop = end === -1 ? sql.length : end + 2
-      tokens.push(token('block-comment', sql.slice(index, stop)))
-      index = stop
-      continue
-    }
-    if (character === "'" || character === '"') {
-      const start = index
-      index += 1
-      while (index < sql.length) {
-        if (sql[index] === character) {
-          if (sql[index + 1] === character) {
-            index += 2
-          } else {
-            index += 1
-            break
-          }
-        } else {
-          index += 1
-        }
-      }
-      tokens.push(token(character === "'" ? 'string' : 'quoted', sql.slice(start, index)))
-      continue
-    }
-    if (character === '$') {
-      const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(sql.slice(index))?.[0]
-      if (tag) {
-        const end = sql.indexOf(tag, index + tag.length)
-        const stop = end === -1 ? sql.length : end + tag.length
-        tokens.push(token('dollar', sql.slice(index, stop)))
-        index = stop
-        continue
-      }
-      const parameter = /^\$\d+/u.exec(sql.slice(index))?.[0]
-      if (parameter) {
-        tokens.push(token('placeholder', parameter))
-        index += parameter.length
-        continue
-      }
-    }
-    if (character === '\u0001') {
-      let end = index + 1
-      while (/\d/u.test(sql[end] ?? '')) end += 1
-      if (sql[end] === '\u0001') {
-        end += 1
-        while (sql[end] === '\u0002') end += 1
-        tokens.push(token('placeholder', sql.slice(index, end)))
-        index = end
-        continue
-      }
-    }
-    if ('(),;[]'.includes(character)) {
-      tokens.push(token('punctuation', character))
-      index += 1
-      continue
-    }
-    const operator = [
-      ':=', '::', '||', '>=', '<=', '<>', '!=', '->>', '->', '=<', '@>', '<@', '@?', '@@', '#>>', '#>',
-      '=', '<', '>', '+', '-', '*', '/', '.',
-    ].find(candidate => sql.startsWith(candidate, index))
-    if (operator) {
-      tokens.push(token('operator', operator))
-      index += operator.length
-      continue
-    }
-    if (/[0-9]/u.test(character)) {
-      const match = /^\d+(?:\.\d+)?/u.exec(sql.slice(index))
-      if (match) {
-        tokens.push(token('number', match[0]))
-        index += match[0].length
-        continue
-      }
-    }
-    if (/[A-Za-z_]/u.test(character)) {
-      const match = /^[A-Za-z_][A-Za-z0-9_$]*/u.exec(sql.slice(index))
-      if (match) {
-        tokens.push(token('word', match[0]))
-        index += match[0].length
-        continue
-      }
-    }
-    tokens.push(token('operator', character))
-    index += 1
-  }
-  return tokens
+function sqlComments(sql: string): SqlComment[] {
+  if (!/--|\/\*/u.test(sql)) return []
+  return scanSync(sql).tokens
+    .filter(token => token.tokenName === 'SQL_COMMENT' || token.tokenName === 'C_COMMENT')
+    .map(token => ({
+      end: token.end,
+      line: sql.slice(0, token.start).split('\n').length,
+      start: token.start,
+      text: token.text,
+    }))
 }
 
 /**
- * Build one token with its uppercase keyword form.
- * @param kind - Token kind.
- * @param text - Token text.
- * @returns Token.
+ * Break formatted SQL lines at safe whitespace boundaries.
+ * @param sql - Formatted SQL.
+ * @returns SQL with lines no longer than 120 characters where possible.
  */
-function token(kind: TokenKind, text: string): Token {
-  return { kind, text, upper: kind === 'word' ? text.toLowerCase() : text }
-}
-
-/**
- * Format one SQL template body.
- * @param sql - SQL text with expression placeholders.
- * @param indent - Prefix for every formatted line.
- * @returns Formatted SQL text.
- */
-function formatLegacySQL(sql: string, indent = ''): string {
-  const statements = splitStatements(tokenize(sql))
-  if (statements.length === 0) return ''
-  const blocks = statements.map(statement => wrapLongLines(formatStatement(statement, indent)))
-  const lines: string[] = []
-  blocks.forEach((block, index) => {
-    if (index < blocks.length - 1 && block.length > 0) {
-      const last = block[block.length - 1] as string
-      if (!last.endsWith(';')) block[block.length - 1] = `${last};`
-    }
-    if (index > 0) lines.push('')
-    lines.push(...block)
-  })
-  return lines.join('\n')
-}
-
-/**
- * Wrap formatted lines longer than the preferred width at safe SQL boundaries.
- * @param lines - Formatted lines.
- * @param width - Preferred maximum line width.
- * @returns Wrapped lines.
- */
-function wrapLongLines(lines: readonly string[], width = 100): string[] {
-  return lines.flatMap(line => line.split('\n')).flatMap(line => {
-    if (line.length <= width || line.trimStart().startsWith('--')) return [line]
+function wrapLongLines(sql: string): string {
+  return sql.split('\n').flatMap(line => {
+    if (line.length <= 120 || line.includes('--') || line.includes('/*')) return [line]
     const indent = line.match(/^\s*/u)?.[0] ?? ''
-    const result: string[] = []
+    const lines: string[] = []
     let current = line
-    let guard = 0
-    while (current.length > width && guard < line.length) {
-      const breakAt = safeBreak(current, width)
-      if (breakAt <= indent.length) break
-      result.push(current.slice(0, breakAt).trimEnd())
-      current = `${indent}  ${current.slice(breakAt).trimStart()}`
-      guard += 1
-    }
-    result.push(current)
-    return result
-  })
-}
-
-/**
- * Find the last safe SQL break at or before a width.
- * @param line - SQL line.
- * @param width - Preferred maximum width.
- * @returns Break offset, or -1 when no safe break exists.
- */
-function safeBreak(line: string, width: number): number {
-  let quote: "'" | '"' | null = null
-  let lastComma = -1
-  let lastSpace = -1
-  for (let index = 0; index < line.length && index <= width; index += 1) {
-    const character = line[index] as string
-    if (quote) {
-      if (character === quote) {
-        if (line[index + 1] === quote) index += 1
-        else quote = null
-      }
-      continue
-    }
-    if (character === "'" || character === '"') {
-      quote = character
-      continue
-    }
-    if (character === '-' && line[index + 1] === '-') break
-    if (character === '/' && line[index + 1] === '*') {
-      const end = line.indexOf('*/', index + 2)
-      if (end === -1) break
-      index = end + 1
-      continue
-    }
-    if (character === ',') lastComma = index + 1
-    if (/\s/u.test(character)) lastSpace = index
-  }
-  return lastComma > 0 ? lastComma : lastSpace
-}
-
-/**
- * Split tokens into statements on top-level semicolons.
- * @param tokens - Statement tokens.
- * @returns Statement token lists.
- */
-function splitStatements(tokens: readonly Token[]): Token[][] {
-  const statements: Token[][] = []
-  let current: Token[] = []
-  let depth = 0
-  for (const candidate of tokens) {
-    if (candidate.text === '(') depth += 1
-    if (candidate.text === ')') depth = Math.max(0, depth - 1)
-    if (depth === 0 && candidate.text === ';') {
-      if (current.length > 0) statements.push(current)
-      current = []
-      continue
-    }
-    current.push(candidate)
-  }
-  if (current.length > 0) statements.push(current)
-  return statements
-}
-
-/**
- * Format one SQL statement.
- * @param tokens - Statement tokens.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatStatement(tokens: readonly Token[], indent: string): string[] {
-  const dollarIndex = tokens.findIndex(candidate => candidate.kind === 'dollar')
-  if (startsWith(tokens, ['create', 'view'])) return formatCreateView(tokens, indent)
-  if (startsWith(tokens, ['create', 'table'])) return formatCreateTable(tokens, indent)
-  if (startsWith(tokens, ['create']) && dollarIndex !== -1) return formatFunction(tokens, dollarIndex, indent)
-  if (startsWith(tokens, ['do']) && dollarIndex !== -1) return formatDo(tokens, dollarIndex, indent)
-  if (startsWith(tokens, ['insert'])) return formatInsert(tokens, indent)
-  if (startsWith(tokens, ['with'])) return formatWith(tokens, indent)
-  return formatQuery(tokens, indent)
-}
-
-/**
- * Format a `CREATE VIEW` statement.
- * @param tokens - Statement tokens.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatCreateView(tokens: readonly Token[], indent: string): string[] {
-  const asIndex = findTopLevel(tokens, candidate => candidate.upper === 'as')
-  if (asIndex === -1) return formatQuery(tokens, indent)
-  const header = formatInline(tokens.slice(0, asIndex + 1))
-  const open = asIndex + 1
-  const alreadyWrapped = tokens[open]?.text === '(' && matchingParen(tokens, open) === tokens.length - 1
-  const body = alreadyWrapped
-    ? formatQuery(tokens.slice(open + 1, tokens.length - 1), `${indent}  `)
-    : formatQuery(tokens.slice(open), `${indent}  `)
-  return [`${indent}${header} (`, ...body, `${indent})`]
-}
-
-/**
- * Whether a SELECT list should be rendered one expression per line.
- * @param tokens - Statement tokens.
- * @param start - First token after SELECT.
- * @returns `true` for CASE or long select lists.
- */
-function shouldMultilineSelect(tokens: readonly Token[], start: number): boolean {
-  let depth = 0
-  let end = tokens.length
-  for (let index = start; index < tokens.length; index += 1) {
-    const currentToken = tokens[index] as Token
-    if (currentToken.text === '(') depth += 1
-    if (currentToken.text === ')') depth = Math.max(0, depth - 1)
-    if (depth === 0 && clauseAt(tokens, index)) {
-      end = index
-      break
-    }
-    if (depth === 0 && currentToken.upper === 'case') return true
-    if (depth === 0 && currentToken.kind === 'line-comment') return true
-  }
-  return formatInline(tokens.slice(start, end)).length > 100
-}
-
-/**
- * Format one select-list expression, breaking long function calls.
- * @param tokens - Expression tokens.
- * @param indent - Prefix for this expression.
- * @returns Formatted lines.
- */
-function formatExpression(tokens: readonly Token[], indent: string): string[] {
-  const asIndex = findTopLevel(tokens, candidate => candidate.upper === 'as')
-  const expression = asIndex === -1 ? tokens : tokens.slice(0, asIndex)
-  const alias = asIndex === -1 ? '' : ` AS ${formatInline(tokens.slice(asIndex + 1))}`
-  const inline = `${formatInline(expression)}${alias}`
-  if (`${indent}${inline}`.length <= 80) return [`${indent}${inline}`]
-
-  const chains = splitOperator(expression, '||')
-  if (chains.length > 1) {
-    const lines = chains.map(chain => `${indent}${formatInline(chain)}`)
-    lines[lines.length - 1] = `${lines[lines.length - 1]}${alias}`
-    return lines
-  }
-
-  const open = expression[1]?.text === '(' ? 1 : -1
-  if (open === -1 || expression[0]?.kind !== 'word') return [`${indent}${inline}`]
-  const close = matchingParen(expression, open)
-  if (close !== expression.length - 1) return [`${indent}${inline}`]
-
-  const name = formatInline(expression.slice(0, 1))
-  const args = splitList(expression.slice(open + 1, close))
-  const lines = [`${indent}${name}(`]
-  args.forEach((argument, index) => {
-    const formatted = formatExpression(argument, `${indent}  `)
-    if (index < args.length - 1 && formatted.length > 0) {
-      formatted[formatted.length - 1] = `${formatted[formatted.length - 1]},`
-    }
-    lines.push(...formatted)
-  })
-  lines.push(`${indent})${alias}`)
-  return lines
-}
-
-/**
- * Split tokens on one top-level binary operator.
- * @param tokens - Expression tokens.
- * @param operator - Binary operator text.
- * @returns Token groups; later groups keep the operator prefix.
- */
-function splitOperator(tokens: readonly Token[], operator: string): Token[][] {
-  const groups: Token[][] = []
-  let current: Token[] = []
-  let depth = 0
-  for (const candidate of tokens) {
-    if (candidate.text === '(') depth += 1
-    if (candidate.text === ')') depth = Math.max(0, depth - 1)
-    if (depth === 0 && candidate.text === operator) {
-      groups.push(current)
-      current = [candidate]
-      continue
-    }
-    current.push(candidate)
-  }
-  if (current.length > 0) groups.push(current)
-  return groups
-}
-
-/**
- * Find the matching closing parenthesis.
- * @param tokens - Token list.
- * @param open - Opening parenthesis index.
- * @returns Closing parenthesis index, or -1.
- */
-function matchingParen(tokens: readonly Token[], open: number): number {
-  let depth = 0
-  for (let index = open; index < tokens.length; index += 1) {
-    if (tokens[index]?.text === '(') depth += 1
-    if (tokens[index]?.text === ')') depth -= 1
-    if (depth === 0) return index
-  }
-  return -1
-}
-
-/**
- * Format one CASE expression and its optional alias/comma.
- * @param tokens - Statement tokens.
- * @param start - CASE token index.
- * @param indent - Prefix for the CASE block.
- * @returns Formatted lines and the next token index.
- */
-function formatCase(tokens: readonly Token[], start: number, indent: string): { lines: string[], nextIndex: number } {
-  const segments: Token[][] = []
-  let segment: Token[] = []
-  let depth = 0
-  let nested = 0
-  let end = tokens.length - 1
-  for (let index = start + 1; index < tokens.length; index += 1) {
-    const currentToken = tokens[index] as Token
-    if (currentToken.text === '(') depth += 1
-    if (currentToken.text === ')') depth = Math.max(0, depth - 1)
-    if (currentToken.upper === 'case') nested += 1
-    if (currentToken.upper === 'end') {
-      if (nested > 0) {
-        nested -= 1
-        segment.push(currentToken)
-        continue
-      }
-      end = index
-      break
-    }
-    if (depth === 0 && nested === 0 && (currentToken.upper === 'when' || currentToken.upper === 'else')) {
-      if (segment.length > 0) segments.push(segment)
-      segment = [currentToken]
-      continue
-    }
-    segment.push(currentToken)
-  }
-  if (segment.length > 0) segments.push(segment)
-
-  const lines = [`${indent}CASE`]
-  for (const part of segments) {
-    const first = part[0]
-    if (!first) continue
-    if (first.upper === 'when') {
-      let thenIndex = -1
-      let partDepth = 0
-      for (let index = 1; index < part.length; index += 1) {
-        const currentToken = part[index] as Token
-        if (currentToken.text === '(') partDepth += 1
-        if (currentToken.text === ')') partDepth -= 1
-        if (partDepth === 0 && currentToken.upper === 'then') {
-          thenIndex = index
-          break
-        }
-      }
-      const condition = part.slice(1, thenIndex === -1 ? part.length : thenIndex)
-      const result = thenIndex === -1 ? [] : part.slice(thenIndex + 1)
-      lines.push(`${indent}  WHEN ${formatInline(condition)}${thenIndex === -1 ? '' : ` THEN ${formatInline(result)}`}`)
-    } else if (first.upper === 'else') {
-      lines.push(`${indent}  ELSE ${formatInline(part.slice(1))}`)
-    }
-  }
-  lines.push(`${indent}END`)
-
-  let nextIndex = end + 1
-  if (tokens[nextIndex]?.upper === 'as' && tokens[nextIndex + 1]) {
-    lines[lines.length - 1] = `${lines[lines.length - 1]} AS ${tokens[nextIndex + 1]?.text}`
-    nextIndex += 2
-  }
-  if (tokens[nextIndex]?.text === ',') {
-    lines[lines.length - 1] = `${lines[lines.length - 1]},`
-    nextIndex += 1
-  }
-  return { lines, nextIndex }
-}
-
-/**
- * Format a CREATE FUNCTION statement with a dollar-quoted PL/pgSQL body.
- * @param tokens - Statement tokens.
- * @param dollarIndex - Index of the dollar-quoted body token.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatFunction(tokens: readonly Token[], dollarIndex: number, indent: string): string[] {
-  const header = formatInline(tokens.slice(0, dollarIndex))
-  const dollar = tokens[dollarIndex] as Token
-  const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(dollar.text)?.[0] ?? '$$'
-  const body = dollar.text.slice(tag.length, dollar.text.length - tag.length)
-  const closing = formatInline(tokens.slice(dollarIndex + 1))
-  return [
-    `${indent}${header} ${tag}`,
-    ...formatPlpgsql(tokenize(body), indent),
-    `${indent}${tag}${closing === '' ? '' : ` ${closing}`};`,
-  ]
-}
-
-/**
- * Format a standalone DO block with a dollar-quoted PL/pgSQL body.
- * @param tokens - Statement tokens.
- * @param dollarIndex - Index of the dollar-quoted body token.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatDo(tokens: readonly Token[], dollarIndex: number, indent: string): string[] {
-  const header = formatInline(tokens.slice(0, dollarIndex))
-  const dollar = tokens[dollarIndex] as Token
-  const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(dollar.text)?.[0] ?? '$$'
-  const body = dollar.text.slice(tag.length, dollar.text.length - tag.length)
-  return [`${indent}${header} ${tag}`, ...formatPlpgsql(tokenize(body), indent), `${indent}${tag}`]
-}
-
-/**
- * Format a PL/pgSQL body.
- * @param tokens - Body tokens.
- * @param indent - Prefix for the block.
- * @returns Formatted lines.
- */
-function formatPlpgsql(tokens: readonly Token[], indent: string): string[] {
-  const lines: string[] = []
-  let index = 0
-  if (tokens[index]?.upper === 'declare') {
-    lines.push(`${indent}DECLARE`)
-    const declarations = formatBlock(tokens, index + 1, `${indent}  `, new Set(['begin']), formatColumn)
-    lines.push(...declarations.lines)
-    index = declarations.next
-  }
-  if (tokens[index]?.upper === 'begin') index += 1
-  lines.push(`${indent}BEGIN`)
-  const body = formatBlock(tokens, index, `${indent}  `, new Set(['end', 'exception']))
-  lines.push(...body.lines)
-  index = body.next
-  if (tokens[index]?.upper === 'exception') {
-    lines.push(`${indent}EXCEPTION`)
-    index += 1
-    while (index < tokens.length && tokens[index]?.upper !== 'end') {
-      if (tokens[index]?.upper === 'when') {
-        const thenIndex = findTopLevel(tokens.slice(index + 1), candidate => candidate.upper === 'then') + index + 1
-        lines.push(`${indent}  WHEN ${formatInline(tokens.slice(index + 1, thenIndex))} THEN`)
-        index = thenIndex + 1
-        const handler = formatBlock(tokens, index, `${indent}    `, new Set(['when', 'end']))
-        lines.push(...handler.lines)
-        index = handler.next
-      } else {
-        index += 1
-      }
-    }
-  }
-  if (tokens[index]?.upper === 'end') {
-    lines.push(`${indent}END`)
-  }
-  return lines
-}
-
-/**
- * Format a sequence of PL/pgSQL statements until a stop keyword.
- * @param tokens - Body tokens.
- * @param start - First token index.
- * @param indent - Prefix for statements.
- * @param stop - Keywords that end this block.
- * @param format - Statement formatter.
- * @returns Formatted lines and the next token index.
- */
-function formatBlock(
-  tokens: readonly Token[],
-  start: number,
-  indent: string,
-  stop: ReadonlySet<string>,
-  format: (tokens: readonly Token[]) => string = formatInline,
-): { lines: string[], next: number } {
-  const lines: string[] = []
-  let index = start
-  while (index < tokens.length) {
-    const currentToken = tokens[index] as Token
-    if (currentToken.kind === 'word' && stop.has(currentToken.upper)) break
-    if (currentToken.kind === 'line-comment' && currentToken.ownLine) {
-      lines.push(`${indent}${currentToken.text}`)
-      index += 1
-      continue
-    }
-    if (currentToken.upper === 'if') {
-      const result = formatIf(tokens, index, indent)
-      lines.push(...result.lines)
-      index = result.next
-      continue
-    }
-    if (currentToken.upper === 'return' && /END (?:IF|LOOP);$/u.test(lines[lines.length - 1] ?? '')) {
-      lines.push('')
-    }
-    let end = index
-    let depth = 0
-    while (end < tokens.length) {
-      const candidate = tokens[end] as Token
-      if (candidate.text === '(') depth += 1
-      if (candidate.text === ')') depth = Math.max(0, depth - 1)
-      if (depth === 0 && candidate.kind === 'word' && stop.has(candidate.upper)) break
-      if (depth === 0 && candidate.text === ';') {
-        end += 1
-        break
-      }
-      end += 1
-    }
-    const statement = tokens.slice(index, end)
-    const semicolon = statement[statement.length - 1]?.text === ';'
-    const text = semicolon ? statement.slice(0, -1) : statement
-    if (text.length > 0) {
-      const inline = `${indent}${format(text)}${semicolon ? ';' : ''}`
-      if (text[0]?.upper === 'return' && text.length > 1 && inline.length > 100) {
-        lines.push(`${indent}RETURN`)
-        const expression = formatExpression(text.slice(1), `${indent}  `)
-        if (semicolon && expression.length > 0) {
-          expression[expression.length - 1] = `${expression[expression.length - 1]};`
-        }
-        lines.push(...expression)
-      } else {
-        lines.push(inline)
-      }
-    }
-    index = end
-  }
-  return { lines, next: index }
-}
-
-/**
- * Format one PL/pgSQL IF/ELSIF/ELSE block.
- * @param tokens - Body tokens.
- * @param start - IF token index.
- * @param indent - Prefix for the IF block.
- * @returns Formatted lines and the next token index.
- */
-function formatIf(tokens: readonly Token[], start: number, indent: string): { lines: string[], next: number } {
-  const lines: string[] = []
-  const thenIndex = findTopLevel(tokens.slice(start + 1), candidate => candidate.upper === 'then') + start + 1
-  lines.push(`${indent}IF ${formatInline(tokens.slice(start + 1, thenIndex))} THEN`)
-  let index = thenIndex + 1
-  while (index < tokens.length) {
-    const body = formatBlock(tokens, index, `${indent}  `, new Set(['elsif', 'else', 'end']))
-    lines.push(...body.lines)
-    index = body.next
-    if (tokens[index]?.upper === 'elsif') {
-      const nextThen = findTopLevel(tokens.slice(index + 1), candidate => candidate.upper === 'then') + index + 1
-      lines.push(`${indent}ELSIF ${formatInline(tokens.slice(index + 1, nextThen))} THEN`)
-      index = nextThen + 1
-      continue
-    }
-    if (tokens[index]?.upper === 'else') {
-      lines.push(`${indent}ELSE`)
-      index += 1
-      continue
-    }
-    if (tokens[index]?.upper === 'end' && tokens[index + 1]?.upper === 'if') {
-      lines.push(`${indent}END IF;`)
-      index += 2
-      if (tokens[index]?.text === ';') index += 1
-      break
-    }
-    break
-  }
-  return { lines, next: index }
-}
-
-/**
- * Format an INSERT statement with one row per line.
- * @param tokens - Statement tokens.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatInsert(tokens: readonly Token[], indent: string): string[] {
-  const valuesIndex = tokens.findIndex(candidate => candidate.upper === 'values')
-  if (valuesIndex === -1) return formatQuery(tokens, indent)
-  const headerTokens = tokens.slice(0, valuesIndex)
-  const open = headerTokens.findIndex(candidate => candidate.text === '(')
-  if (open === -1) return formatQuery(tokens, indent)
-  const close = matchingParen(headerTokens, open)
-  if (close === -1) return formatQuery(tokens, indent)
-  const header = formatInline(headerTokens.slice(0, open))
-  const columns = formatInline(headerTokens.slice(open, close + 1))
-  const rows = splitList(tokens.slice(valuesIndex + 1))
-  const lines = [`${indent}${header} ${columns}`, `${indent}VALUES`]
-  rows.forEach((row, index) => {
-    lines.push(`${indent}  ${formatInline(row)}${index < rows.length - 1 ? ',' : ''}`)
-  })
-  return lines
-}
-
-/**
- * Format a `WITH` query containing one or more CTEs.
- * @param tokens - Statement tokens.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatWith(tokens: readonly Token[], indent: string): string[] {
-  const lines: string[] = []
-  let index = 1
-  const prefix: string[] = ['WITH']
-  if (tokens[index]?.upper === 'recursive') {
-    prefix.push('RECURSIVE')
-    index += 1
-  }
-
-  while (index < tokens.length) {
-    const asIndex = findTopLevel(tokens.slice(index), candidate => candidate.upper === 'as') + index
-    if (asIndex < index) break
-    const name = formatInline(tokens.slice(index, asIndex))
-    const open = asIndex + 1
-    if (tokens[open]?.text !== '(') break
-    let depth = 0
-    let close = -1
-    for (let cursor = open; cursor < tokens.length; cursor += 1) {
-      if (tokens[cursor]?.text === '(') depth += 1
-      if (tokens[cursor]?.text === ')') depth -= 1
-      if (depth === 0) {
-        close = cursor
-        break
-      }
-    }
-    if (close === -1) break
-    lines.push(`${indent}${prefix.length > 0 ? `${prefix.join(' ')} ` : ''}${name} AS (`)
-    lines.push(...formatQuery(tokens.slice(open + 1, close), `${indent}  `))
-    prefix.length = 0
-    const comma = tokens[close + 1]?.text === ','
-    lines.push(`${indent})${comma ? ',' : ''}`)
-    index = comma ? close + 2 : close + 1
-    if (!comma) break
-  }
-
-  if (index < tokens.length) lines.push(...formatQuery(tokens.slice(index), indent))
-  return lines
-}
-
-/**
- * Format a `CREATE TABLE` statement.
- * @param tokens - Statement tokens.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatCreateTable(tokens: readonly Token[], indent: string): string[] {
-  const open = tokens.findIndex(candidate => candidate.text === '(')
-  if (open === -1) return formatQuery(tokens, indent)
-  let depth = 0
-  let close = -1
-  for (let index = open; index < tokens.length; index += 1) {
-    if (tokens[index]?.text === '(') depth += 1
-    if (tokens[index]?.text === ')') depth -= 1
-    if (depth === 0) {
-      close = index
-      break
-    }
-  }
-  if (close === -1) return formatQuery(tokens, indent)
-  const header = formatInline(tokens.slice(0, open))
-  const items = splitList(tokens.slice(open + 1, close))
-  const lines = items.map(item => `${indent}  ${formatColumn(item)},`)
-  if (lines.length > 0) lines[lines.length - 1] = (lines[lines.length - 1] as string).replace(/,$/u, '')
-  return [`${indent}${header} (`, ...lines, `${indent})`]
-}
-
-/**
- * Format one CREATE TABLE column or constraint.
- * @param tokens - Column tokens.
- * @returns Formatted column text.
- */
-function formatColumn(tokens: readonly Token[]): string {
-  const upper = tokens.map((candidate, index) => (
-    index > 0 && candidate.kind === 'word' && TYPE_WORDS.has(candidate.upper)
-      ? { ...candidate, text: candidate.text.toUpperCase() }
-      : candidate
-  ))
-  return formatInline(upper)
-}
-
-/**
- * Split a parenthesized token list on top-level commas.
- * @param tokens - Token list without the outer parentheses.
- * @returns Token groups.
- */
-function splitList(tokens: readonly Token[]): Token[][] {
-  const parts: Token[][] = []
-  let current: Token[] = []
-  let depth = 0
-  for (const candidate of tokens) {
-    if (candidate.text === '(') depth += 1
-    if (candidate.text === ')') depth = Math.max(0, depth - 1)
-    if (candidate.text === ',' && depth === 0) {
-      parts.push(current)
-      current = []
-      continue
-    }
-    current.push(candidate)
-  }
-  if (current.length > 0) parts.push(current)
-  return parts
-}
-
-/**
- * Format a query or DML statement.
- * @param tokens - Statement tokens.
- * @param indent - Prefix for this block.
- * @returns Formatted lines.
- */
-function formatQuery(tokens: readonly Token[], indent: string): string[] {
-  const lines: string[] = []
-  let current = ''
-  let depth = 0
-  let between = false
-
-  let selectMode = false
-  let selectIndent = `${indent}  `
-  let selectNeedsHeader = false
-  let selectTokens: Token[] = []
-
-  const flush = (): void => {
-    if (current.trim() !== '') lines.push(`${indent}${current.trimEnd()}`)
-    current = ''
-  }
-  const flushSelect = (comma: boolean): void => {
-    if (selectTokens.length === 0) return
-    const formatted = formatExpression(selectTokens, selectIndent)
-    if (selectNeedsHeader) {
-      selectNeedsHeader = false
-      const first = formatted[0] ?? ''
-      if (!comma && !first.trimEnd().endsWith('CASE')) {
-        const shift = selectIndent.length
-        for (let index = 0; index < formatted.length; index += 1) {
-          const line = formatted[index] as string
-          formatted[index] = line.startsWith(selectIndent) ? line.slice(shift) : line
-        }
-        formatted[0] = `${indent}SELECT ${formatted[0] as string}`
-      } else {
-        lines.push(`${indent}SELECT`)
-      }
-    }
-    if (comma && formatted.length > 0) formatted[formatted.length - 1] = `${formatted[formatted.length - 1]},`
-    lines.push(...formatted)
-    selectTokens = []
-    current = ''
-  }
-  const startClause = (phrase: readonly string[]): void => {
-    flush()
-    const previous = lines[lines.length - 1]?.trim() ?? ''
-    if (phrase[0] === 'union' && previous !== '') {
-      lines.push('')
-    } else if (phrase[0] !== 'union' && /^UNION(?: ALL)?$/u.test(previous)) {
-      lines.push('')
-    }
-    current = phrase.map(part => part.toUpperCase()).join(' ')
-  }
-  const startBoolean = (keyword: string): void => {
-    flush()
-    current = `${' '.repeat(2)}${keyword.toUpperCase()}`
-  }
-
-  for (let index = 0; index < tokens.length; index += 1) {
-    const currentToken = tokens[index] as Token
-    if (currentToken.text === '(') depth += 1
-    if (currentToken.text === ')') depth = Math.max(0, depth - 1)
-
-    if (currentToken.kind === 'line-comment') {
-      if (selectMode) {
-        if (selectTokens.length > 0) flushSelect(false)
-        if (currentToken.ownLine) lines.push(`${selectIndent}${currentToken.text}`)
-        else if (lines.length > 0) lines[lines.length - 1] = `${lines[lines.length - 1]} ${currentToken.text}`
-        else lines.push(`${selectIndent}${currentToken.text}`)
-      } else if (currentToken.ownLine) {
-        flush()
-        lines.push(`${indent}${currentToken.text}`)
-      } else if (current.trim() === '') {
-        lines.push(`${indent}${currentToken.text}`)
-      } else {
-        current = `${current.trimEnd()} ${currentToken.text}`
-        flush()
-      }
-      continue
-    }
-    if (currentToken.kind === 'block-comment') {
-      current = append(current, currentToken, tokens[index - 1], indent)
-      continue
-    }
-    if (depth === 0 && currentToken.kind === 'word') {
-      const phrase = clauseAt(tokens, index)
-      if (phrase) {
-        if (selectMode) {
-          flushSelect(false)
-          selectMode = false
-        }
-        if (phrase[0] === 'select' && shouldMultilineSelect(tokens, index + 1)) {
-          flush()
-          selectIndent = `${indent}  `
-          selectMode = true
-          selectNeedsHeader = true
-          selectTokens = []
-          current = ''
-          index += phrase.length - 1
-          between = false
-          continue
-        }
-        startClause(phrase)
-        index += phrase.length - 1
-        between = false
-        continue
-      }
-      if (currentToken.upper === 'case') {
-        if (selectMode) {
-          if (selectTokens.length > 0) flushSelect(false)
-          if (selectNeedsHeader) {
-            lines.push(`${indent}SELECT`)
-            selectNeedsHeader = false
+    while (current.length > 120) {
+      let quote: string | null = null
+      let split = -1
+      const limit = Math.min(current.length, 120)
+      for (let index = 0; index < limit; index += 1) {
+        const character = current[index] ?? ''
+        if (quote) {
+          if (character === quote && current[index + 1] === quote) {
+            index += 1
+          } else if (character === quote) {
+            quote = null
           }
-        } else {
-          flush()
-        }
-        const result = formatCase(tokens, index, selectMode ? selectIndent : `${indent}  `)
-        lines.push(...result.lines)
-        index = result.nextIndex - 1
-        continue
-      }
-      if (currentToken.upper === 'and' || currentToken.upper === 'or') {
-        if (currentToken.upper === 'and' && between) {
-          between = false
-        } else {
-          startBoolean(currentToken.text)
-          continue
+        } else if (character === "'" || character === '"') {
+          quote = character
+        } else if (character === ' ') {
+          split = index
         }
       }
-      if (currentToken.upper === 'between') between = true
+      if (split <= indent.length) split = current.indexOf(' ', 120)
+      if (split <= 0) break
+      lines.push(current.slice(0, split))
+      current = `${indent}  ${current.slice(split + 1)}`
     }
-
-    if (currentToken.text === ',') {
-      if (selectMode && depth === 0) {
-        flushSelect(true)
-      } else if (selectMode) {
-        selectTokens.push(currentToken)
-      } else {
-        current = `${current.trimEnd()},`
-      }
-      continue
-    }
-    if (currentToken.text === ';') {
-      if (selectMode) {
-        flushSelect(false)
-        selectMode = false
-      }
-      current = `${current.trimEnd()};`
-      flush()
-      if (index < tokens.length - 1) lines.push('')
-      continue
-    }
-    if (selectMode) {
-      selectTokens.push(currentToken)
-      continue
-    }
-    current = append(current, currentToken, tokens[index - 1], indent)
-  }
-  if (selectMode) flushSelect(false)
-  flush()
-  return lines
-}
-
-/**
- * Append one token to a line using SQL spacing rules.
- * @param line - Current line.
- * @param next - Token to append.
- * @param previous - Previous token.
- * @param indent - Prefix for continuation lines.
- * @returns Updated line.
- */
-function append(line: string, next: Token, previous: Token | undefined, indent: string): string {
-  const text = next.kind === 'word' && KEYWORDS.has(next.upper) && previous?.upper !== 'as'
-    ? next.text.toUpperCase()
-    : next.text
-  const [first, ...rest] = text.split('\n')
-  const rendered = rest.length === 0
-    ? first
-    : `${first}\n${rest.map(part => `${indent}${part}`).join('\n')}`
-  if (line === '') return rendered
-  return needsSpace(previous, next) ? `${line.trimEnd()} ${rendered}` : `${line}${rendered}`
-}
-
-/**
- * Whether a space belongs before a token.
- * @param previous - Previous token.
- * @param next - Next token.
- * @returns `true` when a space is required.
- */
-function needsSpace(previous: Token | undefined, next: Token): boolean {
-  if (!previous) return false
-  if ([',', ';', ')', ']', '::', '.'].includes(next.text)) return false
-  if (['(', '[', '::', '.'].includes(previous.text)) return false
-  if (next.text === '[') return previous.upper === 'array'
-  if (next.text === '(') return SPACE_BEFORE_PAREN.has(previous.upper)
-  if (next.text === '*') return true
-  if (previous.kind === 'operator' || next.kind === 'operator') return previous.text !== '::' && next.text !== '::'
-  return true
-}
-
-/**
- * Render tokens as one inline expression.
- * @param tokens - Tokens to join.
- * @returns Inline SQL text.
- */
-function formatInline(tokens: readonly Token[]): string {
-  return tokens.reduce((line, currentToken, index) => (
-    append(line, currentToken, tokens[index - 1], '')
-  ), '')
-}
-
-/**
- * Return the clause phrase starting at a token index.
- * @param tokens - Statement tokens.
- * @param index - Candidate start.
- * @returns The phrase, or null.
- */
-function clauseAt(tokens: readonly Token[], index: number): readonly string[] | null {
-  return CLAUSE_PHRASES.find(phrase => phrase.every((part, offset) => (
-    tokens[index + offset]?.upper === part
-  ))) ?? null
-}
-
-/**
- * Find a token at parenthesis depth zero.
- * @param tokens - Statement tokens.
- * @param predicate - Match predicate.
- * @returns Token index, or -1.
- */
-function findTopLevel(tokens: readonly Token[], predicate: (candidate: Token) => boolean): number {
-  let depth = 0
-  for (let index = 0; index < tokens.length; index += 1) {
-    const currentToken = tokens[index] as Token
-    if (currentToken.text === '(') depth += 1
-    if (currentToken.text === ')') depth = Math.max(0, depth - 1)
-    if (depth === 0 && predicate(currentToken)) return index
-  }
-  return -1
-}
-
-/**
- * Whether a token sequence begins with the given words.
- * @param tokens - Statement tokens.
- * @param words - Expected words.
- * @returns `true` when the prefix matches.
- */
-function startsWith(tokens: readonly Token[], words: readonly string[]): boolean {
-  return words.every((word, index) => tokens[index]?.upper === word)
+    lines.push(current)
+    return lines
+  }).join('\n')
 }
 
 /**
  * Format one SQL template body through the PostgreSQL AST.
- * Falls back to the legacy formatter for comments, DDL, and unsupported nodes.
  * @param sql - SQL text with expression placeholders.
  * @param indent - Prefix for every formatted line.
+ * @param quoteIdentifiers - Whether emitted identifiers should be quoted.
  * @returns Formatted SQL text.
  */
-export function formatSQL(sql: string, indent = ''): string {
+export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): string {
   const placeholders = new Map<string, string>()
   let safeSql = ''
   for (let index = 0; index < sql.length;) {
@@ -1139,42 +108,33 @@ export function formatSQL(sql: string, indent = ''): string {
     index += 1
   }
   try {
-    if (hasSqlComments(safeSql)) return formatLegacySQL(sql, indent)
     const parsed = parseSync(safeSql) as any
     if (!parsed.stmts?.length) return ''
-    const printer = new LibpgPrinter(safeSql, safeSql.length)
-    if (!parsed.stmts.every((raw: any) => printer.supported(raw.stmt))) {
-      return formatLegacySQL(sql, indent)
-    }
+    const comments = sqlComments(safeSql)
     let formatted = parsed.stmts.map((raw: any) => {
       const start = raw.stmt_location ?? 0
       const end = raw.stmt_len === undefined ? safeSql.length : start + raw.stmt_len
-      return new LibpgPrinter(safeSql, end).statement(raw.stmt, indent)
+      return new LibpgPrinter(safeSql, end, comments, start, quoteIdentifiers).statement(raw.stmt, indent)
     }).join(';\n\n')
+    formatted = wrapLongLines(formatted)
     for (const [safe, original] of placeholders) {
       formatted = formatted.replace(new RegExp(safe, 'giu'), original)
     }
-    if (formatted.split('\n').some(line => line.length > 100)) return formatLegacySQL(sql, indent)
     return formatted
   } catch {
-    return formatLegacySQL(sql, indent)
+    const lines = sql.split('\n')
+    while (lines.length > 0 && (lines[0] as string).trim() === '') lines.shift()
+    while (lines.length > 0 && (lines[lines.length - 1] as string).trim() === '') lines.pop()
+    return lines.map(line => `${indent}${line}`).join('\n')
   }
 }
 
-/**
- * Detect comments without paying for a full token scan on ordinary SQL.
- * @param sql - SQL text.
- * @returns Whether the text contains a SQL comment.
- */
-function hasSqlComments(sql: string): boolean {
-  if (!/--|\/\*/u.test(sql)) return false
-  try {
-    return scanSync(sql).tokens.some(candidate => (
-      candidate.tokenName === 'SQL_COMMENT' || candidate.tokenName === 'C_COMMENT'
-    ))
-  } catch {
-    return true
-  }
+/** One SQL comment with its absolute location. */
+interface SqlComment {
+  end: number,
+  line: number,
+  start: number,
+  text: string,
 }
 
 const ALIAS_STOP_WORDS = new Set([
@@ -1186,7 +146,15 @@ const ALIAS_STOP_WORDS = new Set([
 
 /** Prints raw libpg-query statements in the canonical Basis layout. */
 class LibpgPrinter {
-  constructor(private readonly source: string, private readonly end: number) {}
+  #usedComments = new Set<number>()
+
+  constructor(
+    private readonly source: string,
+    private readonly end: number,
+    private readonly comments: readonly SqlComment[] = [],
+    private readonly start = 0,
+    private readonly quoteIdentifiers = true,
+  ) {}
 
   /**
    * Print one statement.
@@ -1199,111 +167,6 @@ class LibpgPrinter {
       .flatMap(line => line.split('\n'))
       .map(line => `${indent}${line}`)
       .join('\n')
-  }
-
-  /**
-   * Check whether every node in a statement is safe for this printer.
-   * @param node - Candidate node or value.
-   * @param seen - Nodes already visited.
-   * @returns Whether the printer supports the subtree.
-   */
-  supported(node: any, seen = new Set<object>()): boolean {
-    if (!node || typeof node !== 'object') return true
-    if (seen.has(node)) return true
-    seen.add(node)
-    if (Array.isArray(node)) return node.every(item => this.supported(item, seen))
-    const tagged = this.tag(node)
-    if (!tagged) {
-      return Object.entries(node).every(([key, value]) => key === 'location' || this.supported(value, seen))
-    }
-    const [type, body] = tagged
-    if (!this.supportedNode(type, body)) return false
-    return Object.entries(body).every(([key, value]) => key === 'location' || this.supported(value, seen))
-  }
-
-  /**
-   * Check whether one node type is supported.
-   * @param type - Raw node tag.
-   * @param body - Raw node body.
-   * @returns Whether this node's own fields are supported.
-   */
-  supportedNode(type: string, body: any): boolean {
-    switch (type) {
-      case 'SelectStmt':
-        return !body.distinctClause?.length
-          && !body.intoClause
-          && !body.windowClause?.length
-          && !body.lockingClause?.length
-          && !body.sampleClause
-          && (!body.limitOption || body.limitOption === 'LIMIT_OPTION_DEFAULT')
-      case 'InsertStmt':
-        return !body.withClause
-          && (!body.override || body.override === 'OVERRIDING_NOT_SET')
-      case 'ViewStmt':
-        return !body.aliases?.length
-          && !body.options?.length
-          && (!body.withCheckOption || body.withCheckOption === 'NO_CHECK_OPTION')
-      case 'RangeVar':
-        return !body.alias?.colnames?.length
-      case 'JoinExpr':
-        return !body.usingClause?.length && !body.isNatural && !body.alias
-      case 'ResTarget':
-        return !body.indirection?.length
-      case 'ColumnRef':
-        return !body.indirection?.length
-          && (body.fields ?? []).every((field: any) => ['String', 'A_Star'].includes(this.tag(field)?.[0] ?? ''))
-      case 'A_Expr': {
-        const kinds = [
-          'AEXPR_OP', 'AEXPR_OP_ANY', 'AEXPR_OP_ALL', 'AEXPR_LIKE', 'AEXPR_ILIKE',
-          'AEXPR_IN', 'AEXPR_BETWEEN', 'AEXPR_NOT_BETWEEN', 'AEXPR_BETWEEN_SYM',
-          'AEXPR_NOT_BETWEEN_SYM', 'AEXPR_DISTINCT', 'AEXPR_NOT_DISTINCT', 'AEXPR_NULLIF',
-        ]
-        return kinds.includes(body.kind)
-          && Boolean(body.lexpr && body.rexpr)
-          && Boolean(body.name?.length)
-          && this.tag(body.lexpr)?.[0] !== 'A_Expr'
-          && this.tag(body.rexpr)?.[0] !== 'A_Expr'
-      }
-      case 'BoolExpr':
-        return ['AND_EXPR', 'OR_EXPR', 'NOT_EXPR'].includes(body.boolop)
-      case 'FuncCall':
-        return !body.over
-          && !body.agg_order?.length
-          && !body.agg_filter
-          && !body.func_variadic
-          && !body.agg_within_group
-          && Boolean(body.funcname?.length)
-      case 'SortBy':
-        return body.sortby_dir !== 'SORTBY_USING' && !body.useOp?.length
-      case 'TypeCast':
-        return Boolean(body.typeName)
-      case 'BooleanTest':
-        return ['IS_TRUE', 'IS_NOT_TRUE', 'IS_FALSE', 'IS_NOT_FALSE'].includes(body.booltesttype)
-      case 'CommonTableExpr':
-        return (!body.ctematerialized || body.ctematerialized === 'CTEMaterializeDefault')
-          && !body.aliascolnames?.length
-          && !body.search_clause
-          && !body.cycle_clause
-      case 'IndexElem':
-        return Boolean(body.name)
-          && !body.expr
-          && !body.collation
-          && !body.opclass
-          && (!body.ordering || body.ordering === 'SORTBY_DEFAULT')
-          && (!body.nulls_ordering || body.nulls_ordering === 'SORTBY_NULLS_DEFAULT')
-      case 'A_Const':
-      case 'ParamRef':
-      case 'CoalesceExpr':
-      case 'NullTest':
-      case 'CaseExpr':
-      case 'CaseWhen':
-      case 'List':
-      case 'String':
-      case 'A_Star':
-        return true
-      default:
-        return false
-    }
   }
 
   /**
@@ -1388,13 +251,14 @@ class LibpgPrinter {
   }
 
   /**
-   * Quote an unquoted identifier that contains uppercase letters.
+   * Quote an unquoted identifier that contains mixed-case letters.
    * @param text - Identifier text.
    * @returns Identifier text safe for PostgreSQL.
    */
   quoteIdentifier(text: string): string {
-    if (!text || text.startsWith('"') || text === '*') return text
-    return /[A-Z]/u.test(text) ? `"${text}"` : text
+    if (!this.quoteIdentifiers || !text || text.startsWith('"') || text === '*') return text
+    if (/^__basis_p\d+_+__$/u.test(text)) return text
+    return `"${text}"`
   }
 
   /**
@@ -1444,6 +308,16 @@ class LibpgPrinter {
       cursor = name.end
       end = cursor
     }
+    const suffix = (): void => {
+      while (true) {
+        const match = /^\s*(?:precision|varying|with\s+time\s+zone|without\s+time\s+zone)/iu
+          .exec(this.source.slice(cursor))
+        if (!match) break
+        cursor += match[0].length
+        end = cursor
+      }
+    }
+    suffix()
     while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
     if (this.source[cursor] === '(') {
       let depth = 0
@@ -1455,6 +329,7 @@ class LibpgPrinter {
       }
       end = cursor
     }
+    suffix()
     while (this.source[cursor] === '[') {
       const close = this.source.indexOf(']', cursor + 1)
       if (close === -1) break
@@ -1607,6 +482,27 @@ class LibpgPrinter {
   }
 
   /**
+   * Find the end of a target-list entry, including comments.
+   * @param body - SelectStmt body.
+   * @param targets - Target nodes.
+   * @param index - Target index.
+   * @returns End byte.
+   */
+  targetLimit(body: any, targets: readonly any[], index: number): number {
+    if (index < targets.length - 1) return this.startLocation(targets[index + 1])
+    const starts = [
+      body.fromClause?.[0],
+      body.whereClause,
+      body.groupClause?.[0],
+      body.havingClause,
+      body.sortClause?.[0],
+      body.limitCount,
+      body.limitOffset,
+    ].map((node: any) => this.startLocation(node)).filter((value: number) => value >= 0)
+    return starts.length > 0 ? Math.min(...starts) : this.end
+  }
+
+  /**
    * Print a target-list entry.
    * @param node - ResTarget.
    * @param limit - End of the search segment.
@@ -1617,8 +513,56 @@ class LibpgPrinter {
     if (!body) return []
     const tagged = this.tag(body.val)
     const alias = this.alias(body, limit)
-    if (tagged?.[0] === 'CaseExpr') return this.caseLines(tagged[1], alias)
-    return [`${this.expr(body.val)}${alias}`]
+    let lines: string[]
+    if (tagged?.[0] === 'CaseExpr') {
+      lines = this.caseLines(tagged[1], alias)
+    } else if (tagged?.[0] === 'FuncCall' || tagged?.[0] === 'CoalesceExpr') {
+      lines = this.callLines(tagged[0], tagged[1], '')
+      if (lines.length === 1) lines[0] = `${lines[0]}${alias}`
+      else lines[lines.length - 1] = `${lines[lines.length - 1]}${alias}`
+    } else {
+      lines = [`${this.expr(body.val)}${alias}`]
+    }
+    const full: string[] = []
+    for (const comment of this.comments) {
+      if (this.#usedComments.has(comment.start)) continue
+      if (body.location < 0 || comment.start < body.location || comment.start >= limit) continue
+      this.#usedComments.add(comment.start)
+      if (this.inlineComment(comment.start)) {
+        lines[lines.length - 1] = `${lines[lines.length - 1]} ${comment.text.trim()}`
+      } else {
+        full.push(comment.text.trim())
+      }
+    }
+    return [...full, ...lines]
+  }
+
+  /**
+   * Check whether a comment shares a line with preceding SQL.
+   * @param start - Comment start byte.
+   * @returns Whether the comment is inline.
+   */
+  inlineComment(start: number): boolean {
+    const lineStart = this.source.lastIndexOf('\n', start - 1) + 1
+    return this.source.slice(lineStart, start).trim() !== ''
+  }
+
+  /**
+   * Emit full-line comments in a source range.
+   * @param start - Range start.
+   * @param end - Range end.
+   * @param indent - Prefix for the comment.
+   * @returns Comment lines.
+   */
+  fullLineComments(start: number, end: number, indent: string): string[] {
+    const lines: string[] = []
+    for (const comment of this.comments) {
+      if (this.#usedComments.has(comment.start)) continue
+      if (comment.start < start || comment.start >= end || this.inlineComment(comment.start)) continue
+      this.#usedComments.add(comment.start)
+      lines.push(`${indent}${comment.text.trim()}`)
+    }
+    return lines
   }
 
   /**
@@ -1652,7 +596,24 @@ class LibpgPrinter {
       case 'SelectStmt': return this.select(tagged[1], indent)
       case 'InsertStmt': return this.insert(tagged[1], indent)
       case 'ViewStmt': return this.view(tagged[1], indent)
-      default: return []
+      case 'CreateStmt': return this.createTable(tagged[1], indent)
+      case 'CreateFunctionStmt': return this.createFunction(tagged[1], indent)
+      case 'DoStmt': return this.doBlock(tagged[1], indent)
+      case 'UpdateStmt': return this.update(tagged[1], indent)
+      case 'DeleteStmt': return this.delete(tagged[1], indent)
+      case 'VariableSetStmt': return this.variableSet(tagged[1], indent)
+      case 'ConstraintsSetStmt': {
+        const timing = tagged[1].deferred ? 'DEFERRED' : 'IMMEDIATE'
+        return [`${indent}SET CONSTRAINTS ALL ${timing}`]
+      }
+      case 'DropStmt': return this.drop(tagged[1], indent)
+      case 'IndexStmt': return this.index(tagged[1], indent)
+      case 'VacuumStmt': return this.vacuum(tagged[1], indent)
+      case 'CreateSeqStmt': return this.createSequence(tagged[1], indent)
+      case 'AlterTableStmt': return this.alterTable(tagged[1], indent)
+      case 'CreateSchemaStmt': return this.createSchema(tagged[1], indent)
+      case 'CreateTrigStmt': return this.createTrigger(tagged[1], indent)
+      default: throw new Error(`Unsupported SQL statement: ${tagged[0]}`)
     }
   }
 
@@ -1663,31 +624,48 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   select(body: any, indent: string): string[] {
+    const distinctOn = body.distinctClause?.some((item: any) => item?.ResTarget?.name || item?.ResTarget?.val)
+    if (distinctOn) throw new Error('Unsupported SELECT DISTINCT ON')
+    if (body.intoClause || body.windowClause?.length || body.lockingClause?.length || body.sampleClause) {
+      throw new Error('Unsupported SELECT clause')
+    }
     if (body.withClause) return this.withSelect(body, indent)
     if (body.op && body.op !== 'SETOP_NONE') return this.setOperation(body, indent)
     if (body.valuesLists) return this.values(body.valuesLists, indent)
     const nodes = body.targetList ?? []
-    const targets = nodes.map((target: any, index: number) => {
-      const next = nodes[index + 1]
-      const limit = next ? this.startLocation(next) : this.end
-      return this.target(target, limit < 0 ? this.end : limit)
-    })
+    const targets = nodes.map((target: any, index: number) => (
+      this.target(target, this.targetLimit(body, nodes, index))
+    ))
     const targetText = targets.map((target: string[]) => target.join(' ')).join(', ')
+    const distinct = body.distinctClause?.length ? 'DISTINCT ' : ''
     const multiline = targets.some((target: string[]) => target.length > 1)
+      || targets.some((target: string[]) => target.some(line => line.includes('--')))
       || (`${indent}SELECT ${targetText}`.length > 100)
     const lines: string[] = []
-    if (multiline) {
-      lines.push(`${indent}SELECT`)
+    if (multiline && targets.length === 1) {
+      const [first, ...rest] = targets[0] as string[]
+      lines.push(`${indent}SELECT ${distinct}${first}`)
+      for (const line of rest) lines.push(`${indent}${line}`)
+    } else if (multiline) {
+      lines.push(`${indent}SELECT${distinct ? ` ${distinct.trim()}` : ''}`)
       targets.forEach((target: string[], index: number) => {
         const copy = target.map(line => `${indent}  ${line}`)
-        if (index < targets.length - 1 && copy.length > 0) copy[copy.length - 1] = `${copy[copy.length - 1]},`
+        if (index < targets.length - 1 && copy.length > 0) {
+          const last = copy[copy.length - 1]
+          copy[copy.length - 1] = last.includes(' --') ? last.replace(' --', ', --') : `${last},`
+        }
         lines.push(...copy)
       })
     } else {
-      lines.push(`${indent}SELECT ${targetText}`)
+      lines.push(`${indent}SELECT ${distinct}${targetText}`)
     }
     if (body.fromClause?.length) lines.push(...this.from(body.fromClause, indent))
-    if (body.whereClause) lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
+    if (body.whereClause) {
+      const fromStart = body.fromClause?.length ? this.startLocation(body.fromClause[0]) : this.start
+      const whereStart = this.startLocation(body.whereClause)
+      if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
+      lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
+    }
     if (body.groupClause?.length) {
       lines.push(`${indent}GROUP BY ${body.groupClause.map((item: any) => this.expr(item)).join(', ')}`)
     }
@@ -1707,7 +685,19 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   withSelect(body: any, indent: string): string[] {
-    const withClause = body.withClause
+    const lines = this.withClauseLines(body.withClause, indent)
+    const rest = { ...body, withClause: undefined }
+    lines.push(...this.select(rest, indent))
+    return lines
+  }
+
+  /**
+   * Format a WITH clause.
+   * @param withClause - WithClause node.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  withClauseLines(withClause: any, indent: string): string[] {
     const ctes = withClause.ctes ?? []
     const lines: string[] = []
     const prefix = withClause.recursive ? 'WITH RECURSIVE' : 'WITH'
@@ -1721,8 +711,6 @@ class LibpgPrinter {
       lines.push(...this.lines(cte.ctequery, `${indent}  `))
       lines.push(`${indent})${index < ctes.length - 1 ? ',' : ''}`)
     })
-    const rest = { ...body, withClause: undefined }
-    lines.push(...this.select(rest, indent))
     return lines
   }
 
@@ -1800,6 +788,7 @@ class LibpgPrinter {
     const tagged = this.tag(node)
     if (tagged?.[0] === 'JoinExpr') {
       const body = tagged[1]
+      if (body.usingClause?.length || body.isNatural || body.alias) throw new Error('Unsupported JOIN')
       const cross = !body.quals && !body.usingClause?.length && !body.isNatural
       const join = cross ? 'CROSS JOIN' : this.joinName(body.jointype)
       const left = this.fromItem(body.larg)
@@ -1808,8 +797,9 @@ class LibpgPrinter {
       return `${left}\n${join} ${right}${on}`
     }
     if (tagged?.[0] === 'RangeVar') return this.rangeVar(tagged[1])
+    if (tagged?.[0] === 'RangeFunction') return this.rangeFunction(tagged[1])
     if (node?.relname) return this.rangeVar(node)
-    return ''
+    throw new Error(`Unsupported FROM item: ${tagged?.[0] ?? 'unknown'}`)
   }
 
   /**
@@ -1826,6 +816,23 @@ class LibpgPrinter {
       case 'JOIN_INNER': return 'JOIN'
       default: return 'JOIN'
     }
+  }
+
+  /**
+   * Format a set-returning function in FROM.
+   * @param body - RangeFunction body.
+   * @returns Function text.
+   */
+  rangeFunction(body: any): string {
+    const items = (body.functions ?? []).flatMap((node: any) => this.tag(node)?.[1]?.items ?? [])
+    const call = items.map((node: any) => this.tag(node)).find((tagged: any) => tagged?.[0] === 'FuncCall')
+    const text = call ? this.funcCall(call[1]) : ''
+    const ordinality = body.ordinality ? ' WITH ORDINALITY' : ''
+    const alias = body.alias
+      ? ` ${this.quoteIdentifier(body.alias.aliasname)}` +
+        (body.alias.colnames?.length ? ` (${this.identifierList(body.alias.colnames)})` : '')
+      : ''
+    return `${text}${ordinality}${alias}`
   }
 
   /**
@@ -1954,7 +961,7 @@ class LibpgPrinter {
       ? `${indent}INSERT INTO ${relationText} (${columns.join(', ')})`
       : `${indent}INSERT INTO ${relationText}`
     const select = this.tag(body.selectStmt)?.[1]
-    const lines = [header]
+    const lines = [...(body.withClause ? this.withClauseLines(body.withClause, indent) : []), header]
     if (select?.valuesLists) lines.push(...this.values(select.valuesLists, indent))
     else if (select) lines.push(...this.select(select, indent))
     if (body.onConflictClause) lines.push(...this.onConflict(body.onConflictClause, indent))
@@ -1968,6 +975,384 @@ class LibpgPrinter {
       lines.push(`${indent}RETURNING ${returning}`)
     }
     return lines
+  }
+
+  /**
+   * Format a CREATE TABLE statement.
+   * @param body - CreateStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createTable(body: any, indent: string): string[] {
+    const relation = this.relationName(body.relation)
+    const elements = body.tableElts ?? []
+    const lines = [`${indent}CREATE TABLE ${body.if_not_exists ? 'IF NOT EXISTS ' : ''}${relation} (`]
+    elements.forEach((node: any, index: number) => {
+      const tagged = this.tag(node)
+      const text = tagged?.[0] === 'ColumnDef'
+        ? this.columnDef(tagged[1])
+        : tagged?.[0] === 'Constraint' ? this.tableConstraint(tagged[1]) : ''
+      if (text) lines.push(`${indent}  ${text}${index < elements.length - 1 ? ',' : ''}`)
+    })
+    lines.push(`${indent})`)
+    return lines
+  }
+
+  /**
+   * Format one CREATE TABLE column definition.
+   * @param body - ColumnDef body.
+   * @returns Column definition.
+   */
+  columnDef(body: any): string {
+    const name = typeof body.location === 'number' && body.location >= 0
+      ? this.quoteIdentifier(this.readName(body.location).text)
+      : this.quoteIdentifier(body.colname)
+    const type = this.formatTypeName(body.typeName)
+    const constraints = (body.constraints ?? [])
+      .map((node: any) => this.tag(node)?.[1])
+      .filter(Boolean)
+      .map((constraint: any) => this.columnConstraint(constraint))
+      .filter(Boolean)
+    return [name, type, ...constraints].join(' ')
+  }
+
+  /**
+   * Format a type name for DDL.
+   * @param body - TypeName body.
+   * @returns Uppercase type name.
+   */
+  formatTypeName(body: any): string {
+    const raw = body?.location >= 0 ? this.readTypeName(body.location) : this.typeNameText(body)
+    if (!raw || raw.startsWith('"')) return raw
+    return raw.replace(/[a-z_][a-z0-9_$]*/giu, word => word.toUpperCase())
+  }
+
+  /**
+   * Format an identifier list from String nodes.
+   * @param nodes - String nodes.
+   * @returns Quoted identifiers.
+   */
+  identifierList(nodes: readonly any[]): string {
+    return nodes.map(node => this.quoteIdentifier(this.tag(node)?.[1]?.sval ?? '')).join(', ')
+  }
+
+  /**
+   * Format a column constraint.
+   * @param body - Constraint body.
+   * @returns Constraint text.
+   */
+  columnConstraint(body: any): string {
+    switch (body.contype) {
+      case 'CONSTR_PRIMARY': return 'PRIMARY KEY'
+      case 'CONSTR_NOTNULL': return 'NOT NULL'
+      case 'CONSTR_NULL': return 'NULL'
+      case 'CONSTR_DEFAULT': return `DEFAULT ${this.expr(body.raw_expr)}`
+      case 'CONSTR_FOREIGN': {
+        const keys = this.identifierList(body.pk_attrs ?? [])
+        return `REFERENCES ${this.relationName(body.pktable)}${keys ? ` (${keys})` : ''}`
+      }
+      case 'CONSTR_UNIQUE': return `UNIQUE (${this.identifierList(body.keys ?? [])})`
+      case 'CONSTR_CHECK': return `CHECK (${this.expr(body.raw_expr)})`
+      default: throw new Error(`Unsupported column constraint: ${body.contype}`)
+    }
+  }
+
+  /**
+   * Format a table-level constraint.
+   * @param body - Constraint body.
+   * @returns Constraint text.
+   */
+  tableConstraint(body: any): string {
+    switch (body.contype) {
+      case 'CONSTR_PRIMARY': return `PRIMARY KEY (${this.identifierList(body.keys ?? [])})`
+      case 'CONSTR_UNIQUE': return `UNIQUE (${this.identifierList(body.keys ?? [])})`
+      case 'CONSTR_CHECK': return `CHECK (${this.expr(body.raw_expr)})`
+      case 'CONSTR_FOREIGN': {
+        const columns = this.identifierList(body.fk_attrs ?? [])
+        const keys = this.identifierList(body.pk_attrs ?? [])
+        return `FOREIGN KEY (${columns}) REFERENCES ${this.relationName(body.pktable)}${keys ? ` (${keys})` : ''}`
+      }
+      default: return this.columnConstraint(body)
+    }
+  }
+
+  /**
+   * Format a CREATE FUNCTION statement.
+   * @param body - CreateFunctionStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createFunction(body: any, indent: string): string[] {
+    const name = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.')
+    const language = this.optionValue(body.options, 'language') ?? 'plpgsql'
+    const returnType = this.formatTypeName(body.returnType)
+    const header = `${indent}CREATE ${body.replace ? 'OR REPLACE ' : ''}FUNCTION ${name}() RETURNS ${returnType} AS $$`
+    const parsed = parsePlPgSQLSync(this.source.slice(this.start, this.end)) as any
+    const func = parsed.plpgsql_funcs?.[0]?.PLpgSQL_function
+    const bodyText = this.optionBody(body.options)
+    const lines = func ? new PlPgSqlPrinter(this.plBodyComments(bodyText), func, this.start, this.end).print() : []
+    const terminated = this.source[this.end] === ';' || this.source.slice(this.start, this.end).trimEnd().endsWith(';')
+    return [header, ...lines, `${indent}$$ LANGUAGE ${language}${terminated ? ';' : ''}`]
+  }
+
+  /**
+   * Format a DO statement.
+   * @param _body - DoStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  doBlock(_body: any, indent: string): string[] {
+    const parsed = parsePlPgSQLSync(this.source.slice(this.start, this.end)) as any
+    const func = parsed.plpgsql_funcs?.[0]?.PLpgSQL_function
+    const bodyText = this.doBody(_body)
+    const lines = func ? new PlPgSqlPrinter(this.plBodyComments(bodyText), func, this.start, this.end).print() : []
+    return [`${indent}DO $$`, ...lines, `${indent}$$`]
+  }
+
+  /**
+   * Read a function body option.
+   * @param options - DefElem list.
+   * @returns Body text.
+   */
+  optionBody(options: readonly any[]): string {
+    const option = (options ?? []).map(node => this.tag(node)?.[1]).find((node: any) => node?.defname === 'as')
+    const arg = option?.arg
+    if (arg?.String?.sval) return arg.String.sval
+    return (arg?.List?.items ?? []).map((item: any) => this.tag(item)?.[1]?.sval ?? '').join('')
+  }
+
+  /**
+   * Read a DO body.
+   * @param body - DoStmt body.
+   * @returns Body text.
+   */
+  doBody(body: any): string {
+    const option = (body.args ?? []).map((node: any) => this.tag(node)?.[1]).find((node: any) => node?.defname === 'as')
+    return option?.arg?.String?.sval ?? ''
+  }
+
+  /**
+   * Collect comments from a PL/pgSQL body.
+   * @param bodyText - Body source text.
+   * @returns Comments with absolute locations.
+   */
+  plBodyComments(bodyText: string): SqlComment[] {
+    if (!bodyText) return [...this.comments]
+    const bodyStart = this.source.indexOf(bodyText, this.start)
+    const base = bodyStart < 0 ? this.start : bodyStart
+    const comments: SqlComment[] = [...this.comments]
+    const pattern = /--[^\n]*|\/\*[\s\S]*?\*\//gu
+    for (const match of bodyText.matchAll(pattern)) {
+      const start = base + (match.index ?? 0)
+      comments.push({
+        end: start + match[0].length,
+        line: this.source.slice(0, start).split('\n').length,
+        start,
+        text: match[0],
+      })
+    }
+    return comments
+  }
+
+  /**
+   * Read one function option.
+   * @param options - DefElem list.
+   * @param name - Option name.
+   * @returns Option value, or null.
+   */
+  optionValue(options: readonly any[], name: string): string | null {
+    const option = (options ?? []).map(node => this.tag(node)?.[1]).find((node: any) => node?.defname === name)
+    return option?.arg?.String?.sval ?? null
+  }
+
+  /**
+   * Format an UPDATE statement.
+   * @param body - UpdateStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  update(body: any, indent: string): string[] {
+    const relation = this.relationName(this.tag(body.relation)?.[1] ?? body.relation)
+    const updates = (body.targetList ?? []).map((node: any) => {
+      const target = this.tag(node)?.[1]
+      if (!target) return ''
+      const name = typeof target.location === 'number' && target.location >= 0
+        ? this.quoteIdentifier(this.readName(target.location).text)
+        : this.quoteIdentifier(target.name)
+      return `${name} = ${this.expr(target.val)}`
+    }).filter(Boolean)
+    const lines = [`${indent}UPDATE ${relation} SET ${updates.join(', ')}`]
+    if (body.whereClause) {
+      const fromStart = body.fromClause?.length ? this.startLocation(body.fromClause[0]) : this.start
+      const whereStart = this.startLocation(body.whereClause)
+      if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
+      lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
+    }
+    return lines
+  }
+
+  /**
+   * Format a DELETE statement.
+   * @param body - DeleteStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  delete(body: any, indent: string): string[] {
+    const relation = this.relationName(this.tag(body.relation)?.[1] ?? body.relation)
+    const lines = [`${indent}DELETE FROM ${relation}`]
+    if (body.whereClause) {
+      const fromStart = body.fromClause?.length ? this.startLocation(body.fromClause[0]) : this.start
+      const whereStart = this.startLocation(body.whereClause)
+      if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
+      lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
+    }
+    return lines
+  }
+
+  /**
+   * Format a SET statement.
+   * @param body - VariableSetStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  variableSet(body: any, indent: string): string[] {
+    const values = (body.args ?? []).map((arg: any) => {
+      const tagged = this.tag(arg)
+      if (tagged?.[0] === 'A_Const') {
+        const value = tagged[1]?.sval?.sval
+        return value ? this.quoteIdentifier(value) : this.expr(arg)
+      }
+      return this.expr(arg)
+    })
+    return [`${indent}SET ${body.name}${values.length ? ` TO ${values.join(', ')}` : ''}`]
+  }
+
+  /**
+   * Format a DROP statement.
+   * @param body - DropStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  drop(body: any, indent: string): string[] {
+    const types: Record<string, string> = {
+      OBJECT_INDEX: 'INDEX',
+      OBJECT_SCHEMA: 'SCHEMA',
+      OBJECT_SEQUENCE: 'SEQUENCE',
+      OBJECT_TABLE: 'TABLE',
+      OBJECT_TRIGGER: 'TRIGGER',
+      OBJECT_VIEW: 'VIEW',
+    }
+    const names = (body.objects ?? []).map((object: any) => {
+      const items = this.tag(object)?.[1]?.items ?? []
+      return this.identifierList(items)
+    }).join(', ')
+    const behavior = body.behavior === 'DROP_CASCADE' ? ' CASCADE' : ''
+    return [`${indent}DROP ${types[body.removeType] ?? body.removeType} ${names}${behavior}`]
+  }
+
+  /**
+   * Format a CREATE INDEX statement.
+   * @param body - IndexStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  index(body: any, indent: string): string[] {
+    if (body.unique || body.whereClause) throw new Error('Unsupported index clause')
+    const params = (body.indexParams ?? []).map((node: any) => {
+      const elem = this.tag(node)?.[1]
+      if (!elem?.name || elem.expr) throw new Error('Unsupported index expression')
+      const name = this.quoteIdentifier(elem.name)
+      const opclass = (elem.opclass ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').filter(Boolean)
+      return `${name}${opclass.length ? ` ${opclass.join(' ')}` : ''}`
+    }).filter(Boolean)
+    return [
+      `${indent}CREATE INDEX ${this.quoteIdentifier(body.idxname)} ON ${this.relationName(body.relation)}` +
+        `${body.accessMethod ? ` USING ${body.accessMethod}` : ''}(${params.join(', ')})`,
+    ]
+  }
+
+  /**
+   * Format an ANALYZE or VACUUM statement.
+   * @param body - VacuumStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  vacuum(body: any, indent: string): string[] {
+    const relations = (body.rels ?? []).map((node: any) => (
+      this.relationName(this.tag(node)?.[1]?.relation)
+    )).filter(Boolean)
+    return [`${indent}ANALYZE${relations.length ? ` ${relations.join(', ')}` : ''}`]
+  }
+
+  /**
+   * Format a CREATE SEQUENCE statement.
+   * @param body - CreateSeqStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createSequence(body: any, indent: string): string[] {
+    const options = (body.options ?? []).map((node: any) => {
+      const option = this.tag(node)?.[1]
+      if (!option) return ''
+      const value = option.arg?.Integer?.ival ?? option.arg?.Float?.fval ?? option.arg?.String?.sval
+      return `${String(option.defname).toUpperCase()}${value === undefined ? '' : ` ${value}`}`
+    }).filter(Boolean)
+    const sequence = this.relationName(body.sequence)
+    return [`${indent}CREATE SEQUENCE ${sequence}${options.length ? ` ${options.join(' ')}` : ''}`]
+  }
+
+  /**
+   * Format an ALTER TABLE statement.
+   * @param body - AlterTableStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  alterTable(body: any, indent: string): string[] {
+    const commands: Record<string, string> = Object.fromEntries([
+      ['AT_DisableRowSecurity', 'DISABLE ROW LEVEL SECURITY'],
+      ['AT_EnableRowSecurity', 'ENABLE ROW LEVEL SECURITY'],
+      ['AT_ForceRowSecurity', 'FORCE ROW LEVEL SECURITY'],
+      ['AT_NoForceRowSecurity', 'NO FORCE ROW LEVEL SECURITY'],
+    ])
+    const cmds = (body.cmds ?? []).map((node: any) => (
+      commands[this.tag(node)?.[1]?.subtype] ?? ''
+    )).filter(Boolean)
+    return [`${indent}ALTER TABLE ${this.relationName(body.relation)} ${cmds.join(' ')}`]
+  }
+
+  /**
+   * Format a CREATE SCHEMA statement.
+   * @param body - CreateSchemaStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createSchema(body: any, indent: string): string[] {
+    return [`${indent}CREATE SCHEMA ${this.quoteIdentifier(body.schemaname)}`]
+  }
+
+  /**
+   * Format a CREATE TRIGGER statement.
+   * @param body - CreateTrigStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createTrigger(body: any, indent: string): string[] {
+    const timing = body.timing === 2 ? 'BEFORE ' : body.timing === 4 ? 'AFTER ' : 'INSTEAD OF '
+    const eventBits = body.events ?? 0
+    const events = [
+      eventBits & 4 ? 'INSERT' : '',
+      eventBits & 8 ? 'DELETE' : '',
+      eventBits & 16 ? 'UPDATE' : '',
+      eventBits & 32 ? 'TRUNCATE' : '',
+    ].filter(Boolean).join(' OR ')
+    const func = (body.funcname ?? [])
+      .map((part: any) => this.quoteIdentifier(this.tag(part)?.[1]?.sval ?? ''))
+      .join('.')
+    return [
+      `${indent}CREATE TRIGGER ${this.quoteIdentifier(body.trigname)} ${timing}${events}` +
+        ` ON ${this.relationName(body.relation)}` +
+        ` FOR EACH ${body.row ? 'ROW' : 'STATEMENT'} EXECUTE FUNCTION ${func}()`,
+    ]
   }
 
   /**
@@ -2048,6 +1433,35 @@ class LibpgPrinter {
   }
 
   /**
+   * Format a function-like call, splitting long argument lists.
+   * @param type - Node type.
+   * @param body - Call body.
+   * @param indent - Prefix for the call.
+   * @returns Formatted lines.
+   */
+  callLines(type: string, body: any, indent: string): string[] {
+    const name = type === 'CoalesceExpr'
+      ? 'COALESCE'
+      : (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.').toUpperCase()
+    const args = body.agg_star ? null : (body.args ?? [])
+    const inline = type === 'CoalesceExpr'
+      ? `COALESCE(${args.map((arg: any) => this.expr(arg)).join(', ')})`
+      : this.funcCall(body)
+    if (inline.length + indent.length <= 80 || !args || args.length === 0) return [`${indent}${inline}`]
+    const lines = [`${indent}${name}(`]
+    args.forEach((arg: any, index: number) => {
+      const tagged = this.tag(arg)
+      const argLines = tagged?.[0] === 'FuncCall' || tagged?.[0] === 'CoalesceExpr'
+        ? this.callLines(tagged[0], tagged[1], `${indent}  `)
+        : [`${indent}  ${this.expr(arg)}`]
+      if (index < args.length - 1) argLines[argLines.length - 1] = `${argLines[argLines.length - 1]},`
+      lines.push(...argLines)
+    })
+    lines.push(`${indent})`)
+    return lines
+  }
+
+  /**
    * Parenthesize an operand when SQL precedence would otherwise change.
    * @param node - Operand node.
    * @returns Grouped inline SQL.
@@ -2092,10 +1506,36 @@ class LibpgPrinter {
       case 'FuncCall': return this.funcCall(body)
       case 'CoalesceExpr':
         return `COALESCE(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')})`
+      case 'SubLink': {
+        const subselect = body.subselect?.SelectStmt
+        if (!subselect) throw new Error('Unsupported SubLink')
+        const inner = this.select(subselect, '').join(' ')
+        if (body.subLinkType === 'EXISTS_SUBLINK') return `EXISTS (${inner})`
+        if (body.subLinkType === 'EXPR_SUBLINK') return `(${inner})`
+        if (body.subLinkType === 'ARRAY_SUBLINK') return `ARRAY(${inner})`
+        throw new Error(`Unsupported SubLink type: ${body.subLinkType}`)
+      }
       case 'CaseExpr': return this.caseInline(body)
+      case 'SQLValueFunction': {
+        const names: Record<string, string> = {
+          SVFOP_CURRENT_CATALOG: 'CURRENT_CATALOG',
+          SVFOP_CURRENT_DATE: 'CURRENT_DATE',
+          SVFOP_CURRENT_ROLE: 'CURRENT_ROLE',
+          SVFOP_CURRENT_SCHEMA: 'CURRENT_SCHEMA',
+          SVFOP_CURRENT_TIME: 'CURRENT_TIME',
+          SVFOP_CURRENT_TIMESTAMP: 'CURRENT_TIMESTAMP',
+          SVFOP_CURRENT_USER: 'CURRENT_USER',
+          SVFOP_LOCALTIME: 'LOCALTIME',
+          SVFOP_LOCALTIMESTAMP: 'LOCALTIMESTAMP',
+          SVFOP_SESSION_USER: 'SESSION_USER',
+          SVFOP_SYSTEM_USER: 'SYSTEM_USER',
+          SVFOP_USER: 'USER',
+        }
+        return names[body.op] ?? body.op
+      }
       case 'A_Star': return '*'
       case 'String': return body.sval ?? ''
-      default: return ''
+      default: throw new Error(`Unsupported expression: ${type}`)
     }
   }
 
@@ -2154,9 +1594,15 @@ class LibpgPrinter {
       ? this.readQualifiedName(body.location, parts.length, false).text
       : parts.join('.')
     const name = raw.split('.').map(part => (part.startsWith('"') ? part : part.toUpperCase())).join('.')
+    if (body.over || body.agg_filter || body.agg_within_group || body.func_variadic) {
+      throw new Error('Unsupported function clause')
+    }
     const distinct = body.agg_distinct ? 'DISTINCT ' : ''
     const args = body.agg_star ? '*' : (body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')
-    return `${name}(${distinct}${args})`
+    const order = body.agg_order?.length
+      ? ` ORDER BY ${body.agg_order.map((item: any) => this.sort(item)).join(', ')}`
+      : ''
+    return `${name}(${distinct}${args}${order})`
   }
 
   /**
@@ -2168,12 +1614,12 @@ class LibpgPrinter {
     const operator = body.name?.[0]?.String?.sval ?? ''
     if (!operator) return ''
     const left = this.group(body.lexpr)
-    const right = this.group(body.rexpr)
+    const right = (): string => this.group(body.rexpr)
     const items = (): string[] => (this.tag(body.rexpr)?.[1]?.items ?? []).map((item: any) => this.expr(item))
-    if (body.kind === 'AEXPR_OP_ANY') return `${left} ${operator} ANY (${right})`
-    if (body.kind === 'AEXPR_OP_ALL') return `${left} ${operator} ALL (${right})`
-    if (body.kind === 'AEXPR_LIKE') return `${left} ${operator === '!~~' ? 'NOT LIKE' : 'LIKE'} ${right}`
-    if (body.kind === 'AEXPR_ILIKE') return `${left} ${operator === '!~~*' ? 'NOT ILIKE' : 'ILIKE'} ${right}`
+    if (body.kind === 'AEXPR_OP_ANY') return `${left} ${operator} ANY (${right()})`
+    if (body.kind === 'AEXPR_OP_ALL') return `${left} ${operator} ALL (${right()})`
+    if (body.kind === 'AEXPR_LIKE') return `${left} ${operator === '!~~' ? 'NOT LIKE' : 'LIKE'} ${right()}`
+    if (body.kind === 'AEXPR_ILIKE') return `${left} ${operator === '!~~*' ? 'NOT ILIKE' : 'ILIKE'} ${right()}`
     if (body.kind === 'AEXPR_IN') return `${left} ${operator === '<>' ? 'NOT IN' : 'IN'} (${items().join(', ')})`
     if (body.kind === 'AEXPR_BETWEEN' || body.kind === 'AEXPR_NOT_BETWEEN'
       || body.kind === 'AEXPR_BETWEEN_SYM' || body.kind === 'AEXPR_NOT_BETWEEN_SYM') {
@@ -2183,10 +1629,10 @@ class LibpgPrinter {
           : body.kind === 'AEXPR_BETWEEN_SYM' ? 'BETWEEN SYMMETRIC' : 'NOT BETWEEN SYMMETRIC'
       return `${left} ${keyword} ${bounds[0]} AND ${bounds[1]}`
     }
-    if (body.kind === 'AEXPR_DISTINCT') return `${left} IS DISTINCT FROM ${right}`
-    if (body.kind === 'AEXPR_NOT_DISTINCT') return `${left} IS NOT DISTINCT FROM ${right}`
-    if (body.kind === 'AEXPR_NULLIF') return `NULLIF(${left}, ${right})`
-    return `${left} ${operator} ${right}`
+    if (body.kind === 'AEXPR_DISTINCT') return `${left} IS DISTINCT FROM ${right()}`
+    if (body.kind === 'AEXPR_NOT_DISTINCT') return `${left} IS NOT DISTINCT FROM ${right()}`
+    if (body.kind === 'AEXPR_NULLIF') return `NULLIF(${left}, ${right()})`
+    return `${left} ${operator} ${right()}`
   }
 
   /**
@@ -2227,6 +1673,193 @@ class LibpgPrinter {
     if (body.boolval) return body.boolval.boolval ? 'true' : 'false'
     if (body.isnull) return 'NULL'
     return ''
+  }
+}
+
+/** Prints a PL/pgSQL function body from the parsed PL syntax tree. */
+class PlPgSqlPrinter {
+  #used = new Set<number>()
+
+  constructor(
+    private readonly comments: readonly SqlComment[],
+    private readonly functionNode: any,
+    private readonly start: number,
+    private readonly end: number,
+  ) {}
+
+  /**
+   * Print the parsed PL/pgSQL function body.
+   * @returns Formatted lines.
+   */
+  print(): string[] {
+    const block = this.functionNode.action?.PLpgSQL_stmt_block
+    if (!block) return []
+    const lines: string[] = []
+    const declarations = (this.functionNode.datums ?? [])
+      .map((datum: any) => datum.PLpgSQL_var)
+      .filter((variable: any) => variable?.lineno && variable.refname && variable.datatype && !variable.isconst)
+    if (declarations.length > 0) {
+      lines.push('DECLARE')
+      for (const variable of declarations) {
+        const type = variable.datatype.PLpgSQL_type?.typname ?? ''
+        lines.push(`  ${variable.refname} ${String(type).toUpperCase()};`)
+      }
+    }
+    const inner = (block.body ?? []).find((statement: any) => statement.PLpgSQL_stmt_block)?.PLpgSQL_stmt_block
+    lines.push(...this.block(inner ?? block, ''))
+    return lines
+  }
+
+  /**
+   * Print one PL/pgSQL block.
+   * @param body - PLpgSQL_stmt_block body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  block(body: any, indent: string): string[] {
+    const lines = [`${indent}BEGIN`]
+    let previousType = ''
+    for (const statement of body.body ?? []) {
+      const type = Object.keys(statement ?? {})[0] ?? ''
+      const statementLines = this.statement(statement, `${indent}  `)
+      if (statementLines.length === 0) continue
+      if (previousType === 'PLpgSQL_stmt_if' && lines.length > 1) lines.push('')
+      lines.push(...this.commentsBefore(statement, `${indent}  `))
+      lines.push(...statementLines)
+      previousType = type
+    }
+    const exceptions = body.exceptions?.PLpgSQL_exception_block?.exc_list ?? []
+    if (exceptions.length > 0) {
+      lines.push(`${indent}EXCEPTION`)
+      for (const exception of exceptions) {
+        const clause = exception.PLpgSQL_exception
+        const conditions = (clause.conditions ?? []).map((condition: any) => (
+          condition.PLpgSQL_condition?.condname ?? ''
+        )).filter(Boolean).join(' OR ')
+        lines.push(`${indent}  WHEN ${conditions} THEN`)
+        for (const statement of clause.action ?? []) {
+          lines.push(...this.commentsBefore(statement, `${indent}    `))
+          lines.push(...this.statement(statement, `${indent}    `))
+        }
+      }
+    }
+    lines.push(`${indent}END`)
+    return lines
+  }
+
+  /**
+   * Print one PL/pgSQL statement.
+   * @param node - Tagged PL/pgSQL statement.
+   * @param indent - Prefix for this statement.
+   * @returns Formatted lines.
+   */
+  statement(node: any, indent: string): string[] {
+    const type = Object.keys(node ?? {})[0]
+    const body = type ? node[type] : null
+    if (!type || !body) return []
+    switch (type) {
+      case 'PLpgSQL_stmt_if': {
+        const lines = [`${indent}IF ${this.expression(body.cond?.PLpgSQL_expr?.query ?? '')} THEN`]
+        for (const statement of body.then_body ?? []) {
+          lines.push(...this.commentsBefore(statement, `${indent}  `))
+          lines.push(...this.statement(statement, `${indent}  `))
+        }
+        for (const elsif of body.elsif_list ?? []) {
+          const clause = elsif.PLpgSQL_if_elsif
+          lines.push(`${indent}ELSIF ${this.expression(clause.cond?.PLpgSQL_expr?.query ?? '')} THEN`)
+          for (const statement of clause.stmts ?? []) {
+            lines.push(...this.commentsBefore(statement, `${indent}  `))
+            lines.push(...this.statement(statement, `${indent}  `))
+          }
+        }
+        if (body.else_body?.length) {
+          lines.push(`${indent}ELSE`)
+          for (const statement of body.else_body) {
+            lines.push(...this.commentsBefore(statement, `${indent}  `))
+            lines.push(...this.statement(statement, `${indent}  `))
+          }
+        }
+        lines.push(`${indent}END IF;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_assign': {
+        const query = body.expr?.PLpgSQL_expr?.query ?? ''
+        const match = /^(.*?)\s*(:=|=)\s*(.*)$/u.exec(query)
+        if (!match) return []
+        return [`${indent}${this.expression(match[1] ?? '')} ${match[2]} ${this.expression(match[3] ?? '')};`]
+      }
+      case 'PLpgSQL_stmt_return': {
+        if (body.expr?.PLpgSQL_expr?.query) {
+          const query = body.expr.PLpgSQL_expr.query
+          const parts = query.split(/\s*\|\|\s*/u)
+          if (parts.length > 1) {
+            const lines = [`${indent}RETURN`]
+            parts.forEach((part: string, index: number) => {
+              const prefix = index === 0 ? '  ' : '  || '
+              lines.push(`${indent}${prefix}${this.expression(part)}${index === parts.length - 1 ? ';' : ''}`)
+            })
+            return lines
+          }
+          return [`${indent}RETURN ${this.expression(query)};`]
+        }
+        if (typeof body.retvarno === 'number') {
+          const datum = this.functionNode.datums?.[body.retvarno]
+          const name = datum?.PLpgSQL_rec?.refname ?? datum?.PLpgSQL_var?.refname
+          if (name) return [`${indent}RETURN ${name.toUpperCase()};`]
+        }
+        return []
+      }
+      case 'PLpgSQL_stmt_raise': {
+        const levels: Record<number, string> = { 17: 'LOG', 18: 'NOTICE', 19: 'WARNING', 20: 'INFO', 21: 'EXCEPTION' }
+        const level = levels[body.elog_level] ?? 'NOTICE'
+        return [`${indent}RAISE ${level} '${String(body.message ?? '').replace(/'/gu, "''")}';`]
+      }
+      case 'PLpgSQL_stmt_execsql': {
+        const query = body.sqlstmt?.PLpgSQL_expr?.query ?? ''
+        if (!query) return []
+        const formatted = formatSQL(query, `${indent}`)
+        if (!formatted) return []
+        const lines = formatted.split('\n')
+        lines[lines.length - 1] = `${lines[lines.length - 1]};`
+        return lines
+      }
+      default:
+        return []
+    }
+  }
+
+  /**
+   * Format one PL/pgSQL expression.
+   * @param query - Expression SQL.
+   * @returns Inline expression.
+   */
+  expression(query: string): string {
+    if (!query.trim()) return ''
+    const formatted = formatSQL(`SELECT ${query}`, '', false).trim()
+    const expression = formatted.startsWith('SELECT ') ? formatted.slice(7) : formatted
+    return expression.replace(/\b(new|old)\b/giu, word => word.toUpperCase())
+  }
+
+  /**
+   * Emit comments that precede a statement.
+   * @param node - Statement node.
+   * @param indent - Prefix for the comments.
+   * @returns Comment lines.
+   */
+  commentsBefore(node: any, indent: string): string[] {
+    const type = Object.keys(node ?? {})[0]
+    const line = type ? node[type]?.lineno : undefined
+    if (typeof line !== 'number') return []
+    const lines: string[] = []
+    for (const comment of this.comments) {
+      if (this.#used.has(comment.start)) continue
+      if (comment.start < this.start || comment.start > this.end) continue
+      if (comment.line <= line) {
+        this.#used.add(comment.start)
+        lines.push(`${indent}${comment.text.trim()}`)
+      }
+    }
+    return lines
   }
 }
 

@@ -157,9 +157,9 @@ describe('Authorization RLS', () => {
         current: string,
         superuser: boolean,
       }[]>`
-        SELECT current_user AS current, r.rolsuper AS superuser, r.rolbypassrls AS bypass
-        FROM pg_roles r
-        WHERE r.rolname = current_user
+        SELECT CURRENT_USER AS "current", "r"."rolsuper" AS "superuser", "r"."rolbypassrls" AS "bypass"
+        FROM "pg_roles" "r"
+        WHERE "r"."rolname" = CURRENT_USER
       `
       expect(role?.current).toBe('basis_app')
       expect(role?.superuser).toBe(false)
@@ -262,22 +262,20 @@ describe('Authorization RLS', () => {
 
       const actorSetting = await asActor(user, () => server.db.tx(async sql => (
         sql<{ actor: string | null }[]>`
-          SELECT CURRENT_SETTING('actor.id', TRUE) AS actor
+          SELECT CURRENT_SETTING('actor.id', TRUE) AS "actor"
         `
       )))
       expect(actorSetting[0]?.actor).toBe(user)
       const anonymousSetting = await asActor(null, () => server.db.tx(async sql => (
         sql<{ actor: string | null }[]>`
-          SELECT CURRENT_SETTING('actor.id', TRUE) AS actor
+          SELECT CURRENT_SETTING('actor.id', TRUE) AS "actor"
         `
       )))
       expect(anonymousSetting[0]?.actor ?? '').toBe('')
 
       const changed = await asActor(other, () => server.db.tx(async sql => sql`
-        UPDATE "Article"
-        SET "title" = 'Leaked'
+        UPDATE "Article" SET "title" = 'Leaked'
         WHERE "id" = ${article}
-        RETURNING "id"
       `))
       expect(changed).toHaveLength(0)
 
@@ -334,25 +332,19 @@ describe('Authorization RLS', () => {
       await asActor(admin.userId, () => authorization.assignRole(other, editor.id))
       expect(await asActor(other, () => authorization.can('update', 'Article', { id: otherArticle }))).toBe(true)
       const updated = await asActor(other, () => server.db.tx(async sql => sql`
-        UPDATE "Article"
-        SET "title" = 'Updated'
+        UPDATE "Article" SET "title" = 'Updated'
         WHERE "id" = ${otherArticle}
-        RETURNING "id"
       `))
       expect(updated).toHaveLength(1)
       await asActor(admin.userId, () => authorization.removeRole(other, editor.id))
       await asActor(admin.userId, () => authorization.assignRole(other, limited.id))
       await expect(asActor(other, () => server.db.tx(async sql => sql`
-        UPDATE "Article"
-        SET "title" = 'Changed'
+        UPDATE "Article" SET "title" = 'Changed'
         WHERE "id" = ${otherArticle}
-        RETURNING "id"
       `))).rejects.toThrow()
       const sameTitle = await asActor(other, () => server.db.tx(async sql => sql`
-        UPDATE "Article"
-        SET "title" = 'Updated'
+        UPDATE "Article" SET "title" = 'Updated'
         WHERE "id" = ${otherArticle}
-        RETURNING "id"
       `))
       expect(sameTitle).toHaveLength(1)
 
@@ -733,10 +725,8 @@ describe('Authorization RLS', () => {
 
       const update = (actor: string, id: string, title: string) => asActor(actor, () => (
         server.db.tx(async sql => sql<{ id: string }[]>`
-          UPDATE "Workspace"
-          SET "title" = ${title}
+          UPDATE "Workspace" SET "title" = ${title}
           WHERE "id" = ${id}
-          RETURNING "id"
         `)
       ))
       expect(await update(bob, workspaceA, 'Workspace A edited')).toHaveLength(1)
@@ -930,10 +920,8 @@ describe('Authorization RLS', () => {
 
       const update = (actor: string, id: string) => asActor(actor, () => server.db.tx(async sql => (
         sql<{ id: string }[]>`
-          UPDATE "Note"
-          SET "title" = 'Updated'
+          UPDATE "Note" SET "title" = 'Updated'
           WHERE "id" = ${id}
-          RETURNING "id"
         `
       )))
       expect(await update(alice, note)).toHaveLength(1)
@@ -975,7 +963,6 @@ describe('Authorization RLS', () => {
       const remove = (actor: string) => asActor(actor, () => server.db.tx(async sql => sql<{ id: string }[]>`
         DELETE FROM "Note"
         WHERE "id" = ${note}
-        RETURNING "id"
       `))
       expect(await remove(bob)).toHaveLength(0)
       expect(await remove(alice)).toHaveLength(1)

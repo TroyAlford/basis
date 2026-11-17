@@ -781,13 +781,13 @@ export class DatabaseRelease {
    */
   async #ledger(sql: BunSQL): Promise<readonly LedgerRow[]> {
     const [present] = await sql<{ present: boolean }[]>`
-      SELECT TO_REGCLASS('basis.schema_migration') IS NOT NULL AS present
+      SELECT TO_REGCLASS('basis.schema_migration') IS NOT NULL AS "present"
     `
     if (!present?.present) return []
     return await sql<LedgerRow[]>`
-      SELECT version, checksum, status
-      FROM basis.schema_migration
-      ORDER BY applied_at, id
+      SELECT "version", "checksum", "status"
+      FROM "basis"."schema_migration"
+      ORDER BY "applied_at", "id"
     `
   }
 

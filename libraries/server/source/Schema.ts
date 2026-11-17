@@ -415,16 +415,16 @@ const PHASE: Readonly<Record<string, number>> = {
  */
 export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   const extensions = await sql<{ name: string }[]>`
-    SELECT extname AS name
-    FROM pg_extension
-    WHERE extname NOT IN ('plpgsql')
-    ORDER BY extname
+    SELECT "extname" AS "name"
+    FROM "pg_extension"
+    WHERE "extname" NOT IN ('plpgsql')
+    ORDER BY "extname"
   `
   const schemaRows = await sql<{ name: string }[]>`
-    SELECT nspname AS name
-    FROM pg_namespace
-    WHERE nspname IN ('public', 'basis', CURRENT_SCHEMA())
-    ORDER BY nspname
+    SELECT "nspname" AS "name"
+    FROM "pg_namespace"
+    WHERE "nspname" IN ('public', 'basis', CURRENT_SCHEMA())
+    ORDER BY "nspname"
   `
   const tableRows = await sql<{
     force: boolean,
@@ -433,15 +433,15 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     table: string,
   }[]>`
     SELECT
-      n.nspname AS schema,
-      c.relname AS TABLE,
-      c.relrowsecurity AS "rowSecurity",
-      c.relforcerowsecurity AS force
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relkind = 'r'
-      AND n.nspname IN (CURRENT_SCHEMA(), 'basis')
-    ORDER BY n.nspname, c.relname
+      "n"."nspname" AS "schema",
+      "c"."relname" AS "table",
+      "c"."relrowsecurity" AS "rowSecurity",
+      "c"."relforcerowsecurity" AS "force"
+    FROM "pg_class" "c"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
+    WHERE "c"."relkind" = 'r'
+      AND "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+    ORDER BY "n"."nspname", "c"."relname"
   `
   const columnRows = await sql<{
     column: string,
@@ -452,15 +452,15 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     type: string,
   }[]>`
     SELECT
-      table_schema AS schema,
-      table_name AS TABLE,
-      column_name AS COLUMN,
-      is_nullable AS nullable,
-      column_default AS DEFAULT,
-      data_type AS type
-    FROM information_schema.columns
-    WHERE table_schema IN (CURRENT_SCHEMA(), 'basis')
-    ORDER BY table_schema, table_name, ordinal_position
+      "table_schema" AS "schema",
+      "table_name" AS "table",
+      "column_name" AS "column",
+      "is_nullable" AS "nullable",
+      "column_default" AS "default",
+      "data_type" AS "type"
+    FROM "information_schema"."columns"
+    WHERE "table_schema" IN (CURRENT_SCHEMA(), 'basis')
+    ORDER BY "table_schema", "table_name", "ordinal_position"
   `
   const indexRows = await sql<{
     columns: string[] | null,
@@ -475,30 +475,30 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     valid: boolean,
   }[]>`
     SELECT
-      n.nspname AS schema,
-      t.relname AS TABLE,
-      c.relname AS INDEX,
-      am.amname AS method,
-      i.indisunique AS UNIQUE,
-      i.indisvalid AS valid,
-      pg_get_indexdef(i.indexrelid) AS definition,
-      (SELECT array_agg(opc.opcname ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
-        u(opcoid, ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClasses",
-      (SELECT array_agg(opc.opcdefault ORDER BY u.ordinality) FROM unnest(i.indclass) WITH
-        ORDINALITY u(opcoid,
-        ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClassDefaults",
-      (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(i.indkey) WITH ORDINALITY
-        u(attnum,
-        ordinality) JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = u.attnum) AS
-        columns
-    FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indexrelid
-    JOIN pg_class t ON t.oid = i.indrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_am am ON am.oid = c.relam
-    WHERE n.nspname IN (current_schema(), 'basis')
-      AND NOT i.indisprimary
-    ORDER BY n.nspname, t.relname, c.relname
+      "n"."nspname" AS "schema",
+      "t"."relname" AS "table",
+      "c"."relname" AS "index",
+      "am"."amname" AS "method",
+      "i"."indisunique" AS "unique",
+      "i"."indisvalid" AS "valid",
+      PG_GET_INDEXDEF("i"."indexrelid") AS "definition",
+      (SELECT ARRAY_AGG("opc"."opcname" ORDER BY "u"."ordinality") FROM UNNEST("i"."indclass") WITH ORDINALITY "u"
+        ("opcoid", "ordinality")
+    JOIN "pg_opclass" "opc" ON "opc"."oid" = "u"."opcoid") AS "operatorClasses",
+      (SELECT ARRAY_AGG("opc"."opcdefault" ORDER BY "u"."ordinality") FROM UNNEST("i"."indclass") WITH ORDINALITY "u"
+        ("opcoid", "ordinality")
+    JOIN "pg_opclass" "opc" ON "opc"."oid" = "u"."opcoid") AS "operatorClassDefaults",
+      (SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality") FROM UNNEST("i"."indkey") WITH ORDINALITY "u"
+        ("attnum", "ordinality")
+    JOIN "pg_attribute" "a" ON ("a"."attrelid" = "i"."indrelid" AND "a"."attnum" = "u"."attnum")) AS "columns"
+    FROM "pg_index" "i"
+    JOIN "pg_class" "c" ON "c"."oid" = "i"."indexrelid"
+    JOIN "pg_class" "t" ON "t"."oid" = "i"."indrelid"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
+    JOIN "pg_am" "am" ON "am"."oid" = "c"."relam"
+    WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+      AND NOT ("i"."indisprimary")
+    ORDER BY "n"."nspname", "t"."relname", "c"."relname"
   `
   const constraintRows = await sql<{
     constraint: string,
@@ -507,35 +507,35 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     table: string,
   }[]>`
     SELECT
-      n.nspname AS schema,
-      c.relname AS TABLE,
-      con.conname AS CONSTRAINT,
-      PG_GET_CONSTRAINTDEF(con.oid) AS definition
-    FROM pg_constraint con
-    JOIN pg_class c ON c.oid = con.conrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname IN (CURRENT_SCHEMA(), 'basis')
-      AND con.contype = 'f'
-    ORDER BY n.nspname, c.relname, con.conname
+      "n"."nspname" AS "schema",
+      "c"."relname" AS "table",
+      "con"."conname" AS "constraint",
+      PG_GET_CONSTRAINTDEF("con"."oid") AS "definition"
+    FROM "pg_constraint" "con"
+    JOIN "pg_class" "c" ON "c"."oid" = "con"."conrelid"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
+    WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+      AND "con"."contype" = 'f'
+    ORDER BY "n"."nspname", "c"."relname", "con"."conname"
   `
   const primaryRows = await sql<{
     columns: string[],
     schema: string,
     table: string,
   }[]>`
-    SELECT n.nspname AS schema, c.relname AS TABLE,
-      array_agg(a.attname ORDER BY u.ordinality) AS columns
-    FROM pg_constraint con
-    JOIN pg_class c ON c.oid = con.conrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN unnest(con.conkey)
-    WITH ORDINALITY u(attnum, ordinality) ON TRUE
-    JOIN pg_attribute a ON a.attrelid = c.oid
-      AND a.attnum = u.attnum
-    WHERE con.contype = 'p'
-      AND n.nspname IN (current_schema(), 'basis')
-    GROUP BY n.nspname, c.relname
-    ORDER BY n.nspname, c.relname
+    SELECT
+      "n"."nspname" AS "schema",
+      "c"."relname" AS "table",
+      ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality") AS "columns"
+    FROM "pg_constraint" "con"
+    JOIN "pg_class" "c" ON "c"."oid" = "con"."conrelid"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
+    JOIN UNNEST("con"."conkey") WITH ORDINALITY "u" ("attnum", "ordinality") ON TRUE
+    JOIN "pg_attribute" "a" ON ("a"."attrelid" = "c"."oid" AND "a"."attnum" = "u"."attnum")
+    WHERE "con"."contype" = 'p'
+      AND "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+    GROUP BY "n"."nspname", "c"."relname"
+    ORDER BY "n"."nspname", "c"."relname"
   `
   const primaryByTable = new Map<string, string[]>()
   for (const row of primaryRows) {
@@ -550,16 +550,16 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     table: string,
   }[]>`
     SELECT
-      n.nspname AS schema,
-      c.relname AS TABLE,
-      con.conname AS CONSTRAINT,
-      PG_GET_CONSTRAINTDEF(con.oid) AS definition
-    FROM pg_constraint con
-    JOIN pg_class c ON c.oid = con.conrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname IN (CURRENT_SCHEMA(), 'basis')
-      AND con.contype = 'c'
-    ORDER BY n.nspname, c.relname, con.conname
+      "n"."nspname" AS "schema",
+      "c"."relname" AS "table",
+      "con"."conname" AS "constraint",
+      PG_GET_CONSTRAINTDEF("con"."oid") AS "definition"
+    FROM "pg_constraint" "con"
+    JOIN "pg_class" "c" ON "c"."oid" = "con"."conrelid"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
+    WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+      AND "con"."contype" = 'c'
+    ORDER BY "n"."nspname", "c"."relname", "con"."conname"
   `
   const checksByTable = new Map<string, PhysicalCheck[]>()
   for (const row of checkRows) {
@@ -586,20 +586,20 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   }[]>`
     SELECT
       CASE
-        WHEN n.nspname = 'basis' THEN 'basis.' || p.proname
-        ELSE p.proname
-      END AS name,
-      p.prosrc AS body,
-      pg_get_functiondef(p.oid) AS definition,
-      p.prosecdef AS "securityDefiner",
-      pg_get_function_identity_arguments(p.oid) AS signature,
-      ARRAY_TO_STRING(p.proconfig, ',') AS "searchPath"
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname IN (current_schema(), 'basis')
-      AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid =
-        p.oid AND d.deptype = 'e')
-    ORDER BY n.nspname, p.proname
+        WHEN "n"."nspname" = 'basis' THEN 'basis.' || "p"."proname"
+        ELSE "p"."proname"
+      END AS "name",
+      "p"."prosrc" AS "body",
+      PG_GET_FUNCTIONDEF("p"."oid") AS "definition",
+      "p"."prosecdef" AS "securityDefiner",
+      PG_GET_FUNCTION_IDENTITY_ARGUMENTS("p"."oid") AS "signature",
+      ARRAY_TO_STRING("p"."proconfig", ',') AS "searchPath"
+    FROM "pg_proc" "p"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "p"."pronamespace"
+    WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+      AND NOT (EXISTS (SELECT 1 FROM "pg_depend" "d" WHERE "d"."classid" = 'pg_proc'::regclass   AND "d"."objid" =
+        "p"."oid"   AND "d"."deptype" = 'e'))
+    ORDER BY "n"."nspname", "p"."proname"
   `
   const triggerRows = await sql<{
     columns: string[] | null,
@@ -613,26 +613,25 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     type: number,
   }[]>`
     SELECT
-      n.nspname AS schema,
-      c.relname AS TABLE,
-      t.tgname AS name,
-      t.tgenabled AS enabled,
-      t.tgtype AS type,
-      t.tgdeferrable AS DEFERRABLE,
-      t.tginitdeferred AS "initDeferred",
-      t.tgconstraint AS CONSTRAINT,
-      p.proname AS "functionName",
-      (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[]) WITH
-        ORDINALITY u(attnum,
-        ordinality) JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = u.attnum) AS
-        columns
-    FROM pg_trigger t
-    JOIN pg_class c ON c.oid = t.tgrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_proc p ON p.oid = t.tgfoid
-    WHERE NOT t.tgisinternal
-      AND n.nspname IN (current_schema(), 'basis')
-    ORDER BY n.nspname, c.relname, t.tgname
+      "n"."nspname" AS "schema",
+      "c"."relname" AS "table",
+      "t"."tgname" AS "name",
+      "t"."tgenabled" AS "enabled",
+      "t"."tgtype" AS "type",
+      "t"."tgdeferrable" AS "deferrable",
+      "t"."tginitdeferred" AS "initDeferred",
+      "t"."tgconstraint" AS "constraint",
+      "p"."proname" AS "functionName",
+      (SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality") FROM UNNEST("t"."tgattr"::smallint[]) WITH ORDINALITY
+        "u" ("attnum", "ordinality")
+    JOIN "pg_attribute" "a" ON ("a"."attrelid" = "t"."tgrelid" AND "a"."attnum" = "u"."attnum")) AS "columns"
+    FROM "pg_trigger" "t"
+    JOIN "pg_class" "c" ON "c"."oid" = "t"."tgrelid"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
+    JOIN "pg_proc" "p" ON "p"."oid" = "t"."tgfoid"
+    WHERE NOT ("t"."tgisinternal")
+      AND "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+    ORDER BY "n"."nspname", "c"."relname", "t"."tgname"
   `
   const policyRows = await sql<{
     command: string,
@@ -644,21 +643,21 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     table: string,
   }[]>`
     SELECT
-      schemaname AS schema,
-      tablename AS TABLE,
-      policyname AS name,
-      cmd AS command,
-      permissive,
-      roles,
-      concat(
+      "schemaname" AS "schema",
+      "tablename" AS "table",
+      "policyname" AS "name",
+      "cmd" AS "command",
+      "permissive",
+      "roles",
+      CONCAT(
         'USING ',
-        COALESCE(qual, 'true'),
+        COALESCE("qual", 'true'),
         ' WITH CHECK ',
-        COALESCE(with_check, 'true')
-      ) AS definition
-    FROM pg_policies
-    WHERE schemaname IN (current_schema(), 'basis')
-    ORDER BY schemaname, tablename, policyname
+        COALESCE("with_check", 'true')
+      ) AS "definition"
+    FROM "pg_policies"
+    WHERE "schemaname" IN (CURRENT_SCHEMA(), 'basis')
+    ORDER BY "schemaname", "tablename", "policyname"
   `
 
   const grantRows = await sql<{
@@ -667,10 +666,14 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     schema: string,
     table: string,
   }[]>`
-    SELECT grantee, table_schema AS schema, table_name AS TABLE, privilege_type AS privilege
-    FROM information_schema.role_table_grants
-    WHERE table_schema IN (CURRENT_SCHEMA(), 'basis')
-    ORDER BY grantee, table_schema, table_name, privilege_type
+    SELECT
+      "grantee",
+      "table_schema" AS "schema",
+      "table_name" AS "table",
+      "privilege_type" AS "privilege"
+    FROM "information_schema"."role_table_grants"
+    WHERE "table_schema" IN (CURRENT_SCHEMA(), 'basis')
+    ORDER BY "grantee", "table_schema", "table_name", "privilege_type"
   `
   const grants: PhysicalGrant[] = grantRows.map(row => {
     const table = row.schema === 'basis' ? `basis.${row.table}` : row.table
@@ -691,15 +694,16 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     schema: string,
   }[]>`
     SELECT
-      n.nspname AS schema,
+      "n"."nspname" AS "schema",
       CASE
-        WHEN a.grantee = 0 THEN 'PUBLIC'
-        ELSE pg_get_userbyid(a.grantee)
-      END AS grantee,
-      a.privilege_type AS privilege
-    FROM pg_namespace n, aclexplode(n.nspacl) a
-    WHERE n.nspname IN ('public', 'basis', current_schema())
-    ORDER BY n.nspname, grantee, privilege
+        WHEN "a"."grantee" = 0 THEN 'PUBLIC'
+        ELSE PG_GET_USERBYID("a"."grantee")
+      END AS "grantee",
+      "a"."privilege_type" AS "privilege"
+    FROM "pg_namespace" "n"
+    , ACLEXPLODE("n"."nspacl") "a"
+    WHERE "n"."nspname" IN ('public', 'basis', CURRENT_SCHEMA())
+    ORDER BY "n"."nspname", "grantee", "privilege"
   `
   const functionGrantRows = await sql<{
     function: string,
@@ -708,18 +712,19 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   }[]>`
     SELECT
       CASE
-        WHEN n.nspname = 'basis' THEN 'basis.' || p.proname
-        ELSE p.proname
-      END AS function,
+        WHEN "n"."nspname" = 'basis' THEN 'basis.' || "p"."proname"
+        ELSE "p"."proname"
+      END AS "function",
       CASE
-        WHEN a.grantee = 0 THEN 'PUBLIC'
-        ELSE pg_get_userbyid(a.grantee)
-      END AS grantee,
-      a.privilege_type AS privilege
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace, aclexplode(p.proacl) a
-    WHERE n.nspname IN (current_schema(), 'basis')
-    ORDER BY FUNCTION, grantee, privilege
+        WHEN "a"."grantee" = 0 THEN 'PUBLIC'
+        ELSE PG_GET_USERBYID("a"."grantee")
+      END AS "grantee",
+      "a"."privilege_type" AS "privilege"
+    FROM "pg_proc" "p"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "p"."pronamespace"
+    , ACLEXPLODE("p"."proacl") "a"
+    WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+    ORDER BY "function", "grantee", "privilege"
   `
   for (const row of schemaGrantRows) {
     grants.push({
@@ -744,15 +749,14 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     })
   }
   const defaultFunctionRows = await sql<{ function: string }[]>`
-    SELECT
-      CASE
-        WHEN n.nspname = 'basis' THEN 'basis.' || p.proname
-        ELSE p.proname
-      END AS function
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname IN (CURRENT_SCHEMA(), 'basis')
-      AND p.proacl IS NULL
+    SELECT CASE
+      WHEN "n"."nspname" = 'basis' THEN 'basis.' || "p"."proname"
+      ELSE "p"."proname"
+    END AS "function"
+    FROM "pg_proc" "p"
+    JOIN "pg_namespace" "n" ON "n"."oid" = "p"."pronamespace"
+    WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
+      AND "p"."proacl" IS NULL
   `
   for (const row of defaultFunctionRows) {
     grants.push({
@@ -812,14 +816,14 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   })
   let roles: PhysicalRole[] = []
   const [roleTable] = await sql<{ present: boolean }[]>`
-    SELECT TO_REGCLASS('"Role"') IS NOT NULL AS present
+    SELECT TO_REGCLASS('"Role"') IS NOT NULL AS "present"
   `
   if (roleTable?.present) {
     roles = await sql<{ description: string, id: string, name: string }[]>`
-      SELECT r."id", e."name", r."description"
-      FROM "Role" r
-      JOIN "Entity" e ON e."id" = r."id"
-      ORDER BY r."id"
+      SELECT "r"."id", "e"."name", "r"."description"
+      FROM "Role" "r"
+      JOIN "Entity" "e" ON "e"."id" = "r"."id"
+      ORDER BY "r"."id"
     `
   }
 

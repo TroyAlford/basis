@@ -9,18 +9,18 @@ import { checksum } from '../../utilities'
 export async function canonicalDataDigest(sql: BunSQL): Promise<string> {
   const users = await sql<Record<string, unknown>[]>`
     SELECT *
-    FROM "User" t
-    ORDER BY t."id"
+    FROM "User" "t"
+    ORDER BY "t"."id"
   `
   const roles = await sql<Record<string, unknown>[]>`
     SELECT *
-    FROM "Role" t
-    ORDER BY t."id"
+    FROM "Role" "t"
+    ORDER BY "t"."id"
   `
   const userRoles = await sql<Record<string, unknown>[]>`
     SELECT *
-    FROM "UserRole" t
-    ORDER BY t."user.id", t."role.id"
+    FROM "UserRole" "t"
+    ORDER BY "t"."user.id", "t"."role.id"
   `
   return checksum({ roles, userRoles, users })
 }
