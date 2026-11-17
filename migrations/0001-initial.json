@@ -1,6 +1,6 @@
 {
   "appRole": "basis_app",
-  "checksum": "dc59df2aae4d685fdebc15f76d3b4bf7bd4408dd2bb4970bb90e9f57101189cb",
+  "checksum": "070098b8219808a347688cb13f497c44c63bf599de4ae160ce167ef7d0a57bf3",
   "expected": {
     "constraints": [
       {
@@ -112,6 +112,30 @@
         "securityDefiner": true,
         "signature": "role_id text",
         "sql": "\n      CREATE OR REPLACE FUNCTION basis.has_role(role_id text)\n      RETURNS boolean\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT EXISTS (\n          SELECT 1\n          FROM \"UserRole\" ur\n          WHERE ur.\"role.id\" = role_id\n            AND ur.\"user.id\" = nullif(current_setting('actor.id', true), '')\n        )\n      $$;\n    "
+      },
+      {
+        "body": "SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )",
+        "lifecycle": false,
+        "name": "basis.resolve_identity",
+        "required": [
+          "basis.resolve_identity"
+        ],
+        "searchPath": "public, basis, pg_temp",
+        "securityDefiner": true,
+        "signature": "candidate text",
+        "sql": "\n      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)\n      RETURNS text\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )\n      $$;\n    "
+      },
+      {
+        "body": "DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END",
+        "lifecycle": false,
+        "name": "basis.enroll_identity",
+        "required": [
+          "basis.enroll_identity"
+        ],
+        "searchPath": "public, basis, pg_temp",
+        "securityDefiner": true,
+        "signature": "provider_name text, provider_subject text, display_name text, email_address text",
+        "sql": "\n      CREATE OR REPLACE FUNCTION basis.enroll_identity(\n        provider_name text,\n        provider_subject text,\n        display_name text,\n        email_address text\n      )\n      RETURNS text\n      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n      DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END $$;\n    "
       }
     ],
     "policies": [
@@ -953,6 +977,46 @@
         "sql": "REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC"
       },
       {
+        "function": "basis.resolve_identity",
+        "grantName": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "GRANT EXECUTE ON FUNCTION basis.resolve_identity(candidate text) TO \"basis_app\""
+      },
+      {
+        "function": "basis.resolve_identity",
+        "grantName": "grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+        "grantee": "PUBLIC",
+        "kind": "revoke",
+        "name": "revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "REVOKE ALL ON FUNCTION basis.resolve_identity(candidate text) FROM PUBLIC"
+      },
+      {
+        "function": "basis.enroll_identity",
+        "grantName": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "GRANT EXECUTE ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) TO \"basis_app\""
+      },
+      {
+        "function": "basis.enroll_identity",
+        "grantName": "grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+        "grantee": "PUBLIC",
+        "kind": "revoke",
+        "name": "revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "REVOKE ALL ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) FROM PUBLIC"
+      },
+      {
         "grantName": "grant:basis_app:schema:public:CREATE",
         "grantee": "basis_app",
         "kind": "revoke",
@@ -1246,11 +1310,37 @@
       "dependsOn": [
         "schema:basis"
       ],
+      "id": "function:basis.enroll_identity",
+      "kind": "function",
+      "risk": "review",
+      "sql": "\n      CREATE OR REPLACE FUNCTION basis.enroll_identity(\n        provider_name text,\n        provider_subject text,\n        display_name text,\n        email_address text\n      )\n      RETURNS text\n      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n      DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END $$;\n    ",
+      "target": "basis.enroll_identity",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
       "id": "function:basis.has_role",
       "kind": "function",
       "risk": "review",
       "sql": "\n      CREATE OR REPLACE FUNCTION basis.has_role(role_id text)\n      RETURNS boolean\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT EXISTS (\n          SELECT 1\n          FROM \"UserRole\" ur\n          WHERE ur.\"role.id\" = role_id\n            AND ur.\"user.id\" = nullif(current_setting('actor.id', true), '')\n        )\n      $$;\n    ",
       "target": "basis.has_role",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:basis.resolve_identity",
+      "kind": "function",
+      "risk": "review",
+      "sql": "\n      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)\n      RETURNS text\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )\n      $$;\n    ",
+      "target": "basis.resolve_identity",
       "preconditions": [
         "completed:schema:basis"
       ]
@@ -1469,7 +1559,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Entity_create",
       "kind": "policy",
@@ -1482,7 +1574,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1492,7 +1586,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Entity_delete",
       "kind": "policy",
@@ -1505,7 +1601,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1515,7 +1613,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Entity_read",
       "kind": "policy",
@@ -1528,7 +1628,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1538,7 +1640,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Entity_update",
       "kind": "policy",
@@ -1551,7 +1655,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1561,7 +1667,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_ExternalIdentity_create",
       "kind": "policy",
@@ -1574,7 +1682,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1584,7 +1694,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_ExternalIdentity_delete",
       "kind": "policy",
@@ -1597,7 +1709,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1607,7 +1721,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_ExternalIdentity_read",
       "kind": "policy",
@@ -1620,7 +1736,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1630,7 +1748,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_ExternalIdentity_update",
       "kind": "policy",
@@ -1643,7 +1763,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1653,7 +1775,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Note_create",
       "kind": "policy",
@@ -1666,7 +1790,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1676,7 +1802,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Note_delete",
       "kind": "policy",
@@ -1689,7 +1817,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1699,7 +1829,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Note_read",
       "kind": "policy",
@@ -1712,7 +1844,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1722,7 +1856,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Note_update",
       "kind": "policy",
@@ -1735,7 +1871,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1745,7 +1883,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Role_create",
       "kind": "policy",
@@ -1758,7 +1898,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1768,7 +1910,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Role_delete",
       "kind": "policy",
@@ -1781,7 +1925,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1791,7 +1937,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Role_read",
       "kind": "policy",
@@ -1804,7 +1952,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1814,7 +1964,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_Role_update",
       "kind": "policy",
@@ -1827,7 +1979,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1837,7 +1991,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_User_create",
       "kind": "policy",
@@ -1850,7 +2006,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1860,7 +2018,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_User_delete",
       "kind": "policy",
@@ -1873,7 +2033,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1883,7 +2045,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_User_read",
       "kind": "policy",
@@ -1896,7 +2060,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1906,7 +2072,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_User_update",
       "kind": "policy",
@@ -1919,7 +2087,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1929,7 +2099,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_UserRole_create",
       "kind": "policy",
@@ -1942,7 +2114,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1952,7 +2126,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_UserRole_delete",
       "kind": "policy",
@@ -1965,7 +2141,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1975,7 +2153,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_UserRole_read",
       "kind": "policy",
@@ -1988,7 +2168,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -1998,7 +2180,9 @@
         "function:Entity_validate_leaf",
         "function:Entity_validate_leaf_row",
         "function:Entity_leaf_immutable",
-        "function:basis.has_role"
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
       ],
       "id": "policy:basis_UserRole_update",
       "kind": "policy",
@@ -2011,7 +2195,9 @@
         "completed:function:Entity_validate_leaf",
         "completed:function:Entity_validate_leaf_row",
         "completed:function:Entity_leaf_immutable",
-        "completed:function:basis.has_role"
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
       ]
     },
     {
@@ -2095,6 +2281,21 @@
     {
       "dependsOn": [
         "schema:basis",
+        "function:basis.enroll_identity"
+      ],
+      "id": "grant:grant:basis_app:function:basis.enroll_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT EXECUTE ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) TO \"basis_app\"",
+      "target": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
         "function:basis.has_role"
       ],
       "id": "grant:grant:basis_app:function:basis.has_role:EXECUTE",
@@ -2105,6 +2306,21 @@
       "preconditions": [
         "completed:schema:basis",
         "completed:function:basis.has_role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.resolve_identity"
+      ],
+      "id": "grant:grant:basis_app:function:basis.resolve_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT EXECUTE ON FUNCTION basis.resolve_identity(candidate text) TO \"basis_app\"",
+      "target": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.resolve_identity"
       ]
     },
     {
@@ -2496,6 +2712,21 @@
     {
       "dependsOn": [
         "schema:basis",
+        "function:basis.enroll_identity"
+      ],
+      "id": "grant:revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "REVOKE ALL ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) FROM PUBLIC",
+      "target": "revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
         "function:basis.has_role"
       ],
       "id": "grant:revoke:grant:PUBLIC:function:basis.has_role:EXECUTE",
@@ -2506,6 +2737,21 @@
       "preconditions": [
         "completed:schema:basis",
         "completed:function:basis.has_role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.resolve_identity"
+      ],
+      "id": "grant:revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "REVOKE ALL ON FUNCTION basis.resolve_identity(candidate text) FROM PUBLIC",
+      "target": "revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.resolve_identity"
       ]
     },
     {
@@ -2528,6 +2774,6 @@
   "schema": "public",
   "sourceHash": "7b4b9e5daeac7cff813a0886b3e8485b41cfbf3ab6779d020ecf45c908e5cbf7",
   "superuser": true,
-  "targetHash": "b93939e06965090241e181a2a93e96b45b84863892a112413618d54c0366bea1",
+  "targetHash": "cf0c82e25f83533a758842e9e92f34473e85d1974e2bb85f7a600aee32482b0c",
   "version": "0001-initial"
 }
