@@ -428,6 +428,119 @@ describe('EntityDefinitions', () => {
         name: 'DeckCardPrinting',
       }],
     })).toThrow('target')
+    expect(() => load({
+      entities: [
+        { fields: [], name: 'Deck' },
+        {
+          fields: [{
+            field: 'printings',
+            target: 'Printing',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @].printing',
+          }],
+          name: 'Card',
+        },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('owner')
+    expect(() => load({
+      entities: [
+        {
+          fields: [{
+            field: 'printings',
+            target: 'Printing',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @].card.printing',
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('projection')
+  })
+
+  test('allows inherited Collection owners and rejects incompatible aliases', () => {
+    const definitions = load({
+      entities: [
+        {
+          fields: [{
+            field: 'entries',
+            target: 'DeckCardPrinting',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @]',
+          }],
+          name: 'BaseDeck',
+        },
+        { extends: 'BaseDeck', fields: [], name: 'Deck' },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'BaseDeck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(definitions.entity('Deck')?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'entries' }),
+    )
+    expect(() => load({
+      entities: [
+        {
+          fields: [{
+            field: 'entries',
+            target: 'DeckCardPrinting',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @]',
+          }],
+          name: 'Base',
+        },
+        { extends: 'Base', fields: [], name: 'Deck' },
+        {
+          extends: 'Base',
+          fields: [{
+            field: 'printings',
+            target: 'Printing',
+            type: 'Collection',
+            via: 'entries.printing',
+          }],
+          name: 'Card',
+        },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('owner')
   })
 
   test('supports optional inverse navigations and variable relationship arity', () => {

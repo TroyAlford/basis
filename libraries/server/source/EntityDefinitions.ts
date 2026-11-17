@@ -1967,6 +1967,32 @@ function deriveNavigations(
     }
     return undefined
   }
+  const isRelatedEntity = (left: string, right: string): boolean => {
+    if (left === right || right === 'Entity') return true
+    let current = byName.get(left)
+    while (current) {
+      if (current.name === right) return true
+      current = current.extends ? byName.get(current.extends) : undefined
+    }
+    current = byName.get(right)
+    while (current) {
+      if (current.name === left) return true
+      current = current.extends ? byName.get(current.extends) : undefined
+    }
+    return false
+  }
+  const validateOwnerEndpoint = (
+    declaredOwner: string,
+    field: CollectionFieldDefinition,
+    endpoint: RelationshipEndpointDefinition,
+    relationship: RelationshipDefinition,
+  ): void => {
+    if (isRelatedEntity(declaredOwner, endpoint.target)) return
+    throw invalid(
+      `collection field "${declaredOwner}.${field.name}" owner type is incompatible with ` +
+      `relationship "${relationship.name}" endpoint "${endpoint.field}" target "${endpoint.target}"`,
+    )
+  }
   const resolvedCollections = new Map<string, ExplicitCollectionDefinition>()
   const resolvingCollections = new Set<string>()
   const resolveCollection = (
@@ -2006,6 +2032,7 @@ function deriveNavigations(
           `"${match[1]}" on relationship "${directRelationship.name}"`,
         )
       }
+      validateOwnerEndpoint(owner, field, endpoint, directRelationship)
       relationship = directRelationship
       ownerEndpoint = endpoint
       projection = segments.slice(1).map(segment => {
@@ -2026,6 +2053,7 @@ function deriveNavigations(
         throw invalid(`collection field "${owner}.${field.name}" via cannot filter an intermediate collection`)
       }
       const resolvedSource = resolveCollection(source.owner, source.field)
+      validateOwnerEndpoint(owner, field, resolvedSource.ownerEndpoint, resolvedSource.relationship)
       relationship = resolvedSource.relationship
       ownerEndpoint = resolvedSource.ownerEndpoint
       if (resolvedSource.targetEndpoint) {
@@ -2040,6 +2068,12 @@ function deriveNavigations(
         }
         return segment.name
       })
+    }
+    if (projection.length > 1) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via may have at most one projection endpoint; ` +
+        `got "${projection.join('.')}"`,
+      )
     }
     let targetEndpoint: RelationshipEndpointDefinition | undefined
     for (const segment of projection) {
