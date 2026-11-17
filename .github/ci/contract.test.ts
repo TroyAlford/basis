@@ -188,8 +188,7 @@ describe('reference consumer CI', () => {
 
   test('consolidates lightweight checks into one job with distinct steps', () => {
     const steps = workflow.jobs?.quality?.steps ?? []
-    expect(steps.some(step => step.run === 'bun run lint')).toBe(true)
-    expect(steps.some(step => step.run === 'bun run typecheck')).toBe(true)
+    expect(steps.some(step => step.run === 'bunx basis compliance')).toBe(true)
     expect(steps.some(step => step.uses?.includes('/knip@'))).toBe(true)
   })
 
