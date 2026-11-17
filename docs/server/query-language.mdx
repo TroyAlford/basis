@@ -14,7 +14,7 @@ The components have distinct jobs:
 - `QueryParser` builds a transient, non-executable syntax tree and reports syntax diagnostics.
 - `QueryNormalizer` applies entity metadata to parsed syntax and lowers string forms to canonical filters.
 - `Predicate` validates structured filters and performs shared logical/operator expansion.
-- `compilePolymorphicQuery` owns field resolution, projection joins, collection envelopes, finite work budgets, and the one SQL statement that is executed through Bun SQL.
+- `compilePolymorphicQuery` owns field resolution, projection joins, collection path projections, finite work budgets, and the one SQL statement that is executed through Bun SQL.
 
 No input form gets its own executor or database path. A query is either compiled completely or rejected before execution.
 
@@ -544,7 +544,7 @@ The default grouped CTE is selected for numeric count thresholds because it held
 
 ## Ordering, pagination, and exclusions
 
-`orderBy` accepts only effective root/inherited/descendant scalar fields. It rejects references, inverse/N:M collections, dotted reference paths, Array, and JSON. Abstract queries append the stable `id` tie-break and use `name, id` when no ordering is supplied. `limit` defaults to 25 and must be a non-negative integer or `null`; `offset` must be non-negative. Pagination bindings preserve the predicate/collection/work-budget ordering.
+`orderBy` accepts only effective root/inherited/descendant scalar fields; a leading `-` shorthand selects descending direction, and arrays compose multiple fields. It rejects references, inverse/N:M collections, dotted reference paths, Array, and JSON. Abstract queries append the stable `id` tie-break and use `name, id` when no ordering is supplied. `limit` defaults to 25 and must be a non-negative integer or `null`; `offset` must be non-negative. Pagination bindings preserve the predicate/collection/work-budget ordering.
 
 Explicit exclusions for this contract:
 

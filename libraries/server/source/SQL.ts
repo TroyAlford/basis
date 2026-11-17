@@ -499,8 +499,19 @@ function orderByClause(
   if (entries.length === 0) return { sql: '' }
 
   const clauses = entries.map(entry => {
-    const name = typeof entry === 'string' ? entry : entry.field
-    const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
+    const shorthand = typeof entry === 'string' && entry.startsWith('-')
+    const name = typeof entry === 'string'
+      ? shorthand ? entry.slice(1) : entry
+      : entry.field
+    if (typeof entry === 'string' && shorthand && name === '') {
+      throw new Error('Query orderBy shorthand must name a field after "-"')
+    }
+    if (typeof entry === 'string' && entry.startsWith('--')) {
+      throw new Error('Query orderBy shorthand must use one leading "-"')
+    }
+    const direction = typeof entry === 'string'
+      ? shorthand ? SortDirection.Descending : SortDirection.Ascending
+      : entry.direction ?? SortDirection.Ascending
     const field = scope ? (scope.orderField ?? scope.field)(name) : scalarField(entity, name)
     if (field.type === FieldType.Array || field.type === FieldType.JSON) {
       throw new Error(`Query field "${entity.name}.${name}" cannot be used in ordering`)

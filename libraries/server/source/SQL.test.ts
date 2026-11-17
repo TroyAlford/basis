@@ -162,6 +162,46 @@ const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
   }],
 }))
 
+const nestedCollectionDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        {
+          cardinality: 'Many',
+          field: 'pets',
+          inverse: 'owner',
+          target: 'Pet',
+          type: 'Inverse',
+        },
+      ],
+      name: 'User',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
+        {
+          cardinality: 'Many',
+          field: 'toys',
+          inverse: 'pet',
+          target: 'Toy',
+          type: 'Inverse',
+        },
+      ],
+      name: 'Pet',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'label', type: 'String' },
+        { field: 'pet', inverse: 'toys', target: 'Pet', type: 'Entity' },
+      ],
+      name: 'Toy',
+    },
+  ],
+}))
+
 const reciprocalDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [
     {
@@ -536,15 +576,14 @@ describe('SQL.where', () => {
 
   test('projects native scalar arrays and collection envelopes', () => {
     const compiled = compileEntityQuery(collectionDefinitions, 'Pet', {
-      collections: { visits: { limit: 2, offset: 1 } },
-      fields: ['id', 'tags', 'payload', 'visits'],
+      fields: ['id', 'tags', 'payload', 'visits{$limit:2,$offset:1}'],
     })
     expect(compiled.sql).toContain('t."tags" AS "tags"')
     expect(compiled.sql).toContain('t."payload" AS "payload"')
-    expect(compiled.sql).toContain('"visits__items"')
+    expect(compiled.sql).toContain('"visits"')
     expect(compiled.sql).toContain('"visits__total"')
-    expect(compiled.sql).toContain('"visits__remaining"')
-    expect(compiled.values).toEqual([2, 1, 3, 25, 0])
+    expect(compiled.sql).toContain('LIMIT 2 OFFSET 1')
+    expect(compiled.values).toEqual([25, 0])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
@@ -563,47 +602,83 @@ describe('SQL.where', () => {
     })).toThrow('cannot be used in ordering')
   })
 
-  test('projects relationship-backed collections and nested relationship fields', () => {
+  test('projects relationship-backed collection previews', () => {
     const members = compileEntityQuery(relationshipDefinitions, 'Campaign', {
-      collections: { members: { limit: 2, offset: 1, relationshipFields: ['role'] } },
-      fields: ['id', 'members'],
+      fields: ['id', 'members{$limit:2,$offset:1}'],
     })
     expect(members.sql).toContain('FROM "Campaign" "t"')
     expect(members.sql).toMatch(/"Membership" "cj\d+"/)
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
     expect(members.sql).toMatch(/"cj\d+"\."user\.id"/)
-    expect(members.sql).toContain('"members__items"')
-    expect(members.sql).toContain("'membership'")
-    expect(members.sql).toContain("'role'")
-    expect(members.sql).toContain('"role"')
-    expect(members.values).toEqual([2, 1, 3, 25, 0])
+    expect(members.sql).toContain('"members"')
+    expect(members.values).toEqual([25, 0])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
-      collections: { articles: { limit: 1 } },
-      fields: ['id', 'articles'],
+      fields: ['id', 'articles{$limit:1}'],
     })
     expect(articles.sql).toMatch(/"Article" "ct\d+"/)
     expect(articles.sql).toMatch(/"ct\d+"\."author\.id" = "t"\."id"/)
     expect(articles.sql).not.toContain('"Membership"')
   })
 
-  test('rejects relationshipFields on inverse and unknown relationship properties', () => {
-    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
-      collections: { articles: { relationshipFields: [] } },
-      fields: ['id', 'articles'],
-    })).toThrow('does not accept relationshipFields')
+  test('projects collection paths as nested arrays with flattened relationship properties', () => {
+    const compiled = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'name', 'members', 'members.name', 'members.role'],
+    })
+    expect(compiled.sql).toContain('json_agg')
+    expect(compiled.sql).toContain('row_to_json')
+    expect(compiled.sql).toContain('"members"')
+    expect(compiled.sql).toContain("'role'")
+    expect(compiled.sql).not.toContain('"members__items"')
+  })
+
+  test('caps projected collections, reports totals and applies collection filters', () => {
+    const defaults = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'members', 'members.name'],
+    })
+    expect(defaults.sql).toContain('LIMIT 3')
+    expect(defaults.sql).toContain('__total')
+
+    const capped = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', 'members{$limit:50}', 'members.name'],
+    })
+    expect(capped.sql).toContain('LIMIT 50')
+
+    const filtered = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      fields: ['id', "members[name != 'Ada']{$limit:null}", 'members.name'],
+    })
+    expect(filtered.sql).not.toContain('LIMIT 3')
+    expect(filtered.values).toContain('Ada')
+    expect(filtered.sql).toContain('__total')
+  })
+
+  test('enforces collection directive placement and duplicate rules', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
-      collections: { members: { relationshipFields: ['name'] } },
-      fields: ['id', 'members'],
-    })).toThrow('Unknown relationship field "Membership.name"')
+      fields: ['id', "members{$limit:1}[name != 'Ada']"],
+    })).toThrow('Collection options must precede filters')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
-      collections: { members: { relationshipFields: ['favorites.role'] } },
-      fields: ['id', 'members'],
-    })).toThrow('Unknown relationship field "Membership.favorites.role"')
+      fields: ['id', "members[name != 'Ada'].name"],
+    })).toThrow('Collection directives must end the path')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
-      collections: { members: { relationshipFields: ['labels'] } },
-      fields: ['id', 'members'],
-    })).toThrow('is not a scalar property')
+      fields: ['id', 'members{$limit:1}', 'members{$offset:1}'],
+    })).toThrow('more than one directive path')
+  })
+
+  test('accepts root orderBy shorthand', () => {
+    const compiled = compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      orderBy: ['name', '-id'],
+    })
+    expect(compiled.sql).toContain('ORDER BY r."name" ASC, t."id" DESC')
+  })
+
+  test('projects multi-level collection paths', () => {
+    const compiled = compileEntityQuery(nestedCollectionDefinitions, 'User', {
+      fields: ['id', 'pets', 'pets.toys', 'pets.toys.label'],
+    })
+    expect(compiled.sql.match(/LEFT JOIN LATERAL/gu)?.length).toBeGreaterThanOrEqual(2)
+    expect(compiled.sql).toContain('"toys"')
+    expect(compiled.sql).toContain('"pets"')
   })
 
   test('rejects incompatible descendant-only declarations', () => {
@@ -631,13 +706,6 @@ describe('SQL.where', () => {
     expect(() => compileEntityQuery(definitions, entity, {
       fields: Array.from({ length: 64 }, () => 'a.b.c'),
     })).toThrow('maximum graph work budget')
-    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
-      collections: {
-        members: { relationshipFields: Array.from({ length: 128 }, () => 'role') },
-      },
-      fields: ['id', 'members'],
-    })).toThrow('maximum graph work budget')
-
     const edgeDefinitions = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -662,7 +730,6 @@ describe('SQL.where', () => {
     })).not.toThrow()
 
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
-      collections: { articles: {} },
       fields: ['id', 'articles.author'],
     })).toThrow('Reciprocal reference backtracking')
     const fanoutDefinitions = EntityDefinitions.load(JSON.stringify({
@@ -696,23 +763,19 @@ describe('SQL.where', () => {
 
   test('validates reciprocal One/Many traversal without banning repeated forward refs', () => {
     expect(() => compileEntityQuery(reciprocalDefinitions, 'Person', {
-      collections: { pets: { limit: 2 } },
-      fields: ['id', 'pets'],
+      fields: ['id', 'pets{$limit:2}'],
     })).not.toThrow()
     expect(() => compileEntityQuery(reciprocalDefinitions, 'Pet', {
-      collections: { 'owner.pets': { limit: 2 } },
-      fields: ['id', 'owner.pets'],
+      fields: ['id', 'owner.pets{$limit:2}'],
     })).not.toThrow()
     expect(() => compileEntityQuery(oneDefinitions, 'Person', {
       fields: ['id', 'pet'],
     })).not.toThrow()
 
     expect(() => compileEntityQuery(reciprocalDefinitions, 'Person', {
-      collections: { pets: {} },
       fields: ['id', 'pets.owner'],
     })).toThrow('Reciprocal reference backtracking')
     expect(() => compileEntityQuery(reciprocalDefinitions, 'Pet', {
-      collections: { 'owner.pets': {} },
       fields: ['id', 'owner.pets.owner'],
     })).toThrow('Reciprocal reference backtracking')
     expect(() => compileEntityQuery(oneDefinitions, 'Pet', {

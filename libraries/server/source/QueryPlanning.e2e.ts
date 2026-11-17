@@ -304,15 +304,14 @@ describe('Query planning', () => {
 
       const projected = await queryEntity<{
         'id': string,
-        'pets': { items: unknown[], remaining: number, total: number },
+        'pets': { items: unknown[], total: number },
         'pets.$count': number,
       }>(
         database.sql,
         definitions,
         'Person',
         {
-          collections: { pets: { limit: 1 } },
-          fields: ['id', 'pets.$count', 'pets'],
+          fields: ['id', 'pets.$count', 'pets{$limit:1}'],
           orderBy: 'id',
           where: 'pets.$count >= 2',
         },
@@ -484,8 +483,7 @@ describe('Query planning', () => {
         favorite: { pets: { items: unknown[], total: number } },
         id: string,
       }>(database.sql, variantDefinitions, 'Source', {
-        collections: { 'favorite.pets': { limit: 1 } },
-        fields: ['id', 'favorite.pets'],
+        fields: ['id', 'favorite.pets{$limit:1}'],
         orderBy: 'id',
       })
       expect(previews.map(row => row.favorite.pets.total)).toEqual([2, 1])

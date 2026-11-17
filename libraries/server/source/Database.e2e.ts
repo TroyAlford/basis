@@ -1026,7 +1026,6 @@ describe('Server database lifecycle', () => {
           { entity: 'Article', id: articleOne, name: 'Article One' },
           { entity: 'Article', id: articleTwo, name: 'Article Two' },
         ],
-        remaining: 0,
         total: 2,
       },
       id: ada,
@@ -1042,30 +1041,8 @@ describe('Server database lifecycle', () => {
       tags: ['one', 'two'],
     }])
 
-    const withProperties = await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
-      collections: {
-        members: { limit: 1, offset: 0, relationshipFields: ['role'] },
-      },
-      fields: ['id', 'name', 'members'],
-      where: { id: campaign },
-    })
-    expect(withProperties).toEqual([{
-      id: campaign,
-      members: {
-        items: [{
-          entity: 'User',
-          id: ada,
-          membership: { role: 'GM' },
-          name: 'Ada',
-        }],
-        remaining: 1,
-        total: 2,
-      },
-      name: 'Example Campaign',
-    }])
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
-      collections: { members: { limit: 2, offset: 0 } },
-      fields: ['id', 'members'],
+      fields: ['id', 'members{$limit:2}'],
       where: { id: campaign },
     })).toEqual([{
       id: campaign,
@@ -1074,13 +1051,26 @@ describe('Server database lifecycle', () => {
           { entity: 'User', id: ada, name: 'Ada' },
           { entity: 'User', id: grace, name: 'Grace' },
         ],
-        remaining: 0,
         total: 2,
       },
     }])
+    const projectedMembers = await queryEntity<{
+      id: string,
+      members: { items: Record<string, unknown>[], total: number },
+      name: string,
+    }>(database.sql, entities, 'Campaign', {
+      fields: ['id', 'name', 'members', 'members.name', 'members.role'],
+      where: { id: campaign },
+    })
+    expect(projectedMembers).toHaveLength(1)
+    expect(projectedMembers[0]?.members.items).toHaveLength(2)
+    expect(projectedMembers[0]?.members.total).toBe(2)
+    expect(projectedMembers[0]?.members.items).toEqual(expect.arrayContaining([
+      { entity: 'User', id: ada, name: 'Ada', role: 'GM' },
+      { entity: 'User', id: grace, name: 'Grace', role: 'Player' },
+    ]))
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
-      collections: { campaigns: { relationshipFields: ['role'] } },
-      fields: ['id', 'campaigns'],
+      fields: ['id', 'campaigns', 'campaigns.role'],
       orderBy: 'id',
       where: { id: ada },
     })).toEqual([{
@@ -1088,20 +1078,18 @@ describe('Server database lifecycle', () => {
         items: [{
           entity: 'Campaign',
           id: campaign,
-          membership: { role: 'GM' },
           name: 'Example Campaign',
+          role: 'GM',
         }],
-        remaining: 0,
         total: 1,
       },
       id: ada,
     }])
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
-      collections: { campaigns: { limit: 1, offset: 1 } },
-      fields: ['id', 'campaigns'],
+      fields: ['id', 'campaigns{$limit:1,$offset:1}'],
       where: { id: linus },
     })).toEqual([{
-      campaigns: { items: [], remaining: 0, total: 0 },
+      campaigns: { items: [], total: 0 },
       id: linus,
     }])
 
@@ -1110,20 +1098,17 @@ describe('Server database lifecycle', () => {
       VALUES (${linus}, ${campaign}, 'Player', 'cards')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
-      collections: { members: { limit: 1, offset: 1 } },
-      fields: ['id', 'members'],
+      fields: ['id', 'members{$limit:1,$offset:1}'],
       where: { id: campaign },
     })).toEqual([{
       id: campaign,
       members: {
         items: [{ entity: 'User', id: grace, name: 'Grace' }],
-        remaining: 1,
         total: 3,
       },
     }])
     const multipleRoots = await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
-      collections: { campaigns: { limit: 1 } },
-      fields: ['id', 'campaigns'],
+      fields: ['id', 'campaigns{$limit:1}'],
       orderBy: 'id',
     })
     expect(multipleRoots.map(row => row.id)).toEqual([ada, grace, linus])
@@ -1206,27 +1191,201 @@ describe('Server database lifecycle', () => {
       VALUES (${userId}, ${campaignId}, 'GM', 'dice')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'SystemUser', {
-      collections: { campaigns: { relationshipFields: ['role'] } },
-      fields: ['id', 'campaigns', 'articles'],
+      fields: ['id', 'campaigns', 'campaigns.role', 'articles'],
       where: { id: userId },
     })).toEqual([{
       articles: {
         items: [{ entity: 'Article', id: articleId, name: 'Article One' }],
-        remaining: 0,
         total: 1,
       },
       campaigns: {
         items: [{
           entity: 'Campaign',
           id: campaignId,
-          membership: { role: 'GM' },
           name: 'Example Campaign',
+          role: 'GM',
         }],
-        remaining: 0,
         total: 1,
       },
       id: userId,
     }])
+  })
+
+  isolatedTest('projects nested collection paths and relationship properties', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'pets',
+              inverse: 'owner',
+              target: 'Pet',
+              type: 'Inverse',
+            },
+          ],
+          name: 'User',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'label', type: 'String' },
+            { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
+            {
+              cardinality: 'Many',
+              field: 'toys',
+              inverse: 'pet',
+              target: 'Toy',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'label', type: 'String' },
+            { field: 'pet', inverse: 'toys', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Toy',
+        },
+      ],
+    }))
+    await database.use(entities)
+    const user = '00000000-0000-4000-8000-000000000101'
+    const pet = '00000000-0000-4000-8000-000000000102'
+    const toy = '00000000-0000-4000-8000-000000000103'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${user}, 'Ada', 'User'), (${pet}, 'Rex', 'Pet'), (${toy}, 'Ball', 'Toy')
+    `
+    await database.sql`
+      INSERT INTO "User" ("id")
+      VALUES (${user})
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id", "owner.id", "label")
+      VALUES (${pet}, ${user}, 'Dog')
+    `
+    await database.sql`
+      INSERT INTO "Toy" ("id", "pet.id", "label")
+      VALUES (${toy}, ${pet}, 'Red')
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
+      fields: ['id', 'pets', 'pets.label', 'pets.toys', 'pets.toys.label'],
+      where: { id: user },
+    })).toEqual([{
+      id: user,
+      pets: {
+        items: [{
+          entity: 'Pet',
+          id: pet,
+          label: 'Dog',
+          name: 'Rex',
+          toys: {
+            items: [{
+              entity: 'Toy',
+              id: toy,
+              label: 'Red',
+              name: 'Ball',
+            }],
+            total: 1,
+          },
+        }],
+        total: 1,
+      },
+    }])
+  })
+
+  isolatedTest('caps projected collections, reports totals and applies collection filters', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        { fields: [], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    await database.use(entities)
+    const campaign = '00000000-0000-4000-8000-000000000201'
+    const users = [
+      ['00000000-0000-4000-8000-000000000202', 'Ada'],
+      ['00000000-0000-4000-8000-000000000203', 'Bob'],
+      ['00000000-0000-4000-8000-000000000204', 'Cara'],
+      ['00000000-0000-4000-8000-000000000205', 'Dan'],
+      ['00000000-0000-4000-8000-000000000206', 'Eve'],
+    ] as const
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${campaign}, 'Campaign', 'Campaign')
+    `
+    await database.sql`
+      INSERT INTO "Campaign" ("id")
+      VALUES (${campaign})
+    `
+    for (const [id, name] of users) {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, ${name}, 'User')
+      `
+      await database.sql`
+        INSERT INTO "User" ("id")
+        VALUES (${id})
+      `
+      await database.sql`
+        INSERT INTO "Membership" ("user.id", "campaign.id", "role")
+        VALUES (${id}, ${campaign}, 'Player')
+      `
+    }
+
+    const query = (fields: string[]) => queryEntity<{
+      id: string,
+      members: { items: { name: string }[], total: number },
+    }>(database.sql, entities, 'Campaign', { fields, where: { id: campaign } })
+
+    const defaults = await query(['id', 'members', 'members.name'])
+    expect(defaults[0]?.members.items).toHaveLength(3)
+    expect(defaults[0]?.members.total).toBe(5)
+
+    const expanded = await query(['id', 'members{$limit:null}', 'members.name'])
+    expect(expanded[0]?.members.items).toHaveLength(5)
+    expect(expanded[0]?.members.total).toBe(5)
+
+    const capped = await query(['id', 'members{$limit:2}', 'members.name'])
+    expect(capped[0]?.members.items).toHaveLength(2)
+    expect(capped[0]?.members.total).toBe(5)
+
+    const filtered = await query([
+      'id',
+      "members[name != 'Ada']",
+      'members.name',
+    ])
+    expect(filtered[0]?.members.items).toHaveLength(3)
+    expect(filtered[0]?.members.total).toBe(4)
+    expect(filtered[0]?.members.items.map(member => member.name)).not.toContain('Ada')
+
+    const filteredExpanded = await query([
+      'id',
+      "members[name != 'Ada']{$limit:null}",
+      'members.name',
+    ])
+    expect(filteredExpanded[0]?.members.items).toHaveLength(4)
+    expect(filteredExpanded[0]?.members.total).toBe(4)
+
+    const paged = await query([
+      'id',
+      'members{$limit:2,$offset:1,$orderBy:-name}',
+      'members.name',
+    ])
+    expect(paged[0]?.members.items.map(member => member.name)).toEqual(['Dan', 'Cara'])
+    expect(paged[0]?.members.total).toBe(5)
   })
 
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
@@ -1371,8 +1530,7 @@ describe('Server database lifecycle', () => {
     })).toMatchObject({ errno: '23505' })
 
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Person', {
-      collections: { pets: { limit: 1, offset: 0 } },
-      fields: ['id', 'pet', 'pets'],
+      fields: ['id', 'pet', 'pets{$limit:1}'],
       orderBy: 'id',
       where: { id: personOne },
     })).toEqual([{
@@ -1380,7 +1538,6 @@ describe('Server database lifecycle', () => {
       pet: { entity: 'Pet', id: petOne, name: 'Pet One' },
       pets: {
         items: [{ entity: 'Pet', id: petOne, name: 'Pet One' }],
-        remaining: 1,
         total: 2,
       },
     }])
@@ -1393,8 +1550,7 @@ describe('Server database lifecycle', () => {
       { id: personThree, pet: null },
     ])
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
-      collections: { 'owner.pets': { limit: 1, offset: 0 } },
-      fields: ['id', 'owner.pets'],
+      fields: ['id', 'owner.pets{$limit:1}'],
       where: { id: petOne },
     })).toEqual([{
       id: petOne,
@@ -1404,7 +1560,6 @@ describe('Server database lifecycle', () => {
         name: 'Ada',
         pets: {
           items: [{ entity: 'Pet', id: petOne, name: 'Pet One' }],
-          remaining: 1,
           total: 2,
         },
       },
@@ -1629,8 +1784,7 @@ describe('Server database lifecycle', () => {
       entities,
       'Person',
       {
-        collections: { pets: { limit: 1 } },
-        fields: ['id', 'pets'],
+        fields: ['id', 'pets{$limit:1}'],
         orderBy: 'id',
         where: "pets $contains (title = 'Rex')",
       },
@@ -2114,13 +2268,12 @@ describe('Server database lifecycle', () => {
             { entity: 'SpecialVisit', id: '1001', name: 'Special Visit' },
             { entity: 'SpecialVisit', id: '1002', name: 'Second Special Visit' },
           ],
-          remaining: 0,
           total: 2,
         },
       },
       {
         id: petTwo,
-        visits: { items: [], remaining: 0, total: 0 },
+        visits: { items: [], total: 0 },
       },
     ])
   })

@@ -1,5 +1,5 @@
 import { collectionSqlRelation } from './CollectionSql'
-import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition } from './EntityDefinitions'
+import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import type { Filter } from './Predicate'
@@ -31,12 +31,8 @@ const PUBLIC_PROJECTION_BUDGET: ProjectionBudget = {
 
 /** Options accepted by a polymorphic entity query. */
 export interface PolymorphicQueryOptions {
-  /** Per-collection preview and pagination overrides. */
-  readonly collections?: Readonly<Record<string, {
-    readonly limit?: number,
-    readonly offset?: number,
-    readonly relationshipFields?: readonly string[],
-  }>>,
+  /** Internal unique alias prefix for correlated projected collections. */
+  readonly aliasPrefix?: string,
   /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
   readonly fields: readonly string[],
   /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
@@ -47,6 +43,10 @@ export interface PolymorphicQueryOptions {
   readonly orderBy?: OrderBy,
   /** Internal full-record projection budget; public queries use the standard budget. */
   readonly projectionBudget?: ProjectionBudget,
+  /** Internal raw root condition used to correlate a projected collection. */
+  readonly rawWhere?: string,
+  /** Internal root alias used by correlated projected collections. */
+  readonly rootAlias?: string,
   /** Effective-field predicate. */
   readonly where?: Filter | Readonly<Record<string, unknown>> | string,
 }
@@ -79,16 +79,36 @@ interface IdentityProjection {
   readonly name: string,
 }
 
-/** One entity collection projection. */
-interface CollectionProjection {
-  /** SQL alias for the JSON items array. */
-  readonly itemsAlias: string,
+/** One projected collection compiled as a correlated child query. */
+interface ProjectedCollectionProjection {
+  /** SQL column alias carrying the JSON item array. */
+  readonly alias: string,
+  /** Convert the JSON items into the `{ items, total }` envelope. */
+  readonly hydrate: (row: Record<string, unknown>) => { items: unknown[], total: number },
   /** Output field name. */
   readonly name: string,
-  /** SQL alias for the remaining count. */
-  readonly remainingAlias: string,
-  /** SQL alias for the total count. */
+  /** SQL column alias carrying the full filtered count. */
   readonly totalAlias: string,
+}
+
+/** Requested paths below one collection navigation. */
+interface ProjectedCollectionSpec {
+  /** Collection navigation metadata. */
+  readonly collection: DerivedCollectionDefinition,
+  /** Whether this collection already received a directive path. */
+  directivesSeen: boolean,
+  /** Relationship-owned scalar fields requested on the item. */
+  readonly edgeFields: Set<string>,
+  /** Relative target fields requested below the collection. */
+  readonly fields: Set<string>,
+  /** Collection-context filters. */
+  readonly filters: Set<string>,
+  /** Requested page size; `null` means unlimited. */
+  limit?: number | null,
+  /** Requested page offset. */
+  offset?: number,
+  /** Requested item ordering. */
+  orderBy?: OrderBy,
 }
 
 /** One nested singular reference. */
@@ -111,10 +131,6 @@ interface TraversalState {
 
 /** One entity occurrence in a projection tree. */
 interface ProjectionNode {
-  /** Collection field names already selected at this node. */
-  readonly collectionNames: Set<string>,
-  /** Entity collections selected at this node. */
-  readonly collections: CollectionProjection[],
   /** Effective-field and descendant metadata for this occurrence. */
   readonly context: EntityContext,
   /** Field names already selected at this node. */
@@ -125,6 +141,10 @@ interface ProjectionNode {
   identity?: IdentityProjection,
   /** Reference path from the query root. */
   readonly path: readonly string[],
+  /** Projected collection output descriptors. */
+  readonly projectedCollections: ProjectedCollectionProjection[],
+  /** Projected collection specifications by collection name. */
+  readonly projectedSpecs: Map<string, ProjectedCollectionSpec>,
   /** Singular references by name. */
   readonly referenceNames: Map<string, ReferenceProjection>,
   /** Singular references selected at this node. */
@@ -255,47 +275,39 @@ class QueryProjection {
   #work = 0
   /** Projection limits for this compilation. */
   readonly #budget: ProjectionBudget
-  /** Collection configuration overrides. */
-  readonly #collections: Readonly<Record<string, {
-    readonly limit?: number,
-    readonly offset?: number,
-    readonly relationshipFields?: readonly string[],
-  }>> | undefined
-  /** Selected collection option keys. */
-  readonly #selectedCollectionKeys = new Set<string>()
   /** Values bound by collection subqueries. */
   readonly values: unknown[] = []
   /** Starting placeholder index for collection values. */
   #valueStart = 1
+  /** Prefix that keeps nested compiler aliases unique. */
+  readonly #aliasPrefix: string
 
   /**
    * Create the root occurrence for one query.
    * @param entities - Canonical definitions.
    * @param definition - Root entity being queried.
-   * @param collections - Per-collection preview overrides.
    * @param budget - Projection limits; defaults to the public query budget.
+   * @param rootAlias - Root table alias for this query.
+   * @param aliasPrefix - Prefix for nested compiler aliases.
    */
   constructor(
     entities: EntityDefinitions,
     definition: EntityDefinition,
-    collections?: Readonly<Record<string, {
-      readonly limit?: number,
-      readonly offset?: number,
-      readonly relationshipFields?: readonly string[],
-    }>>,
     budget: ProjectionBudget = PUBLIC_PROJECTION_BUDGET,
+    rootAlias = 't',
+    aliasPrefix = '',
   ) {
     this.#entities = entities
-    this.#collections = collections
     this.#budget = budget
+    this.#aliasPrefix = aliasPrefix
     this.root = {
-      baseAlias: 't',
-      collections: new Map(definition.collections.map(collection => [collection.name, collection])),
+      baseAlias: rootAlias,
+      collections: contextCollections(entities, definition),
       definition,
       descendants: descendantFields(entities, definition),
       effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
       isTarget: false,
-      ownerAliases: new Map([[definition.name, 't']]),
+      ownerAliases: new Map([[definition.name, rootAlias]]),
       rootAlias: 'r',
       rootJoined: false,
       rootOnly: false,
@@ -320,11 +332,13 @@ class QueryProjection {
     this.#validateBudget(fields)
     this.#valueStart = valueStart
     const root = this.#node(this.root, [])
-    for (const field of fields) this.#addPath(root, field.split('.'), undefined, 0)
-    for (const name of Object.keys(this.#collections ?? {})) {
-      if (!this.#selectedCollectionKeys.has(name)) {
-        throw new Error(`Collection options were provided for unselected field "${name}"`)
-      }
+    for (const field of fields) this.#addPath(root, splitFieldPath(field), undefined, 0)
+    const nodes: ProjectionNode[] = [root]
+    for (const node of nodes) {
+      for (const reference of node.references) nodes.push(...reference.nodes)
+    }
+    for (const node of nodes) {
+      for (const spec of node.projectedSpecs.values()) this.#addProjectedCollection(node, spec)
     }
     return row => hydrateRoot(row, root)
   }
@@ -334,18 +348,12 @@ class QueryProjection {
    * @param fields - Requested field paths.
    */
   #validateBudget(fields: readonly string[]): void {
-    const collections = Object.keys(this.#collections ?? {})
-    if (fields.length + collections.length > this.#budget.paths) {
+    if (fields.length > this.#budget.paths) {
       throw new Error(
         `Query projection exceeds the maximum path count of ${this.#budget.paths}`,
       )
     }
-    const collectionWork = (this.#collections
-      ? Object.values(this.#collections)
-      : []).reduce((total, config) => (
-      total + 1 + (config.relationshipFields?.length ?? 0)
-    ), 0)
-    const work = fields.reduce((total, field) => total + field.split('.').length, collectionWork)
+    const work = fields.reduce((total, field) => total + splitFieldPath(field).length, 0)
     if (work > this.#budget.work) {
       throw new Error(
         `Query projection exceeds the maximum graph work budget of ${this.#budget.work}`,
@@ -961,10 +969,21 @@ class QueryProjection {
     traversal: TraversalState | undefined,
     depth: number,
   ): void {
-    const name = segments[0]
-    if (name === undefined) throw new Error('Query field path cannot be empty')
+    const rawName = segments[0]
+    if (rawName === undefined) throw new Error('Query field path cannot be empty')
+    const directives = parseCollectionDirectives(rawName)
+    const name = directives.name
     const rest = segments.slice(1)
-    const path = [...node.path, ...segments].join('.')
+    const path = [
+      ...node.path,
+      name,
+      ...rest.map(segment => parseCollectionDirectives(segment).name),
+    ].join('.')
+    const hasDirectives = directives.filter !== undefined || directives.limit !== undefined
+      || directives.offset !== undefined || directives.orderBy !== undefined
+    if (hasDirectives && rest.length > 0) {
+      throw new Error(`Collection directives must end the path "${rawName}"; use separate child paths`)
+    }
     if (rest.length === 1 && rest[0] === '$count') {
       const collection = node.context.collections.get(name)
       if (collection) {
@@ -1014,20 +1033,54 @@ class QueryProjection {
     }
     const collection = node.context.collections.get(name)
     if (collection) {
-      if (rest.length > 0) {
-        if (
-          collection.kind === 'inverse'
-          && rest[0] === collection.association.forward.name
-        ) {
-          throw new Error(`Reciprocal reference backtracking "${path}"`)
-        }
-        throw new Error(
-          `Cannot traverse collection field "${node.context.definition.name}.${segments.join('.')}"`,
-        )
+      if (rest.length > 0
+        && collection.kind === 'inverse'
+        && rest[0] === collection.association.forward.name) {
+        throw new Error(`Reciprocal reference backtracking "${path}"`)
       }
-      this.#addCollection(node, collection)
+      const key = collectionKey(node.path, collection.name)
+      let spec = node.projectedSpecs.get(collection.name)
+      if (spec === undefined) {
+        spec = {
+          collection,
+          directivesSeen: false,
+          edgeFields: new Set(),
+          fields: new Set(),
+          filters: new Set(),
+        }
+        node.projectedSpecs.set(collection.name, spec)
+      }
+      if (hasDirectives) {
+        if (spec.directivesSeen) {
+          throw new Error(`Collection "${key}" receives more than one directive path`)
+        }
+        spec.directivesSeen = true
+        if (directives.filter !== undefined) spec.filters.add(directives.filter)
+        if (directives.limit !== undefined) spec.limit = directives.limit
+        if (directives.offset !== undefined) spec.offset = directives.offset
+        if (directives.orderBy !== undefined) spec.orderBy = directives.orderBy
+      }
+      if (rest.length === 0) return
+      if (collection.kind === 'relationship') {
+        const edge = collection.relationship.fields.find(field => field.name === rest[0])
+        if (edge !== undefined) {
+          if (rest.length > 1) {
+            throw new Error(`Cannot traverse relationship property "${path}"`)
+          }
+          if (edge.type === FieldType.Array || edge.type === FieldType.JSON) {
+            throw new Error(`Relationship property "${path}" is not a scalar field`)
+          }
+          spec.edgeFields.add(edge.name)
+          return
+        }
+      }
+      spec.fields.add(rest.join('.'))
       return
     }
+    if (hasDirectives) {
+      throw new Error(`Collection directive "${rawName}" is not a collection navigation`)
+    }
+
     const effective = node.context.effective.get(name)
 
     if (effective) {
@@ -1280,168 +1333,104 @@ class QueryProjection {
    * @param node - Projection occurrence.
    * @param collection - Derived collection navigation.
    */
-  #addCollection(node: ProjectionNode, collection: DerivedCollectionDefinition): void {
-    if (node.collectionNames.has(collection.name)) return
-    const key = collectionKey(node.path, collection.name)
-    const config = this.#collections?.[key]
-    const limit = config?.limit ?? 3
-    const offset = config?.offset ?? 0
-    if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error(`Collection "${key}" limit must be a positive integer`)
-    }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new Error(`Collection "${key}" offset must be a non-negative integer`)
-    }
-    let relationship: {
-      readonly fields: readonly RelationshipFieldDefinition[],
-      readonly name: string,
-    } | undefined
-    if (collection.kind === 'inverse') {
-      if (config?.relationshipFields !== undefined) {
-        throw new Error(
-          `Collection "${collection.name}" is an inverse navigation and does not accept relationshipFields`,
-        )
-      }
-    } else {
-      relationship = {
-        fields: this.#relationshipFields(collection, config?.relationshipFields),
-        name: collection.relationship.name,
-      }
-    }
-    const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
+  /**
+   * Add one projected collection as a correlated child query.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested target and edge fields.
+   */
+  #addProjectedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
+    const key = collectionKey(node.path, spec.collection.name)
+    const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)
-    this.#addCollectionColumns(
-      node,
-      collection,
-      plan.rootAlias,
-      plan.relation,
-      plan.condition,
-      `${plan.rootAlias}.${quote('id')}`,
-      limit,
-      offset,
-      relationship ? { ...relationship, relationshipAlias: plan.relationshipAlias as string } : undefined,
-    )
-    node.collectionNames.add(collection.name)
-    this.#selectedCollectionKeys.add(key)
-  }
-
-  /**
-   * Validate selected relationship properties for one navigation.
-   * @param collection - Relationship-backed navigation.
-   * @param names - Requested direct property names.
-   * @returns Selected relationship fields in request order.
-   */
-  #relationshipFields(
-    collection: RelationshipDerivedCollectionDefinition,
-    names: readonly string[] | undefined,
-  ): readonly RelationshipFieldDefinition[] {
-    if (names === undefined) return []
-    if (!Array.isArray(names)) {
-      throw new Error(`Collection "${collection.name}" relationshipFields must be an array`)
+    const target = spec.collection.target === 'Entity'
+      ? identityDefinition()
+      : this.#entities.entity(spec.collection.target)
+    if (!target) throw new Error(`Unknown target entity "${spec.collection.target}"`)
+    const limit = spec.limit === undefined ? 3 : spec.limit
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+      throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
     }
-    const result: RelationshipFieldDefinition[] = []
-    const seen = new Set<string>()
-    for (const name of names) {
-      if (typeof name !== 'string') {
-        throw new Error(`Collection "${collection.name}" relationshipFields must contain strings`)
-      }
-      if (seen.has(name)) continue
-      const field = collection.relationship.fields.find(candidate => candidate.name === name)
-      if (!field) {
-        throw new Error(
-          `Unknown relationship field "${collection.relationship.name}.${name}" ` +
-          `for collection "${collection.name}"`,
-        )
-      }
-      if (field.type === FieldType.Array || field.type === FieldType.JSON) {
-        throw new Error(
-          `Relationship field "${collection.relationship.name}.${name}" is not a scalar property`,
-        )
-      }
-      seen.add(name)
-      result.push(field)
+    const offset = spec.offset ?? 0
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
     }
-    return result
-  }
-
-  /**
-   * Add collection count and preview columns using correlated subqueries.
-   * @param node - Root projection occurrence.
-   * @param collection - Derived collection navigation.
-   * @param targetRoot - Target root alias inside the collection relation.
-   * @param relation - Collection relation SQL.
-   * @param condition - Correlated relation condition.
-   * @param orderBy - Stable collection ordering expression.
-   * @param limit - Preview row limit.
-   * @param offset - Preview row offset.
-   * @param relationship - Relationship context; its fields are nested under its lowercased name.
-   * @param relationship.fields - Selected scalar relationship properties.
-   * @param relationship.name - Relationship name used as the nested result property.
-   * @param relationship.relationshipAlias - Relationship table alias.
-   */
-  #addCollectionColumns(
-    node: ProjectionNode,
-    collection: DerivedCollectionDefinition,
-    targetRoot: string,
-    relation: string,
-    condition: string,
-    orderBy: string,
-    limit: number,
-    offset: number,
-    relationship?: {
-      readonly fields: readonly RelationshipFieldDefinition[],
-      readonly name: string,
-      readonly relationshipAlias: string,
-    },
-  ): void {
-    this.#consume(2 + (relationship?.fields.length ?? 0))
-    const aliasKey = columnAlias(node.path, collection.name)
-    const itemsAlias = `${aliasKey}__items`
-    const totalAlias = `${aliasKey}__total`
-    const remainingAlias = `${aliasKey}__remaining`
-    const items = this.#bind(limit)
-    const itemOffset = this.#bind(offset)
-    const remainingOffset = this.#bind(offset + limit)
-    const countAlias = this.#nextAlias('c')
-    this.joins.push(
-      `LEFT JOIN LATERAL (SELECT count(*)::int AS "total" FROM ${relation} WHERE ${condition}) ` +
-      `"${countAlias}" ON TRUE`,
-    )
-    const relationshipColumns = (relationship?.fields ?? []).map(field => (
-      `"${relationship.relationshipAlias}".${quote(field.name)} AS ${quote(`relationship__${field.name}`)}`
+    const filter = spec.filters.size === 0
+      ? undefined
+      : [...spec.filters].map(value => `(${value})`).join(' $and ')
+    const childAlias = this.#nextAlias('c')
+    const child = compilePolymorphicQuery(this.#entities, target, {
+      aliasPrefix: `${childAlias}_`,
+      fields: [...new Set(['id', 'name', 'entity', ...spec.fields])],
+      limit: null,
+      offset: 0,
+      orderBy: spec.orderBy ?? 'id',
+      rawWhere:
+        `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+        `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`,
+      rootAlias: childAlias,
+      ...(filter === undefined ? {} : { where: filter }),
+    })
+    const base = this.#valueStart + this.values.length
+    const childSql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+      `$${base + Number(value) - 1}`
     ))
-    const relationshipObject = relationship && relationship.fields.length > 0
-      ? `, ${quoteLiteral(lowerFirst(relationship.name))}, json_build_object(${relationship.fields.map(field => (
-        `${quoteLiteral(field.name)}, collection_page.${quote(`relationship__${field.name}`)}`
-      )).join(', ')})`
-      : ''
-    this.columns.push(
-      'COALESCE((' +
-      'SELECT json_agg(json_build_object(\'id\', collection_page."id", \'name\', collection_page."name", ' +
-      `'entity', collection_page."entity"${relationshipObject}) ` +
-      'ORDER BY collection_page."order_by", collection_page."id") ' +
-      `FROM (SELECT "${targetRoot}"."id" AS "id", "${targetRoot}"."name" AS "name", ` +
-      `"${targetRoot}"."entity" AS "entity", ${orderBy} AS "order_by"` +
-      `${relationshipColumns.length > 0 ? `, ${relationshipColumns.join(', ')}` : ''} ` +
-      `FROM ${relation} ` +
-      `WHERE ${condition} ORDER BY ${orderBy} ASC, "${targetRoot}"."id" ASC ` +
-      `LIMIT ${items} OFFSET ${itemOffset}) AS collection_page), ` +
-      `'[]'::json) AS "${itemsAlias}"`,
-      `"${countAlias}"."total" AS "${totalAlias}"`,
-      `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
+    this.values.push(...child.values)
+
+    const edgeFields = [...spec.edgeFields]
+    const edgeObject = edgeFields.length === 0
+      ? 'NULL'
+      : `(SELECT json_build_object(${edgeFields.map(field => (
+        `${quoteLiteral(field)}, ${quote(plan.relationshipAlias as string)}.${quote(field)}`
+      )).join(', ')}) ` +
+      `FROM ${plan.relation} WHERE ${plan.condition} ` +
+      `AND ${quote(plan.rootAlias)}.${quote('id')} = "__item".${quote('id')})`
+    const alias = columnAlias(node.path, spec.collection.name)
+    const totalAlias = `${alias}__total`
+    const lateralAlias = this.#nextAlias('pc')
+    const page = [
+      ...(limit === null ? [] : [`LIMIT ${limit}`]),
+      ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
+    ].join(' ')
+    this.joins.push(
+      'LEFT JOIN LATERAL (SELECT ' +
+      'COALESCE((SELECT json_agg(json_build_object(\'item\', row_to_json("__item"), ' +
+      `'edge', ${edgeObject})) FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), ` +
+      '\'[]\'::json) AS "__items", ' +
+      `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__total"` +
+      `) AS ${quote(lateralAlias)} ON TRUE`,
     )
-    node.collections.push({ itemsAlias, name: collection.name, remainingAlias, totalAlias })
+    this.columns.push(
+      `${quote(lateralAlias)}.${quote('__items')} AS ${quote(alias)}`,
+      `${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`,
+    )
+    node.projectedCollections.push({
+      alias,
+      hydrate: row => {
+        const raw = row[alias]
+        const entries = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string'
+            ? JSON.parse(raw) as unknown[]
+            : []
+        return {
+          items: entries.map(entry => {
+            const record = entry as {
+              readonly edge?: Record<string, unknown> | null,
+              readonly item: Record<string, unknown>,
+            }
+            const hydrated = child.hydrate(record.item)
+            return record.edge === undefined || record.edge === null
+              ? hydrated
+              : { ...hydrated, ...record.edge }
+          }),
+          total: Number(row[totalAlias] ?? 0),
+        }
+      },
+      name: spec.collection.name,
+      totalAlias,
+    })
   }
 
-  /**
-   * Bind one collection-subquery value after predicate bindings.
-   * @param value - Value to bind.
-   * @returns Placeholder.
-   */
-  #bind(value: unknown): string {
-    this.values.push(value)
-    return `$${this.#valueStart + this.values.length - 1}`
-  }
   /**
    * Select one computed scalar field.
    * @param node - Projection occurrence.
@@ -1598,12 +1587,12 @@ class QueryProjection {
    */
   #node(context: EntityContext, path: readonly string[]): ProjectionNode {
     return {
-      collectionNames: new Set(),
-      collections: [],
       context,
       fieldNames: new Set(),
       fields: [],
       path,
+      projectedCollections: [],
+      projectedSpecs: new Map(),
       referenceNames: new Map(),
       references: [],
     }
@@ -1627,7 +1616,7 @@ class QueryProjection {
    */
   #nextAlias(prefix: string): string {
     this.#alias += 1
-    return `${prefix}${this.#alias}`
+    return `${this.#aliasPrefix}${prefix}${this.#alias}`
   }
 }
 
@@ -1674,8 +1663,9 @@ export function compilePolymorphicQuery(
   const projection = new QueryProjection(
     entities,
     definition,
-    options.collections,
     options.projectionBudget,
+    options.rootAlias,
+    options.aliasPrefix,
   )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
@@ -1725,6 +1715,7 @@ export function compilePolymorphicQuery(
   const conditions = [
     ...(definition.abstract ? [leafFilter] : []),
     ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')]),
+    ...(options.rawWhere === undefined ? [] : [options.rawWhere]),
   ]
   const whereSql = conditions.length === 0
     ? ''
@@ -1758,7 +1749,7 @@ function rootContext(entities: EntityDefinitions, rootAlias: string): EntityCont
   const definition = identityDefinition()
   return {
     baseAlias: rootAlias,
-    collections: new Map(entities.collections('Entity').map(collection => [collection.name, collection])),
+    collections: contextCollections(entities, definition),
     definition,
     descendants: universalDescendantFields(entities, definition),
     effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
@@ -1789,7 +1780,7 @@ function targetContext(
 ): EntityContext {
   return {
     baseAlias,
-    collections: new Map(definition.collections.map(collection => [collection.name, collection])),
+    collections: contextCollections(entities, definition),
     definition,
     descendants: descendantFields(entities, definition),
     effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
@@ -1805,6 +1796,27 @@ function targetContext(
       definition.singularNavigations.map(navigation => [navigation.name, navigation]),
     ),
   }
+}
+
+/**
+ * Build the collection index for one occurrence, including descendant-only collections.
+ * @param entities - Canonical definitions.
+ * @param definition - Entity being queried.
+ * @returns Collections keyed by logical name.
+ */
+function contextCollections(
+  entities: EntityDefinitions,
+  definition: EntityDefinition,
+): ReadonlyMap<string, DerivedCollectionDefinition> {
+  const result = new Map(definition.collections.map(collection => [collection.name, collection]))
+  if (definition.abstract) {
+    for (const leaf of entities.concreteDescendants(definition.name)) {
+      for (const collection of entities.collections(leaf.name)) {
+        if (!result.has(collection.name)) result.set(collection.name, collection)
+      }
+    }
+  }
+  return result
 }
 
 /**
@@ -1914,6 +1926,275 @@ function collectionKey(path: readonly string[], name: string): string {
   return [...path.map(segment => segment.replace(/__v\d+$/u, '')), name].join('.')
 }
 
+/** Parsed collection-context directives on one path segment. */
+interface CollectionDirectives {
+  /** Collection filter, relative to each item. */
+  readonly filter?: string,
+  /** Requested page size; `null` means unlimited. */
+  readonly limit?: number | null,
+  /** Base collection field name. */
+  readonly name: string,
+  /** Requested page offset. */
+  readonly offset?: number,
+  /** Requested item ordering. */
+  readonly orderBy?: OrderBy,
+}
+
+/**
+ * Split a string on one delimiter outside brackets, braces and quoted strings.
+ * @param value - Source text.
+ * @param delimiter - Delimiter character.
+ * @returns Trimmed, non-empty pieces.
+ */
+function splitTopLevel(value: string, delimiter: string): readonly string[] {
+  const parts: string[] = []
+  let current = ''
+  let depth = 0
+  let quoteCharacter: string | null = null
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (quoteCharacter !== null) {
+      current += character
+      if (character === '\\') {
+        index += 1
+        current += value[index] ?? ''
+      } else if (character === quoteCharacter) {
+        quoteCharacter = null
+      }
+      continue
+    }
+    if (character === '\'' || character === '"' || character === '`') {
+      quoteCharacter = character
+      current += character
+      continue
+    }
+    if (character === '[' || character === '{') {
+      depth += 1
+      current += character
+      continue
+    }
+    if (character === ']' || character === '}') {
+      depth -= 1
+      current += character
+      continue
+    }
+    if (character === delimiter && depth === 0) {
+      parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += character
+  }
+  if (quoteCharacter !== null || depth !== 0) throw new Error(`Unbalanced collection directive "${value}"`)
+  parts.push(current.trim())
+  return parts.filter(part => part !== '')
+}
+
+/**
+ * Read one balanced bracket or brace group.
+ * @param segment - Full path segment.
+ * @param start - Opening delimiter index.
+ * @param open - Opening delimiter.
+ * @param close - Closing delimiter.
+ * @returns The content and the index just after the group.
+ */
+function readGroup(
+  segment: string,
+  start: number,
+  open: string,
+  close: string,
+): { readonly content: string, readonly next: number } {
+  let depth = 1
+  let quoteCharacter: string | null = null
+  let content = ''
+  let index = start + 1
+  for (; index < segment.length && depth > 0; index += 1) {
+    const character = segment[index] as string
+    if (quoteCharacter !== null) {
+      content += character
+      if (character === '\\') {
+        index += 1
+        content += segment[index] ?? ''
+      } else if (character === quoteCharacter) {
+        quoteCharacter = null
+      }
+      continue
+    }
+    if (character === '\'' || character === '"' || character === '`') {
+      quoteCharacter = character
+      content += character
+      continue
+    }
+    if (character === open) {
+      depth += 1
+      content += character
+      continue
+    }
+    if (character === close) {
+      depth -= 1
+      if (depth === 0) break
+      content += character
+      continue
+    }
+    if (character === '[' || character === '{') {
+      depth += 1
+      content += character
+      continue
+    }
+    if (character === ']' || character === '}') {
+      depth -= 1
+      content += character
+      continue
+    }
+    content += character
+  }
+  if (depth !== 0 || quoteCharacter !== null) throw new Error(`Unbalanced collection path "${segment}"`)
+  return { content: content.trim(), next: index + 1 }
+}
+
+/**
+ * Parse one compact `$orderBy` value.
+ * @param value - Option value.
+ * @returns Existing orderBy contract values.
+ */
+function parseOrderByValue(value: string): OrderBy {
+  if (value.startsWith('[') && value.endsWith(']')) {
+    const fields = splitTopLevel(value.slice(1, -1), ',')
+    if (fields.length === 0) throw new Error('Collection $orderBy array must not be empty')
+    return fields.map(field => parseOrderByField(field)) as readonly string[]
+  }
+  return parseOrderByField(value)
+}
+
+/**
+ * Parse one short orderBy field.
+ * @param value - Field text.
+ * @returns Field or `-field` shorthand.
+ */
+function parseOrderByField(value: string): string {
+  const field = value.trim()
+  if (field === '') throw new Error('Collection $orderBy field must not be empty')
+  if (field.startsWith('--')) throw new Error('Collection $orderBy uses one leading "-" for descending')
+  return field
+}
+
+/**
+ * Parse one compact options group.
+ * @param content - Group content.
+ * @returns Parsed options.
+ */
+function parseCollectionOptions(content: string): Pick<CollectionDirectives, 'limit' | 'offset' | 'orderBy'> {
+  const options: { limit?: number | null, offset?: number, orderBy?: OrderBy } = {}
+  for (const entry of splitTopLevel(content, ',')) {
+    const separator = entry.indexOf(':')
+    if (separator === -1) throw new Error(`Collection option "${entry}" must be a key:value pair`)
+    const key = entry.slice(0, separator).trim()
+    const value = entry.slice(separator + 1).trim()
+    if (Object.hasOwn(options, key)) throw new Error(`Collection option "${key}" is repeated`)
+    if (key === '$limit') {
+      if (value === 'null') {
+        options.limit = null
+      } else if (/^\d+$/u.test(value)) {
+        options.limit = Number(value)
+      } else {
+        throw new Error('Collection $limit must be a non-negative integer or null')
+      }
+    } else if (key === '$offset') {
+      if (!/^\d+$/u.test(value)) throw new Error('Collection $offset must be a non-negative integer')
+      options.offset = Number(value)
+    } else if (key === '$orderBy') {
+      options.orderBy = parseOrderByValue(value)
+    } else {
+      throw new Error(`Unknown collection option "${key}"`)
+    }
+  }
+  return options
+}
+
+/**
+ * Split one field path without splitting dots inside directive groups or quoted strings.
+ * @param value - Requested field path.
+ * @returns Path segments.
+ */
+function splitFieldPath(value: string): readonly string[] {
+  const segments: string[] = []
+  let current = ''
+  let depth = 0
+  let quoteCharacter: string | null = null
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (quoteCharacter !== null) {
+      current += character
+      if (character === '\\') {
+        index += 1
+        current += value[index] ?? ''
+      } else if (character === quoteCharacter) {
+        quoteCharacter = null
+      }
+      continue
+    }
+    if (character === '\'' || character === '"' || character === '`') {
+      quoteCharacter = character
+      current += character
+      continue
+    }
+    if (character === '[' || character === '{') {
+      depth += 1
+      current += character
+      continue
+    }
+    if (character === ']' || character === '}') {
+      depth -= 1
+      current += character
+      continue
+    }
+    if (character === '.' && depth === 0) {
+      segments.push(current)
+      current = ''
+      continue
+    }
+    current += character
+  }
+  if (quoteCharacter !== null || depth !== 0) throw new Error(`Unbalanced collection path "${value}"`)
+  segments.push(current)
+  return segments
+}
+
+/**
+ * Parse collection filter, options and `$orderBy` from one path segment.
+ * Filter group `[...]` must precede options group `{...}`.
+ * @param segment - One requested field-path segment.
+ * @returns The base name and its directives.
+ */
+function parseCollectionDirectives(segment: string): CollectionDirectives {
+  const bracket = segment.indexOf('[')
+  const brace = segment.indexOf('{')
+  const open = bracket === -1 ? brace : brace === -1 ? bracket : Math.min(bracket, brace)
+  if (open === -1) return { name: segment }
+  const name = segment.slice(0, open)
+  if (name === '') throw new Error(`Collection path "${segment}" has no field name`)
+  let index = open
+  let filter: string | undefined
+  let options: Pick<CollectionDirectives, 'limit' | 'offset' | 'orderBy'> = {}
+  if (segment[index] === '[') {
+    const group = readGroup(segment, index, '[', ']')
+    filter = group.content
+    if (filter === '') throw new Error(`Collection filter in "${segment}" is empty`)
+    index = group.next
+  }
+  if (segment[index] === '{') {
+    const group = readGroup(segment, index, '{', '}')
+    options = parseCollectionOptions(group.content)
+    index = group.next
+  } else if (segment[index] === '[') {
+    throw new Error(`Collection filters must be specified once in "${segment}"`)
+  }
+  if (index !== segment.length) {
+    throw new Error(`Collection options must precede filters and appear once in "${segment}"`)
+  }
+  return { filter, name, ...options }
+}
+
 /**
  * Build one flat SQL column alias for a projection path.
  * @param path - Reference path from the query root.
@@ -1936,36 +2217,13 @@ function hydrateRoot(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const field of node.fields) result[field.name] = row[field.alias]
-  for (const collection of node.collections) {
-    result[collection.name] = hydrateCollection(row, collection)
+  for (const collection of node.projectedCollections) {
+    result[collection.name] = collection.hydrate(row)
   }
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
-}
-
-/**
- * Hydrate one collection envelope.
- * @param row - Flat SQL row.
- * @param collection - Collection projection metadata.
- * @returns The `{ items, total, remaining }` envelope.
- */
-function hydrateCollection(
-  row: Record<string, unknown>,
-  collection: CollectionProjection,
-): { items: unknown[], remaining: number, total: number } {
-  const raw = row[collection.itemsAlias]
-  const items = Array.isArray(raw)
-    ? raw
-    : typeof raw === 'string'
-      ? JSON.parse(raw) as unknown[]
-      : []
-  return {
-    items,
-    remaining: Number(row[collection.remainingAlias] ?? 0),
-    total: Number(row[collection.totalAlias] ?? 0),
-  }
 }
 
 /**
@@ -2004,8 +2262,8 @@ function hydrateReference(
     name: row[identity.name],
   }
   for (const field of node.fields) result[field.name] = row[field.alias]
-  for (const collection of node.collections) {
-    result[collection.name] = hydrateCollection(row, collection)
+  for (const collection of node.projectedCollections) {
+    result[collection.name] = collection.hydrate(row)
   }
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)

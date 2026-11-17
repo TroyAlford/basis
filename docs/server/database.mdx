@@ -393,65 +393,48 @@ const visits = await server.db.query<{
 
 `fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, reciprocal backtracking, paths deeper than eight reference hops, and projections exceeding the finite path or work budget fail before SQL runs. Singular reference paths and collection comparisons are supported in `where`; reference fields cannot be used in `orderBy`. Relation cycles are allowed in the canonical model and physical foreign keys; a query rejects only guaranteed immediate backtracking through a declared reciprocal pair. The compiler caps requested paths and both authored path work and actual expanded projection/join work, rejecting an over-budget projection before SQL execution.
 
-Derived collection navigations project a bounded envelope. The default preview is three lightweight `{ id, name, entity }` items; `total` is the exact collection count and `remaining` is the count after the requested page. `collections` overrides the preview limit and offset per selected collection. The navigation name is the authored `Inverse` field name, or the declared endpoint inverse for a named relationship:
+Derived collection navigations project an `{ items, total }` envelope. `total` is the full filtered, authorized count; `items` is capped at three by default. A collection path may carry one optional filter group `[...]`, followed by one optional options group `{...}`:
 
 ```ts
 const campaigns = await server.db.query<{
   campaigns: {
-    items: { entity: string, id: string, name: string }[],
-    remaining: number,
+    items: { entity: string, id: string, name: string, role: string }[],
     total: number,
   },
   id: string,
 }>('User', {
-  collections: { campaigns: { limit: 5, offset: 0 } },
-  fields: ['id', 'campaigns'],
+  fields: ['id', 'campaigns', 'campaigns.name', 'campaigns.role'],
 })
 ```
 
-Both directions of a named relationship use the same physical relationship row and the same compiler path. Select `relationshipFields` to include direct scalar properties of the relationship itself beneath an object named by lowercasing the first character of the relationship name:
+Use `$limit` and `$offset` to page the matching items. `$limit:null` returns every matching item; `$offset` still applies:
 
 ```ts
-const campaigns = await server.db.query<{
-  id: string,
-  members: {
-    items: {
-      entity: string,
-      id: string,
-      membership: { role: string },
-      name: string,
-    }[],
-    remaining: number,
-    total: number,
-  },
-}>('Campaign', {
-  collections: {
-    members: { limit: 3, offset: 0, relationshipFields: ['role'] },
-  },
-  fields: ['id', 'members'],
+await server.db.query('User', {
+  fields: ['id', 'campaigns{$limit:50,$offset:0,$orderBy:name}', 'campaigns.name'],
+})
+await server.db.query('User', {
+  fields: ['id', 'campaigns{$limit:null}', 'campaigns.name'],
 })
 ```
 
-`relationshipFields` accepts only direct scalar property names of the named relationship; target entity fields, nested graph paths, arrays, JSON, and unknown names are rejected. A collection predicate may filter a direct scalar relationship property with the same lowercase prefix, for example `members $contains (membership.role = 'GM')`. The same physical `Membership` row produces `User.campaigns` in the other direction. Inverse-only navigations such as `User.articles` reject `relationshipFields` because there is no intervening relationship. The envelope is computed in the same SQL statement for both inverse and relationship-backed collections; there is no per-parent lookup. Collections follow stable target identity order.
-
-A terminal nested collection is allowed beneath a singular forward reference, using the natural dotted collection key:
+A filter group uses the standard predicate language relative to each item. If both groups are present, the filter comes first: `[]{}` is valid, while `{}[]` is rejected. Directives must terminate the collection path; sub-fields are separate field paths:
 
 ```ts
-const pets = await server.db.query<{
-  id: string,
-  owner: {
-    entity: string,
-    id: string,
-    name: string,
-    pets: { items: { entity: string, id: string, name: string }[], remaining: number, total: number },
-  },
-}>('Pet', {
-  collections: { 'owner.pets': { limit: 2, offset: 0 } },
-  fields: ['id', 'owner.pets'],
+await server.db.query('Campaign', {
+  fields: [
+    'id',
+    "members[name != 'Ada']{$limit:10,$offset:0,$orderBy:-name}",
+    'members.name',
+    'members.products{$limit:10}',
+    'members.products.name',
+  ],
 })
 ```
 
-`Pet.owner.pets` is legal and bounded. `Pet.owner.pets.owner` is rejected as reciprocal backtracking because the collection item’s `owner` returns to the already traversed Person. A singular reciprocal navigation follows the same rule: `Pet.owner.pet` and `Person.pet.owner` are rejected for a `One` pair, while `Person.manager.manager` remains legal because repeating a forward-only reference is not reciprocal backtracking. Arbitrary recursion through collection elements remains deferred.
+`$orderBy` uses the same shorthand as the root `orderBy` contract: a field name, a leading `-` for descending, or an array of those for multiple levels (`$orderBy:[name,-createdAt]`). It applies to scalar item fields, not references or nested collections. The filter changes both `items` and `total`; the total is the full filtered count before offset/limit. Relationship properties flatten onto the item for projection (`printings.quantity`, `members.role`); collection-context filters address item fields. The same path syntax continues through singular references and nested collections, for example `printings{$limit:100}.panels{$limit:null}`.
+
+Nested collection paths are legal beneath singular references and other collection items, for example `owner.pets.toys.label`. A collection item path that returns through the immediately reciprocal relationship is rejected as reciprocal backtracking: `Pet.owner.pets.owner` and `Person.pet.owner` fail, while repeated forward-only references such as `Person.manager.manager` remain legal.
 
 Collection navigations participate in `where` through `$contains` (`~=`), `$all`, and `$empty`; member predicates may use `@` or `@.path`, while equivalent relative paths remain supported. `collection.$count` is available in predicates, projections, and supported ordering paths. Negate `$contains` for "no related item matches"; empty collections satisfy `$all` and `$empty`, and fail `$contains`. Bracketed `$contains [P, Q]` requires independent matches, while `$contains (P $and Q)` requires one member to satisfy both. Inner filters resolve against each collection item, including singular-reference paths and named-relationship properties.
 
@@ -489,7 +472,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded inverse and named-relationship collection envelopes. Collection predicates, collection counts, native Array comparisons, scoped `@` member predicates, opaque JSON `$contains`, nested collections under collection members, composed singular-reference plus collection paths (`owner.pets $contains (...)`), and same-occurrence correlation within one grouped `$contains` are implemented (array operands are capped at 128 elements; unsafe or non-round-trippable JSON numeric literals are rejected); arbitrary nested collection projections beyond a terminal collection beneath a singular reference, JSON path traversal/equality, and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Only guaranteed reciprocal backtracking is rejected; cyclic entity definitions and physical foreign keys remain valid.
+`orderBy` is optional and accepts a field name, a leading `-` for descending, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and collection path projections. Collection paths return `{ items, total }` envelopes with a default page size of three; `{...}` options change limit/offset/order, and `[...]` filters constrain the items and the total. Named-relationship properties flatten onto each item (`members.role`), and paths continue through singular references and nested collections. Collection predicates, collection counts, native Array comparisons, scoped `@` member predicates, opaque JSON `$contains`, nested collections under collection members, composed singular-reference plus collection paths (`owner.pets $contains (...)`), and same-occurrence correlation within one grouped `$contains` are implemented (array operands are capped at 128 elements; unsafe or non-round-trippable JSON numeric literals are rejected); JSON path traversal/equality and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Only guaranteed reciprocal backtracking is rejected; cyclic entity definitions and physical foreign keys remain valid.
 
 ## `db.sql`
 

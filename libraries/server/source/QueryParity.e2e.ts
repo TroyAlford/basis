@@ -86,7 +86,6 @@ interface ParityCase {
   readonly expected?: readonly string[],
   /** Extra query options shared by both forms. */
   readonly options?: {
-    readonly collections?: Readonly<Record<string, { readonly limit?: number, readonly offset?: number }>>,
     readonly fields?: readonly string[],
     readonly limit?: number,
     readonly offset?: number,
@@ -241,7 +240,6 @@ async function execute(
 ): Promise<{ source: { id: string }[], structured: { id: string }[] }> {
   const options = queryCase.options ?? {}
   const shared = {
-    collections: options.collections,
     fields: options.fields ?? ['id'],
     limit: options.limit,
     offset: options.offset,
@@ -596,8 +594,7 @@ describe('Query parity gate', () => {
         entity: 'Person',
         expected: [grace],
         options: {
-          collections: { pets: { limit: 1, offset: 0 } },
-          fields: ['id', 'pets'],
+          fields: ['id', 'pets{$limit:1}'],
           limit: 1,
           offset: 1,
           orderBy: 'title',
