@@ -1387,6 +1387,10 @@ class QueryProjection {
     if (!orderings.some(order => order.name === 'id')) {
       orderings.push({ direction: 'ASC', name: 'id' })
     }
+    const projectedFields = new Set(['id', 'name', 'entity', ...spec.fields])
+    const orderOnlyFields = new Set(orderings
+      .map(order => order.name)
+      .filter(name => !projectedFields.has(name)))
     const filter = spec.filters.size === 0
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
@@ -1484,9 +1488,12 @@ class QueryProjection {
               readonly item: Record<string, unknown>,
             }
             const hydrated = child.hydrate(record.item)
-            return record.edge === undefined || record.edge === null
+            const merged = record.edge === undefined || record.edge === null
               ? hydrated
               : { ...hydrated, ...record.edge }
+            return Object.fromEntries(
+              Object.entries(merged).filter(([field]) => !orderOnlyFields.has(field)),
+            )
           }),
           total: Number(row[totalAlias] ?? 0),
         }

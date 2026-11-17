@@ -1528,6 +1528,101 @@ describe('Server database lifecycle', () => {
     ])
   })
 
+  isolatedTest('does not project collection ordering fields unless requested', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'email', type: 'String' },
+          ],
+          name: 'User',
+        },
+        { fields: [], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    await database.use(entities)
+    const campaign = '00000000-0000-4000-8000-000000000a01'
+    const members = [
+      ['00000000-0000-4000-8000-000000000a11', 'c@example.com'],
+      ['00000000-0000-4000-8000-000000000a12', 'a@example.com'],
+      ['00000000-0000-4000-8000-000000000a13', 'e@example.com'],
+      ['00000000-0000-4000-8000-000000000a14', 'b@example.com'],
+      ['00000000-0000-4000-8000-000000000a15', 'd@example.com'],
+    ] as const
+    const expected = [...members].sort((left, right) => left[1].localeCompare(right[1]))
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${campaign}, 'Ordering Campaign', 'Campaign')
+    `
+    await database.sql`
+      INSERT INTO "Campaign" ("id")
+      VALUES (${campaign})
+    `
+    for (const [id, email] of members) {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, ${email}, 'User')
+      `
+      await database.sql`
+        INSERT INTO "User" ("id", "email")
+        VALUES (${id}, ${email})
+      `
+      await database.sql`
+        INSERT INTO "Membership" ("user.id", "campaign.id", "role")
+        VALUES (${id}, ${campaign}, 'GM')
+      `
+    }
+
+    interface Item { email?: string, id: string, role: string }
+    interface Envelope { items: Item[], total: number }
+    const query = (fields: string[]) => queryEntity<{
+      id: string,
+      members: Envelope,
+    }>(database.sql, entities, 'Campaign', { fields, where: { id: campaign } })
+
+    const hidden = await query(['id', 'members{$orderBy:email,$limit:null}', 'members.role'])
+    expect(hidden[0]?.members.items.map(item => item.id)).toEqual(expected.map(([id]) => id))
+    expect(hidden[0]?.members.items.every(item => !('email' in item))).toBe(true)
+    expect(hidden[0]?.members.items.every(item => item.role === 'GM')).toBe(true)
+
+    const projected = await query([
+      'id',
+      'members{$orderBy:email,$limit:null}',
+      'members.email',
+      'members.role',
+    ])
+    expect(projected[0]?.members.items.map(item => item.email)).toEqual(expected.map(([, email]) => email))
+    expect(projected[0]?.members.items.map(item => item.id)).toEqual(expected.map(([id]) => id))
+
+    const pages = async (includeEmail: boolean): Promise<Item[]> => {
+      const fields = [
+        'members{$orderBy:email,$limit:2,$offset:0}',
+        'members.role',
+        ...(includeEmail ? ['members.email'] : []),
+      ]
+      const offsets = [0, 2, 4]
+      const results = await Promise.all(offsets.map(async offset => (
+        await query(fields.map(field => field.replace('$offset:0', `$offset:${offset}`)))
+      )))
+      return results.flatMap(result => result[0]?.members.items ?? [])
+    }
+    for (const includeEmail of [false, true]) {
+      const paged = await pages(includeEmail)
+      expect(paged.map(item => item.id)).toEqual(expected.map(([id]) => id))
+      expect(new Set(paged.map(item => item.id)).size).toBe(members.length)
+      expect(paged.every(item => 'email' in item === includeEmail)).toBe(true)
+    }
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
