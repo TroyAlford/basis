@@ -115,16 +115,11 @@ jobs:
           bun-version-file: .tool-versions
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Lint
-        run: bun run lint
-      # The class-based component invariant. Also enforced by `basis lint`
-      # when the repository uses `basis/eslint`; the focused command makes the
-      # architectural gate explicit and works alongside a repository config.
+      # The authoritative gate: style, architecture, infrastructure, and
+      # typecheck in one command. Do not also run `basis lint`; compliance
+      # includes it.
       - name: Compliance
         run: bunx basis compliance
-      # Drop this step when the repository's lint command already runs it.
-      - name: Typecheck
-        run: bun run typecheck
       # Advisory only; the shared action fails on configuration errors, not on
       # findings. Drop it or make it required per repository policy.
       - name: Knip (advisory)

@@ -2,10 +2,10 @@ import Ajv2020 from 'ajv/dist/2020'
 import addFormats from 'ajv-formats'
 import { Logger } from 'basis/logger'
 import { Cardinality, FieldType, Graph } from 'basis/server'
+import { tempDirectory } from 'basis/testing'
 import { runAsync } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { GeneratedSchemas } from '../index'
 import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
@@ -142,7 +142,7 @@ describe('codegen', () => {
         name: 'EmitterNote',
       }],
     })
-    const directory = await mkdtemp(join(tmpdir(), 'basis-emitters-'))
+    const directory = tempDirectory('basis-emitters')
     try {
       expect(TypeScriptEmitter.extension).toBe('ts')
       expect(TypeScriptEmitter.folder).toBe('typescript')
@@ -166,7 +166,7 @@ describe('codegen', () => {
   test('rejects emitter destinations that escape the output root', async () => {
     expect(() => emitter({ extension: 'ts', folder: '../escape' }, () => []))
       .toThrow('Unsafe emitter folder')
-    const directory = await mkdtemp(join(tmpdir(), 'basis-emitter-safe-'))
+    const directory = tempDirectory('basis-emitter-safe')
     try {
       const unsafe = emitter(
         { extension: 'ts', folder: 'typescript' },
@@ -367,7 +367,7 @@ readonly entity: $BasisEntities.OnlyChild,
     expect(() => new Graph({
       entities: [{ fields: [], name: 'Reference' }],
     })).toThrow('reserved for generated contracts')
-    const directory = await mkdtemp(join(tmpdir(), 'basis-collision-types-'))
+    const directory = tempDirectory('basis-collision-types')
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, types)
@@ -391,7 +391,7 @@ readonly entity: $BasisEntities.OnlyChild,
         },
       ],
     })
-    const directory = await mkdtemp(join(tmpdir(), 'basis-mutual-types-'))
+    const directory = tempDirectory('basis-mutual-types')
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, `
@@ -431,7 +431,7 @@ const bar: Bar = {
         },
       ],
     })
-    const directory = await mkdtemp(join(tmpdir(), 'basis-abstract-types-'))
+    const directory = tempDirectory('basis-abstract-types')
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, `
@@ -482,7 +482,7 @@ const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 
     expect(validate({ ...base, access: 'owner', fallback: 'viewer' })).toBe(true)
     expect(validate({ ...base, access: 'invalid', fallback: null })).toBe(false)
 
-    const directory = await mkdtemp(join(tmpdir(), 'basis-enum-types-'))
+    const directory = tempDirectory('basis-enum-types')
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, `
@@ -498,7 +498,7 @@ void access
   })
 
   test('emits TypeScript that compiles', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
+    const directory = tempDirectory('basis-authored-types')
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, generateTypes(new Graph({ entities: document })))

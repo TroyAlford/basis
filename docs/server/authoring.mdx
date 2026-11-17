@@ -97,7 +97,7 @@ export default emitter({ extension: 'txt', folder: 'custom' }, graph => [{
 }])
 ```
 
-`basis emit` writes beneath `generated/`; `basis typecheck` and `basis check` run the same lifecycle automatically. No configuration lists emitters, and no custom bundle stage is required.
+`basis emit` writes beneath `generated/`; `basis typecheck`, `basis lint`, and `basis compliance` run the same lifecycle automatically. No configuration lists emitters, and no custom bundle stage is required.
 
 - Built-in `TypeScriptEmitter` writes `generated/typescript/index.ts`; `JsonSchemaEmitter` writes `generated/json-schema/schemas.json`. Application emitters own their extension, folder, file names, and content.
 - `basis/codegen` also exports the pure content generators `generateTypes(graph)` and `generateJSONSchemas(graph)` for consumers that own their own file emission.
@@ -260,7 +260,7 @@ erDiagram
   User ||--o{ Note : owner.id
 ```
 
-`basis emit` writes the generated outputs beneath `generated/` by convention. They are deterministic for a fixed Graph and are overwritten on regeneration; an application may commit them or ignore them as part of its own repository policy. `basis typecheck` and `basis check` run the lifecycle automatically.
+`basis emit` writes the generated outputs beneath `generated/` by convention. They are deterministic for a fixed Graph and are overwritten on regeneration; an application may commit them or ignore them as part of its own repository policy. `basis typecheck`, `basis lint`, and `basis compliance` run the lifecycle automatically.
 
 ## Authoring conventions
 

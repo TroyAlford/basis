@@ -1,8 +1,8 @@
+import { tempDirectory } from 'basis/testing'
 import { run } from 'basis/utilities'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ChangedFile, ImpactConfig, ImpactDecision } from '../actions/change-impact/main'
@@ -33,7 +33,7 @@ afterEach(async () => {
  * @returns The workspace root.
  */
 async function workspace(files: Record<string, string>): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'basis-impact-'))
+  const directory = tempDirectory('basis-impact')
   directories.push(directory)
   for (const [path, content] of Object.entries(files)) {
     const full = join(directory, path)
@@ -112,7 +112,7 @@ function gitOutput(cwd: string, args: string[]): string {
  * @returns The clone root.
  */
 async function clone(source: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'basis-impact-clone-'))
+  const directory = tempDirectory('basis-impact-clone')
   directories.push(directory)
   git(directory, ['clone', '-q', source, '.'])
   git(directory, ['config', 'user.email', 'test@example.com'])

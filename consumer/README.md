@@ -34,18 +34,18 @@ Declare non-npm host capabilities in the application root:
 
 The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken. Basis-owned patches live in the package and are applied by that hook; consumers never copy patch files or add their own `patchedDependencies` entries. See [Installation](../docs/installation.mdx).
 
-## Lint, format, and typecheck
+## Lint, format, compliance, and typecheck
 
 ```bash
 bunx basis lint
 bunx basis format
+bunx basis compliance
 bunx basis typecheck
-bunx basis check
 ```
 
-`basis lint` uses the Basis policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), and [TypeScript](../docs/typescript.mdx).
+`basis lint` uses the Basis style policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. `basis compliance` runs the same style and typecheck surface plus the authoritative architecture and infrastructure rules. Choose `lint` or `compliance` for a repository gate, not both. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), [Compliance](../docs/compliance.mdx), and [TypeScript](../docs/typescript.mdx).
 
-`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. Installing Basis does not enforce that version by itself. `basis check` runs `basis lint` before it typechecks.
+`basis typecheck`, `basis lint`, and `basis compliance` run Bun's built-in TypeScript checker and require Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. Installing Basis does not enforce that version by itself.
 
 ## Server and database
 

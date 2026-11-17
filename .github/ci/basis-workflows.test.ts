@@ -1,7 +1,7 @@
+import { tempDirectory } from 'basis/testing'
 import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -89,7 +89,7 @@ function runGate(
 function runLaneStep(decision: unknown): { code: number, output: string } {
   const step = code.jobs?.impact?.steps?.find(entry => entry.name === 'Derive test-lane decisions')
   if (!step?.run) throw new Error('lane decision step is missing')
-  const directory = mkdtempSync(join(tmpdir(), 'basis-impact-lanes-'))
+  const directory = tempDirectory('basis-impact-lanes')
   const outputFile = join(directory, 'github-output')
   try {
     writeFileSync(join(directory, 'impact-decision.json'), JSON.stringify(decision))
@@ -133,8 +133,8 @@ const laneGroups: Record<string, string[]> = {
 
 /** Every code job the required gate judges. */
 const workflowJobs = [
-  'eslint', 'impact', 'unit', 'database', 'e2e', 'lifecycle',
-  'type-check', 'knip', 'consumer-install',
+  'compliance', 'impact', 'unit', 'database', 'e2e', 'lifecycle',
+  'knip', 'consumer-install',
 ]
 
 /**
@@ -173,10 +173,7 @@ describe('Basis Code CI', () => {
   })
 
   test('keeps the quality jobs and every test lane command', () => {
-    const eslint = code.jobs?.eslint?.steps ?? []
-    expect(eslint.some(step => step.run?.includes('bun ./node_modules/eslint/bin/eslint.js'))).toBe(true)
-    expect(eslint.some(step => step.run?.includes('stylelint'))).toBe(true)
-    expect(eslint.some(step => step.run === 'bun run lint:md')).toBe(true)
+    expect(runs('compliance', 'bun run compliance')).toBe(true)
 
     const unit = code.jobs?.unit?.steps?.find(step => (
       step.name === 'Run unit tests, screenshots and docs concurrently'
@@ -186,7 +183,6 @@ describe('Basis Code CI', () => {
     expect(runs('database', 'bun run test:database')).toBe(true)
     expect(runs('e2e', 'bun run test:e2e')).toBe(true)
     expect(runs('lifecycle', 'bun run test:lifecycle')).toBe(true)
-    expect(runs('type-check', 'bun run lint:ts')).toBe(true)
     expect(runs('consumer-install', 'bun run test:consumer')).toBe(true)
     expect(code.jobs?.knip?.steps?.some(step => step.uses?.includes('/knip'))).toBe(true)
   })
@@ -270,14 +266,14 @@ describe('Basis Code CI', () => {
     expect(required?.if).toContain('always()')
     expect(required?.if).toContain('!github.event.pull_request.draft')
     expect(required?.needs).toEqual([
-      'eslint', 'impact', 'unit', 'database', 'e2e', 'lifecycle',
-      'type-check', 'knip', 'consumer-install',
+      'compliance', 'impact', 'unit', 'database', 'e2e', 'lifecycle',
+      'knip', 'consumer-install',
     ])
 
     const script = gateScript(code)
     expect(script).not.toContain('gh api')
     expect(script).not.toContain('REUSE_')
-    expect(script).toContain('eslint impact type-check knip consumer-install')
+    expect(script).toContain('compliance impact knip consumer-install')
     expect(script).toContain('!= "success"')
     expect(script).toContain('DECISION_HASH')
   })
@@ -340,7 +336,7 @@ describe('Basis PR Metadata', () => {
     expect(job?.steps?.some(step => step.uses === './.github/actions/enforce-convco')).toBe(true)
     expect(job?.steps?.some(step => step.with?.['github-token'] === '${{ secrets.GITHUB_TOKEN }}')).toBe(true)
 
-    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install']) {
+    for (const id of ['compliance', 'run-tests', 'type-check', 'knip', 'consumer-install']) {
       expect(metadata.jobs?.[id]).toBeUndefined()
     }
   })

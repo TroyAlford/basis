@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { run as runProcess } from 'basis/utilities'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { findInstalledInstances } from '../patches/install'
 
@@ -156,7 +156,7 @@ export const write = (path: string, contents: string): void => {
  * @param prefix Directory name prefix.
  * @returns Absolute path to the new directory.
  */
-export const makeTempDir = (prefix: string): string => mkdtempSync(join(tmpdir(), prefix))
+export const makeTempDir = (prefix: string): string => tempDirectory(prefix)
 
 /**
  * Builds a PATH containing only Bun and Git, so a fixture proves it never needs

@@ -4,10 +4,20 @@ import { entityDefinitionFormat } from './entityDefinitionFormat'
 import { importExtensions } from './importExtensions'
 import { noMixedTypeImports } from './no-mixed-type-imports'
 import { noObjectPadding } from './no-object-padding'
+import { noAlternativeScreenshots } from './noAlternativeScreenshots'
+import { noAlternativeTestRenderer } from './noAlternativeTestRenderer'
+import { noCustomDatabaseFixture } from './noCustomDatabaseFixture'
+import { noCustomTestLifecycle } from './noCustomTestLifecycle'
+import { noCustomTestServer } from './noCustomTestServer'
+import { noCustomTestTempRoot } from './noCustomTestTempRoot'
 import { noDefaultExport } from './noDefaultExport'
+import { noDirectBrowserLifecycle } from './noDirectBrowserLifecycle'
+import { noDirectProcessSpawn } from './noDirectProcessSpawn'
+import { noDirectTestingInternals } from './noDirectTestingInternals'
 import { noExtraneousDependencies } from './noExtraneousDependencies'
 import { noJsxLineBreaks } from './noJsxLineBreaks'
 import { noJsxSpaceInjection } from './noJsxSpaceInjection'
+import { noTestDatabaseIsolationFramework } from './noTestDatabaseIsolationFramework'
 import { sortInterface } from './sortInterface'
 import { sortKeys } from './sortKeys'
 import { sortStringEnum } from './sortStringEnum'
@@ -19,12 +29,22 @@ export default {
     'component-architecture': componentArchitecture,
     'entity-definition-format': entityDefinitionFormat,
     'import-extensions': importExtensions,
+    'no-alternative-screenshots': noAlternativeScreenshots,
+    'no-alternative-test-renderer': noAlternativeTestRenderer,
+    'no-custom-database-fixture': noCustomDatabaseFixture,
+    'no-custom-test-lifecycle': noCustomTestLifecycle,
+    'no-custom-test-server': noCustomTestServer,
+    'no-custom-test-temp-root': noCustomTestTempRoot,
     'no-default-export': noDefaultExport,
+    'no-direct-browser-lifecycle': noDirectBrowserLifecycle,
+    'no-direct-process-spawn': noDirectProcessSpawn,
+    'no-direct-testing-internals': noDirectTestingInternals,
     'no-extraneous-dependencies': noExtraneousDependencies,
     'no-jsx-line-breaks': noJsxLineBreaks,
     'no-jsx-space-injection': noJsxSpaceInjection,
     'no-mixed-type-imports': noMixedTypeImports,
     'no-object-padding': noObjectPadding,
+    'no-test-database-isolation-framework': noTestDatabaseIsolationFramework,
     'sort-interface': sortInterface,
     'sort-keys': sortKeys,
     'sort-string-enum': sortStringEnum,

@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { checksum } from './checksum'
 
@@ -23,7 +23,7 @@ describe('checksum', () => {
   })
 
   test('hashes a large file through the native file overload', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'basis-checksum-'))
+    const root = tempDirectory('basis-checksum')
     const path = join(root, 'archive.dump')
     const bytes = new Uint8Array(2 * 1024 * 1024)
     for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 251
@@ -36,7 +36,7 @@ describe('checksum', () => {
   })
 
   test('propagates native file checksum errors', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'basis-checksum-'))
+    const root = tempDirectory('basis-checksum')
     try {
       await expect(checksum(Bun.file(join(root, 'missing.dump'))))
         .rejects.toThrow(/failed for missing\.dump/)
