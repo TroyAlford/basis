@@ -74,6 +74,8 @@ Components whose meaningful state only exists after mount — the resolved `Awai
 
 `useApplication({ entry })` starts one development server per application identity on a free loopback port, waits for readiness, and shares it across the run. The preload stops it at teardown. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
 
+`startApplication` is the low-level primitive behind `useApplication`. Its `stop()` returns the child exit code, so a framework lifecycle test can assert a clean shutdown. `readyStatus` can accept an expected error-state response, such as a fixture's deliberate 503 health result, without bypassing the application fixture.
+
 ```tsx
 // Deck.e2e.ts
 import { matchScreenshot, test, useApplication } from 'basis/testing'

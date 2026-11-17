@@ -33,7 +33,6 @@ describe('Reviewed schema evolution', () => {
   test('applies a reviewed artifact, records it once, verifies readiness, and rejects drift', async () => {
     const desired = model('Note')
     await withIsolatedDatabase('migration-apply', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired })
       const attemptVersion = migrationVersion('001-note')
@@ -44,7 +43,6 @@ describe('Reviewed schema evolution', () => {
 
       const applied = await DDL.apply(database.sql, artifact)
       expect(applied.applied).toBe(true)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       expect(applied.version).toBe(attemptVersion)
 
       const [ledger] = await database.sql<{ count: number }[]>`
@@ -108,14 +106,12 @@ describe('Reviewed schema evolution', () => {
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'NewNote' }],
     }))
     await withIsolatedDatabase('migration-rename', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
         version: migrationVersion('001-old'),
       })
       await DDL.apply(database.sql, first)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
         actual,
@@ -144,14 +140,12 @@ describe('Reviewed schema evolution', () => {
     const previous = model('Note')
     const desired = model('Note', 'Tag')
     await withIsolatedDatabase('migration-additive', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
         version: migrationVersion('001-note'),
       })
       await DDL.apply(database.sql, first)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
 
       const actual = await DDL.introspect(database.sql)
       const previousPhysical = previous.physicalSchema()
@@ -180,7 +174,6 @@ describe('Reviewed schema evolution', () => {
         }],
         schema: database.schema,
       })
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const expected = graph.physicalSchema(appRole, false)
       const plan = DDL.plan({
@@ -194,7 +187,6 @@ describe('Reviewed schema evolution', () => {
         version: migrationVersion('001-graph'),
       })
       await DDL.apply(database.sql, artifact)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const readiness = await DDL.readiness(database.sql, artifact)
       expect(readiness.ready).toBe(true)
       expect(readiness.discrepancies).toEqual([])
@@ -209,14 +201,12 @@ describe('Reviewed schema evolution', () => {
       ],
     }))
     await withIsolatedDatabase('migration-mti', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
         schema: database.schema,
         version: migrationVersion('001-mti'),
       })
       await DDL.apply(database.sql, artifact)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       expect((await DDL.readiness(database.sql, artifact)).ready).toBe(true)
     }, { fresh: true })
   })
@@ -229,14 +219,12 @@ describe('Reviewed schema evolution', () => {
       entities: [{ fields: [{ field: 'amount', type: 'Number' }], name: 'Note' }],
     }))
     await withIsolatedDatabase('migration-data', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
         version: migrationVersion('001-note'),
       })
       await DDL.apply(database.sql, first)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
 
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
@@ -262,7 +250,6 @@ describe('Reviewed schema evolution', () => {
         version: migrationVersion('002-number'),
       })
       await DDL.apply(database.sql, artifact)
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       expect((await DDL.readiness(database.sql, artifact)).ready).toBe(true)
     }, { fresh: true })
   })
@@ -270,7 +257,6 @@ describe('Reviewed schema evolution', () => {
   test('rolls back an interrupted migration before writing the ledger', async () => {
     const desired = model('Note')
     await withIsolatedDatabase('migration-interrupted', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual: empty, desired })
       const failing = plan.operations.find(operation => (
@@ -287,7 +273,6 @@ describe('Reviewed schema evolution', () => {
         version: migrationVersion('001-note'),
       })
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow()
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const [ledgerTable] = await database.sql<{ present: boolean }[]>`
         SELECT to_regclass('basis.schema_migration') IS NOT NULL AS present
       `
@@ -385,7 +370,6 @@ describe('Reviewed schema evolution', () => {
   test('rejects application when the live source drifted from the approved plan', async () => {
     const desired = model('Note')
     await withIsolatedDatabase('migration-drift', async database => {
-      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
       const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
         schema: database.schema,

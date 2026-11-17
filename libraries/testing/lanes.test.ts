@@ -1,7 +1,8 @@
+import { runAsync } from 'basis/utilities'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 /*
  * The custom-suffix lanes are opt-in, so their behavior cannot be exercised by
@@ -205,17 +206,11 @@ async function run(
   args: string[],
   env: Record<string, string> = {},
 ): Promise<{ code: number, output: string }> {
-  const proc = Bun.spawn([process.execPath, 'test', ...args], {
+  const result = await runAsync(process.execPath, ['test', ...args], {
     cwd: directory,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
+    env,
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  return { code: await proc.exited, output: `${stdout}\n${stderr}` }
+  return { code: result.exitCode, output: `${result.stdout}\n${result.stderr}` }
 }
 
 /**

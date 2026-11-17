@@ -1,8 +1,9 @@
+import { runAsync } from 'basis/utilities'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SNAPSHOT_ACTIVITY_LOG } from './browser'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 /*
  * Lifecycle proof for the run-scoped snapshot runtime.
@@ -161,8 +162,7 @@ describe('snapshot runtime lifecycle', () => {
     })
 
     const start = Bun.nanoseconds()
-    const proc = Bun.spawn([
-      process.execPath,
+    const result = await runAsync(process.execPath, [
       'test',
       './components-a.screenshot.tsx',
       './components-b.screenshot.tsx',
@@ -172,18 +172,13 @@ describe('snapshot runtime lifecycle', () => {
     ], {
       cwd: target.dir,
       env: {
-        ...process.env,
         [SNAPSHOT_ACTIVITY_LOG]: target.activity,
         UPDATE_SNAPSHOTS: '1',
       },
-      stderr: 'pipe',
-      stdout: 'pipe',
     })
-    const stdout = new Response(proc.stdout).text()
-    const stderr = new Response(proc.stderr).text()
-    const code = await proc.exited
     const durationMs = (Bun.nanoseconds() - start) / 1_000_000
-    const output = `${await stdout}\n${await stderr}`
+    const output = `${result.stdout}\n${result.stderr}`
+    const code = result.exitCode
     const activity = readActivity(target.activity)
     const expected = FIRST_COMPONENTS + SECOND_COMPONENTS + (2 * REPEATS) + VISITS.length
 

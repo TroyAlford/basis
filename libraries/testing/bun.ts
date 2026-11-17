@@ -3,7 +3,7 @@ import { stopApplications } from './application'
 import { closeRuntime, getBrowser } from './browser'
 import { pruneSnapshots } from './cleanup'
 import { cleanupRun } from './lifecycle'
-import { cleanupTempDirectories, isolateTempDirectories } from './temp'
+import { cleanupTempDirectories, isolateTempDirectories } from './tempDirectory'
 
 import './happydom'
 import '../react/testing/bun/register'

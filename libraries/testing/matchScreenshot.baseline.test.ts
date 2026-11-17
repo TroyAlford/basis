@@ -6,7 +6,7 @@ import { PNG } from 'pngjs'
 import { commitScreenshot, runMatchScreenshot, runScreenshot } from './matchScreenshot'
 import { slug } from './naming'
 import { snapshotDirectory } from './snapshots'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 import { updating } from './update'
 
 const root = tempDirectory('basis-baseline')

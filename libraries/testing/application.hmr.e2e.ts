@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'bun:test'
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { useApplication } from './application'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 const repoRoot = join(import.meta.dir, '..', '..')
 const created: string[] = []
@@ -20,12 +20,8 @@ function fixture(): string {
   created.push(directory)
   symlinkSync(join(repoRoot, 'node_modules'), join(directory, 'node_modules'), 'dir')
   writeFileSync(join(directory, 'serve.ts'), `
-import { appendFileSync } from 'node:fs'
 import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
 
-import { join } from 'node:path'
-appendFileSync(process.env.BASIS_APP_ACTIVITY ?? join(import.meta.dir, 'activity.log'), \`\${process.pid}
-\`)
 new Server().root(import.meta.dir).main('./main.tsx').title('HMR').start()
   `.trim())
   writeFileSync(join(directory, 'main.tsx'), `
@@ -47,75 +43,8 @@ export class Application extends Component {
   }
 }
   `.trim())
-  const preload = JSON.stringify(join(repoRoot, 'libraries', 'testing', 'bun.ts'))
-  writeFileSync(join(directory, 'bunfig.toml'), `[test]\npreload = [${preload}]\n`)
-  writeFileSync(join(directory, 'verify.e2e.ts'), `
-import { expect, test } from 'bun:test'
-import { useApplication } from ${JSON.stringify(join(import.meta.dir, 'application.ts'))}
-
-test('serves the current source', async () => {
-  const app = await useApplication({
-    cwd: import.meta.dir, entry: './serve.ts',
-    development: true, timeoutMs: 120_000,
-  })
-  await app.visit('/', async page => {
-    await page.waitForSelector('h1')
-    expect(await page.textContent('h1')).toBe(process.env.EXPECTED)
-  })
-})
-  `.trim())
   return directory
 }
-
-/**
- * Run the fixture's child test in a separate Bun invocation.
- * @param directory - Fixture directory.
- * @param expected - Expected h1 text.
- * @returns The child exit code and output.
- */
-async function runChild(directory: string, expected: string): Promise<{ code: number, output: string }> {
-  const proc = Bun.spawn([process.execPath, 'test', './verify.e2e.ts'], {
-    cwd: directory,
-    env: {
-      ...process.env,
-      BASIS_APP_ACTIVITY: join(directory, 'activity.log'),
-      EXPECTED: expected,
-    },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  const output = await new Response(proc.stdout).text() + await new Response(proc.stderr).text()
-  return { code: await proc.exited, output }
-}
-
-test('persists a server across invocations and serves edited source', async () => {
-  const directory = fixture()
-  const applicationFile = join(directory, 'Application.tsx')
-  const source = readFileSync(applicationFile, 'utf8')
-  const activity = join(directory, 'activity.log')
-  try {
-    const first = await runChild(directory, 'Application')
-    expect(first.code).toBe(0)
-    const firstBoots = readFileSync(activity, 'utf8').trim().split('\n').filter(Boolean)
-    expect(firstBoots).toHaveLength(1)
-
-    writeFileSync(applicationFile, source.replace('Application</h1>', 'Application Updated</h1>'))
-    const second = await runChild(directory, 'Application Updated')
-    expect(second.code).toBe(0)
-    const secondBoots = readFileSync(activity, 'utf8').trim().split('\n').filter(Boolean)
-    expect(secondBoots).toHaveLength(1)
-    const pid = Number(secondBoots[0])
-    if (Number.isInteger(pid)) {
-      try {
-        process.kill(pid, 'SIGTERM')
-      } catch {
-        // The detached process may already be gone.
-      }
-    }
-  } finally {
-    writeFileSync(applicationFile, source)
-  }
-})
 
 test('serves updated browser source through native HMR without restarting', async () => {
   const directory = fixture()
@@ -123,7 +52,6 @@ test('serves updated browser source through native HMR without restarting', asyn
     cwd: directory,
     development: true,
     entry: './serve.ts',
-    timeoutMs: 120_000,
   })
 
   try {

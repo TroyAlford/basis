@@ -13,7 +13,7 @@ const expectsReport = (code: string): void => {
 
 describe('noDirectTestingInternals', () => {
   test('reports a deep basis/testing import', () => {
-    expectsReport('import { tempDirectory } from \'basis/testing/temp\'')
+    expectsReport('import { tempDirectory } from \'basis/testing/tempDirectory\'')
   })
 
   test('reports a public-helper implementation import', () => {
@@ -21,27 +21,27 @@ describe('noDirectTestingInternals', () => {
   })
 
   test('reports a side-effect deep import', () => {
-    expectsReport('import \'basis/testing/temp\'')
+    expectsReport('import \'basis/testing/tempDirectory\'')
   })
 
   test('reports a deep export', () => {
-    expectsReport('export { tempDirectory } from \'basis/testing/temp\'')
+    expectsReport('export { tempDirectory } from \'basis/testing/tempDirectory\'')
   })
 
   test('reports an export-all', () => {
-    expectsReport('export * from \'basis/testing/temp\'')
+    expectsReport('export * from \'basis/testing/tempDirectory\'')
   })
 
   test('reports a dynamic import', () => {
-    expectsReport('await import(\'basis/testing/temp\')')
+    expectsReport('await import(\'basis/testing/tempDirectory\')')
   })
 
   test('reports a require', () => {
-    expectsReport('const { tempDirectory } = require(\'basis/testing/temp\')')
+    expectsReport('const { tempDirectory } = require(\'basis/testing/tempDirectory\')')
   })
 
   test('reports a type-only deep import', () => {
-    expectsReport('import type { Temp } from \'basis/testing/temp\'')
+    expectsReport('import type { Temp } from \'basis/testing/tempDirectory\'')
   })
 
   test('reports the private @basis/testing workspace', () => {
@@ -49,7 +49,7 @@ describe('noDirectTestingInternals', () => {
   })
 
   test('reports a private @basis/testing subpath', () => {
-    expectsReport('import { tempDirectory } from \'@basis/testing/temp\'')
+    expectsReport('import { tempDirectory } from \'@basis/testing/tempDirectory\'')
   })
 
   test('reports a basis/libraries testing path', () => {

@@ -36,7 +36,7 @@ describe('createComplianceConfig', () => {
 
   test('runs process and testing-internals rules everywhere', () => {
     const code = [
-      'import { tempDirectory } from \'basis/testing/temp\'',
+      'import { tempDirectory } from \'basis/testing/tempDirectory\'',
       'Bun.spawn([\'bun\', \'test\'])',
       'tempDirectory(\'fixture\')',
     ].join('\n')

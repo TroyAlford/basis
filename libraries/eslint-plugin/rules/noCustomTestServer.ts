@@ -38,6 +38,9 @@ const SERVER_WORD = /(?:^|[\s/._'"-])(?:dev|listen|serve|server|start)(?:$|[\s/.
 // A port binding is an application-server launch even without a server word.
 const PORT_BINDING = /(?:^|\s)(?:--port|-p|PORT=)\S*/i
 
+// Container lifecycle commands publish ports but do not start an application.
+const CONTAINER_COMMAND = /^\s*(?:docker|nerdctl|podman)\b/i
+
 // Whether a call is a direct server constructor.
 const isDirectServer = (reference: ResolvedReference | null): boolean => {
   if (!reference) return false
@@ -56,6 +59,7 @@ const looksLikeServerLaunch = (strings: readonly string[]): boolean => {
   if (command.length === 0) return false
   if (TEST_ARTIFACT.test(command)) return false
   if (NON_SERVER_COMMAND.test(command)) return false
+  if (CONTAINER_COMMAND.test(command)) return false
   return SERVER_WORD.test(command) || PORT_BINDING.test(command)
 }
 

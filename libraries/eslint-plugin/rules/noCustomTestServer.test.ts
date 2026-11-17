@@ -75,4 +75,8 @@ describe('noCustomTestServer', () => {
   test('allows a build script', () => {
     expect(lint('Bun.spawn([\'bun\', \'./scripts/build.ts\'])')).toHaveLength(0)
   })
+
+  test('allows a container port publish', () => {
+    expect(lint('Bun.spawn([\'docker\', \'run\', \'-p\', \'127.0.0.1::5432\', \'postgres\'])')).toHaveLength(0)
+  })
 })
