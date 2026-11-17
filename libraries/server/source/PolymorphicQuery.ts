@@ -1121,7 +1121,8 @@ class QueryProjection {
     ].join('.')
     const hasDirectives = directives.filter !== undefined || directives.limit !== undefined
       || directives.offset !== undefined || directives.orderBy !== undefined
-    if (hasDirectives && rest.length > 0) {
+    const recordCollection = node.context.collections.get(name)?.kind === 'relationship-records'
+    if (hasDirectives && rest.length > 0 && !recordCollection) {
       throw new Error(`Collection directives must end the path "${rawName}"; use separate child paths`)
     }
     if (rest.length === 1 && rest[0] === '$total') {
