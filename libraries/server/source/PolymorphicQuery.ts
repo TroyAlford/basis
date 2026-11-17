@@ -157,6 +157,22 @@ interface ProjectedCollectionRows {
   readonly work: number,
 }
 
+/** Shared effective directives for one projected collection. */
+interface CollectionDirectivePlan {
+  /** Relationship-record predicate declared by the collection source. */
+  readonly additionalWhere: readonly Filter[],
+  /** Query-time collection filter. */
+  readonly filter?: string,
+  /** Effective page size. */
+  readonly limit: number | null,
+  /** Effective page offset. */
+  readonly offset: number,
+  /** Effective ordering. */
+  readonly orderBy?: OrderBy,
+  /** SQL page clause. */
+  readonly page: string,
+}
+
 /** One nested singular reference. */
 interface ReferenceProjection {
   /** Canonical association for each target node. */
@@ -1575,20 +1591,15 @@ class QueryProjection {
     const target = this.#entities.relationshipRecord(relationship.name)
     if (!target) throw new Error(`Unknown relationship "${relationship.name}"`)
     const key = collectionKey(node.path, collection.name)
+    const directives = this.#collectionDirectives(spec, collection, key)
     const endpoint = collection.ownerEndpoint
     const childAlias = this.#nextAlias('cr')
-    const orderings = this.#recordOrderings(
-      relationship,
-      spec.orderBy === undefined ? collection.viaOrderBy : spec.orderBy,
-    )
+    const orderings = this.#recordOrderings(relationship, directives.orderBy)
     const fields = [...new Set([
       ...relationship.between.map(item => item.field),
       ...relationship.fields.map(field => field.name),
       ...spec.fields,
     ])]
-    const filter = spec.filters.size === 0
-      ? undefined
-      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields,
@@ -1601,11 +1612,11 @@ class QueryProjection {
         `${quote(childAlias)}.${quote(`${endpoint.field}.id`)} = ` +
         `${quote(node.context.baseAlias)}.${quote('id')}`,
       rootAlias: childAlias,
-      ...(filter === undefined ? {} : { where: filter }),
-      ...(collection.viaFilter === undefined ? {} : { additionalWhere: [collection.viaFilter] }),
+      ...(directives.filter === undefined ? {} : { where: directives.filter }),
+      ...(directives.additionalWhere.length === 0 ? {} : { additionalWhere: directives.additionalWhere }),
     })
     let totalChild: CompiledPolymorphicQuery | undefined
-    if (filter !== undefined) {
+    if (directives.filter !== undefined) {
       const totalChildAlias = this.#nextAlias('ct')
       totalChild = compilePolymorphicQuery(this.#entities, target, {
         aliasPrefix: `${totalChildAlias}_`,
@@ -1619,15 +1630,9 @@ class QueryProjection {
           `${quote(totalChildAlias)}.${quote(`${endpoint.field}.id`)} = ` +
           `${quote(node.context.baseAlias)}.${quote('id')}`,
         rootAlias: totalChildAlias,
-        ...(collection.viaFilter === undefined ? {} : { additionalWhere: [collection.viaFilter] }),
+        ...(directives.additionalWhere.length === 0 ? {} : { additionalWhere: directives.additionalWhere }),
       })
     }
-    const page = this.#collectionPage(
-      spec,
-      key,
-      collection.viaLimit === undefined ? 3 : collection.viaLimit,
-      collection.viaOffset ?? 0,
-    )
     const aggregateOrder = orderings.map(order => (
       order.endpoint
         ? `${quote('__item')}.${quote(`${order.field}__id`)} ${order.direction}`
@@ -1639,7 +1644,7 @@ class QueryProjection {
       edgeObject: 'NULL',
       hydrateRow: row => child.hydrate(row),
       orderOnlyFields: new Set(),
-      page,
+      page: directives.page,
       ...(totalChild === undefined ? {} : { totalChild }),
       work: 1,
     })
@@ -1661,8 +1666,9 @@ class QueryProjection {
       ? identityDefinition()
       : this.#entities.entity(spec.collection.target)
     if (!target) throw new Error(`Unknown target entity "${spec.collection.target}"`)
-    const page = this.#collectionPage(spec, key, 3, 0)
-    const orderings = parseCollectionOrdering(spec.orderBy, ['id'])
+    const directives = this.#collectionDirectives(spec, spec.collection, key, ['id'])
+    this.#validateProjectedCollectionOrder(spec.collection, target)
+    const orderings = parseCollectionOrdering(directives.orderBy, ['id'])
     if (!orderings.some(order => order.name === 'id')) {
       orderings.push({ direction: 'ASC', name: 'id' })
     }
@@ -1670,9 +1676,6 @@ class QueryProjection {
     const orderOnlyFields = new Set(orderings
       .map(order => order.name)
       .filter(name => !projectedFields.has(name)))
-    const filter = spec.filters.size === 0
-      ? undefined
-      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const relationshipOptions = this.#relationshipOptions(plan, spec.collection, target)
     const childAlias = this.#nextAlias('c')
     const child = compilePolymorphicQuery(this.#entities, target, {
@@ -1690,13 +1693,11 @@ class QueryProjection {
       rawWhere: this.#collectionCorrelation(plan, childAlias),
       ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
       rootAlias: childAlias,
-      ...(filter === undefined ? {} : { where: filter }),
-      ...(spec.collection.kind === 'explicit' && spec.collection.viaFilter !== undefined
-        ? { additionalWhere: [spec.collection.viaFilter] }
-        : {}),
+      ...(directives.filter === undefined ? {} : { where: directives.filter }),
+      ...(directives.additionalWhere.length === 0 ? {} : { additionalWhere: directives.additionalWhere }),
     })
     let totalChild: CompiledPolymorphicQuery | undefined
-    if (filter !== undefined) {
+    if (directives.filter !== undefined) {
       const availableAlias = this.#nextAlias('ca')
       totalChild = compilePolymorphicQuery(this.#entities, target, {
         aliasPrefix: `${availableAlias}_`,
@@ -1704,10 +1705,9 @@ class QueryProjection {
         limit: null,
         offset: 0,
         rawWhere: this.#collectionCorrelation(plan, availableAlias),
+        ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
         rootAlias: availableAlias,
-        ...(spec.collection.kind === 'explicit' && spec.collection.viaFilter !== undefined
-          ? { additionalWhere: [spec.collection.viaFilter] }
-          : {}),
+        ...(directives.additionalWhere.length === 0 ? {} : { additionalWhere: directives.additionalWhere }),
       })
     }
     const edgeFields = [...spec.edgeFields]
@@ -1727,31 +1727,83 @@ class QueryProjection {
       edgeObject,
       hydrateRow: row => child.hydrate(row),
       orderOnlyFields,
-      page,
+      page: directives.page,
       ...(totalChild === undefined ? {} : { totalChild }),
       work: plan.work,
     })
   }
 
   /**
-   * Build one projected collection page clause.
+   * Resolve effective query-time and authored defaults for one collection.
    * @param spec - Projected collection request.
+   * @param collection - Collection navigation.
    * @param key - Collection path for diagnostics.
-   * @param defaultLimit - Default page size from the collection source.
-   * @param defaultOffset - Default page offset from the collection source.
+   * @param fallbackOrder - Source-specific default ordering.
+   * @returns Effective filter, ordering, page, and work inputs.
+   */
+  #collectionDirectives(
+    spec: ProjectedCollectionSpec,
+    collection: DerivedCollectionDefinition,
+    key: string,
+    fallbackOrder?: OrderBy,
+  ): CollectionDirectivePlan {
+    const authored = collection.kind === 'explicit'
+    const authoredLimit = authored ? collection.viaLimit : undefined
+    const limit = spec.limit !== undefined
+      ? spec.limit
+      : authoredLimit !== undefined ? authoredLimit : 3
+    const offset = spec.offset ?? (authored ? collection.viaOffset ?? 0 : 0)
+    const orderBy = spec.orderBy ??
+      (authored ? collection.viaOrderBy : undefined) ??
+      fallbackOrder
+    return {
+      additionalWhere: authored && collection.viaFilter !== undefined
+        ? [collection.viaFilter]
+        : [],
+      ...(spec.filters.size === 0
+        ? {}
+        : { filter: [...spec.filters].map(value => `(${value})`).join(' $and ') }),
+      limit,
+      offset,
+      ...(orderBy === undefined ? {} : { orderBy }),
+      page: this.#collectionPage(key, limit, offset),
+    }
+  }
+
+  /**
+   * Validate an authored projected-Entity order against the target field contract.
+   * @param collection - Collection navigation.
+   * @param target - Projected target entity.
+   */
+  #validateProjectedCollectionOrder(
+    collection: DerivedCollectionDefinition,
+    target: EntityDefinition,
+  ): void {
+    if (collection.kind !== 'explicit' || collection.viaOrderBy === undefined) return
+    for (const order of parseCollectionOrdering(collection.viaOrderBy, [])) {
+      if (target.effectiveFields.some(field => field.name === order.name)) continue
+      const relationshipField = collection.relationship.fields.some(field => field.name === order.name)
+      const endpoint = collection.relationship.between.some(field => field.field === order.name)
+      if (relationshipField || endpoint) {
+        throw new Error(
+          `Collection "${collection.name}" via order field "${order.name}" is ambiguous ` +
+          `for projected ${target.name}; use a target field or order the record collection`,
+        )
+      }
+    }
+  }
+
+  /**
+   * Build one projected collection page clause.
+   * @param key - Collection path for diagnostics.
+   * @param limit - Effective page size.
+   * @param offset - Effective page offset.
    * @returns SQL LIMIT/OFFSET clause.
    */
-  #collectionPage(
-    spec: ProjectedCollectionSpec,
-    key: string,
-    defaultLimit: number | null,
-    defaultOffset: number,
-  ): string {
-    const limit = spec.limit === undefined ? defaultLimit : spec.limit
+  #collectionPage(key: string, limit: number | null, offset: number): string {
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
     }
-    const offset = spec.offset ?? defaultOffset
     if (!Number.isInteger(offset) || offset < 0) {
       throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
     }

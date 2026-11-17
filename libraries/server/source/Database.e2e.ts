@@ -2458,6 +2458,150 @@ describe('Server database lifecycle', () => {
     ])
   })
 
+  isolatedTest('applies via defaults to projected Entity collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'entries', target: 'DeckCardPrinting', type: 'Collection', via: 'DeckCardPrinting[deck = @]' },
+            {
+              field: 'pagedEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$limit:2,$offset:1}',
+            },
+            {
+              field: 'cards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @].card',
+            },
+            {
+              field: 'pagedCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$limit:2,$offset:1}.card',
+            },
+            {
+              field: 'sortedCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$orderBy:-name}.card',
+            },
+            {
+              field: 'aliasedPagedCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'pagedEntries.card',
+            },
+            {
+              field: 'filteredEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 1]',
+            },
+            {
+              field: 'filteredCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'filteredEntries.card',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Card' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    await database.use(entities)
+    const deck = '00000000-0000-4000-8000-000000000a01'
+    const cardIds = ['a11', 'a12', 'a13', 'a14', 'a15'].map(value => `00000000-0000-4000-8000-000000000${value}`)
+    const printingIds = ['a21', 'a22', 'a23', 'a24', 'a25'].map(value => `00000000-0000-4000-8000-000000000${value}`)
+    const names = ['Zulu', 'Alpha', 'Mike', 'Echo', 'Bravo']
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${deck}, 'Deck', 'Deck'),
+        (${cardIds[0]}, ${names[0]}, 'Card'),
+        (${cardIds[1]}, ${names[1]}, 'Card'),
+        (${cardIds[2]}, ${names[2]}, 'Card'),
+        (${cardIds[3]}, ${names[3]}, 'Card'),
+        (${cardIds[4]}, ${names[4]}, 'Card'),
+        (${printingIds[0]}, 'Printing 1', 'Printing'),
+        (${printingIds[1]}, 'Printing 2', 'Printing'),
+        (${printingIds[2]}, 'Printing 3', 'Printing'),
+        (${printingIds[3]}, 'Printing 4', 'Printing'),
+        (${printingIds[4]}, 'Printing 5', 'Printing')
+    `
+    await database.sql`
+      INSERT INTO "Deck" ("id")
+      VALUES
+        (${deck})
+    `
+    for (const [index, card] of cardIds.entries()) {
+      await database.sql`
+        INSERT INTO "Card" ("id")
+        VALUES
+          (${card})
+      `
+      await database.sql`
+        INSERT INTO "Printing" ("id")
+        VALUES
+          (${printingIds[index]})
+      `
+    }
+    const quantities = [0, 1, 2, 5, 10]
+    for (const [index, quantity] of quantities.entries()) {
+      await database.sql`
+        INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+        VALUES
+          (${deck}, ${cardIds[index]}, ${printingIds[index]}, ${quantity})
+      `
+    }
+    const query = <T>(field: string) => queryEntity<T>(database.sql, entities, 'Deck', {
+      fields: ['id', field],
+      where: { id: deck },
+    })
+    const ids = (rows: Record<string, { items: { id: string }[] }>[], field: string) => (
+      rows[0]?.[field]?.items.map(item => item.id)
+    )
+    expect(ids(await query('pagedCards'), 'pagedCards'))
+      .toEqual(ids(await query('cards{$limit:2,$offset:1}'), 'cards'))
+    expect(ids(await query('aliasedPagedCards'), 'aliasedPagedCards'))
+      .toEqual(ids(await query('cards{$limit:2,$offset:1}'), 'cards'))
+    const sorted = await query<{ sortedCards: { items: { name: string }[] } }>('sortedCards{$limit:null}')
+    expect(sorted[0]?.sortedCards.items.map(item => item.name)).toEqual([
+      'Zulu',
+      'Mike',
+      'Echo',
+      'Bravo',
+      'Alpha',
+    ])
+    const override = await query<{ pagedCards: { items: { id: string }[] } }>(
+      'pagedCards{$limit:3,$offset:0}',
+    )
+    expect(override[0]?.pagedCards.items.map(item => item.id))
+      .toEqual(cardIds.slice(0, 3))
+    const counts = await query<{ pagedCards: { $matched: number, $total: number } }>('pagedCards')
+    expect(counts[0]?.pagedCards).toMatchObject({ $matched: 5, $total: 5 })
+    const filtered = await query<{
+      filteredCards: { $matched: number, $total: number, items: { name: string }[] },
+    }>("filteredCards[name != 'Echo']")
+    expect(filtered[0]?.filteredCards.$matched).toBe(2)
+    expect(filtered[0]?.filteredCards.$total).toBe(3)
+    expect(filtered[0]?.filteredCards.items.map(item => item.name)).toEqual(['Mike', 'Bravo'])
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
