@@ -363,6 +363,79 @@ describe('EntityDefinitions', () => {
     for (const value of cases) expect(() => load(value)).toThrow()
   })
 
+  test('supports optional endpoint navigations and variable relationship arity', () => {
+    const entities = load({
+      entities: [
+        { fields: [], name: 'Deck' },
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [
+        {
+          between: [
+            { collection: 'memberships', field: 'deck', inverse: 'members', target: 'Deck' },
+            { collection: 'deckMemberships', field: 'user', inverse: 'decks', target: 'User' },
+          ],
+          fields: [{ field: 'role', type: 'String' }],
+          name: 'DeckMembership',
+        },
+        {
+          between: [
+            { collection: 'entries', field: 'deck', target: 'Deck' },
+            { field: 'card', target: 'Card' },
+            { field: 'printing', target: 'Printing' },
+          ],
+          fields: [{ field: 'quantity', type: 'Number' }],
+          name: 'DeckCardPrinting',
+        },
+      ],
+    })
+    const deck = entities.entity('Deck')
+    const user = entities.entity('User')
+    expect(deck?.collections).toContainEqual(expect.objectContaining({
+      kind: 'relationship-records',
+      name: 'memberships',
+      target: 'DeckMembership',
+    }))
+    expect(deck?.collections).toContainEqual(expect.objectContaining({
+      kind: 'relationship',
+      name: 'members',
+      target: 'User',
+    }))
+    expect(deck?.collections).toContainEqual(expect.objectContaining({
+      kind: 'relationship-records',
+      name: 'entries',
+      target: 'DeckCardPrinting',
+    }))
+    expect(user?.collections).toContainEqual(expect.objectContaining({
+      kind: 'relationship-records',
+      name: 'deckMemberships',
+      target: 'DeckMembership',
+    }))
+    expect(entities.relationship('DeckCardPrinting')?.between).toHaveLength(3)
+    expect(() => load({
+      entities: [{ fields: [], name: 'Deck' }, { fields: [], name: 'User' }],
+      relationships: [{
+        between: [{ field: 'deck', target: 'Deck' }],
+        fields: [],
+        name: 'DeckMembership',
+      }],
+    })).toThrow('at least two endpoints')
+    expect(() => load({
+      entities: [{ fields: [], name: 'Deck' }, { fields: [], name: 'User' }],
+      relationships: [{
+        between: [
+          { field: 'deck', inverse: 'members', target: 'Deck' },
+          { field: 'user', inverse: 'decks', target: 'User' },
+          { field: 'other', inverse: 'others', target: 'Deck' },
+        ],
+        fields: [],
+        name: 'DeckMembership',
+      }],
+    })).toThrow('inverse navigations require exactly two endpoints')
+  })
+
   test('rejects invalid relationship endpoints, names, fields and alias collisions', () => {
     const base = {
       entities: [

@@ -213,10 +213,12 @@ export type FieldDefinition =
 
 /** One endpoint of a named relationship. */
 export interface RelationshipEndpointDefinition {
+  /** Explicit relationship-record collection exposed on the target entity. */
+  readonly collection?: string,
   /** Local endpoint column name, in camelCase. */
   readonly field: string,
-  /** Derived navigation name exposed on the target entity. */
-  readonly inverse: string,
+  /** Optional derived navigation of related entities exposed on the target entity. */
+  readonly inverse?: string,
   /** Referenced entity or supported ancestor. */
   readonly target: string,
 }
@@ -230,8 +232,8 @@ export type RelationshipFieldDefinition =
 
 /** One named, first-class many-to-many relationship. */
 export interface RelationshipDefinition {
-  /** The two endpoint descriptors in authored order. */
-  readonly between: readonly [RelationshipEndpointDefinition, RelationshipEndpointDefinition],
+  /** The endpoint descriptors in authored order. */
+  readonly between: readonly RelationshipEndpointDefinition[],
   /** Declarative constraints owned by this relationship. */
   readonly constraints: readonly ConstraintDefinition[],
   /** Properties owned by the relationship itself. */
@@ -296,10 +298,25 @@ export interface RelationshipDerivedCollectionDefinition {
   readonly target: string,
 }
 
+/** An explicit collection of relationship records exposed on one endpoint target. */
+export interface RelationshipRecordCollectionDefinition {
+  /** Authored endpoint index that owns this navigation. */
+  readonly endpoint: number,
+  /** Derivation-kind discriminator. */
+  readonly kind: 'relationship-records',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The named relationship that owns this navigation. */
+  readonly relationship: RelationshipDefinition,
+  /** Relationship record type returned by the navigation. */
+  readonly target: string,
+}
+
 /** One collection navigation available in the query model. */
 export type DerivedCollectionDefinition =
   | InverseDerivedCollectionDefinition
   | RelationshipDerivedCollectionDefinition
+  | RelationshipRecordCollectionDefinition
 
 /** One effective physical field and its owning entity table. */
 export type EffectiveFieldDefinition =
@@ -1622,16 +1639,26 @@ function parseRelationship(
   }
   const name = value.name
   validatePhysicalIdentifier(name, 'relationship table')
-  if (!Array.isArray(value.between) || value.between.length !== 2) {
-    throw invalid(`relationship "${name}" between must contain exactly two endpoints`)
+  if (!Array.isArray(value.between) || value.between.length < 2) {
+    throw invalid(`relationship "${name}" between must contain at least two endpoints`)
   }
-  const first = parseRelationshipEndpoint(name, value.between[0], byName)
-  const second = parseRelationshipEndpoint(name, value.between[1], byName)
-  if (first.field === second.field) {
-    throw invalid(`relationship "${name}" endpoint fields must differ`)
-  }
-  if (first.inverse === second.inverse) {
-    throw invalid(`relationship "${name}" endpoint inverse names must differ`)
+  const endpoints = value.between.map(candidate => parseRelationshipEndpoint(name, candidate, byName))
+  const endpointFields = new Set<string>()
+  const inverseNames = new Set<string>()
+  for (const endpoint of endpoints) {
+    if (endpointFields.has(endpoint.field)) {
+      throw invalid(`relationship "${name}" endpoint fields must differ`)
+    }
+    endpointFields.add(endpoint.field)
+    if (endpoint.inverse !== undefined) {
+      if (endpoints.length !== 2) {
+        throw invalid(`relationship "${name}" inverse navigations require exactly two endpoints`)
+      }
+      if (inverseNames.has(endpoint.inverse)) {
+        throw invalid(`relationship "${name}" endpoint inverse names must differ`)
+      }
+      inverseNames.add(endpoint.inverse)
+    }
   }
   if (!Array.isArray(value.fields)) {
     throw invalid(`relationship "${name}" must define a fields array`)
@@ -1647,7 +1674,7 @@ function parseRelationship(
     return field
   })
   const columns = new Map<string, string>()
-  for (const endpoint of [first, second]) columns.set(endpoint.field, `${endpoint.field}.id`)
+  for (const endpoint of endpoints) columns.set(endpoint.field, `${endpoint.field}.id`)
   for (const field of fields) {
     columns.set(field.name, fieldColumn(field))
     columns.set(fieldColumn(field), fieldColumn(field))
@@ -1656,7 +1683,7 @@ function parseRelationship(
     ...fieldConstraints(name, fields),
     ...parseConstraints(name, value.constraints, columns),
   ]
-  return { between: [first, second], constraints, fields, name }
+  return { between: endpoints, constraints, fields, name }
 }
 
 /**
@@ -1674,12 +1701,21 @@ function parseRelationshipEndpoint(
   if (!isRecord(value)) {
     throw invalid(`relationship "${relationshipName}" endpoint must be an object`)
   }
-  assertKnownKeys(value, ['field', 'inverse', 'target'], 'relationship endpoint')
+  assertKnownKeys(value, ['collection', 'field', 'inverse', 'target'], 'relationship endpoint')
   if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
     throw invalid(`relationship "${relationshipName}" endpoint field must be a camelCase identifier`)
   }
-  if (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse)) {
+  if (
+    value.inverse !== undefined
+    && (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse))
+  ) {
     throw invalid(`relationship "${relationshipName}" endpoint inverse must be a camelCase identifier`)
+  }
+  if (
+    value.collection !== undefined
+    && (typeof value.collection !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.collection))
+  ) {
+    throw invalid(`relationship "${relationshipName}" endpoint collection must be a camelCase identifier`)
   }
   if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
     throw invalid(`relationship "${relationshipName}" endpoint target must be a PascalCase entity name`)
@@ -1693,7 +1729,12 @@ function parseRelationshipEndpoint(
   validatePhysicalIdentifier(`${value.field}.id`, `relationship "${relationshipName}" endpoint column`)
   validatePhysicalIdentifier(`${relationshipName}_${value.field}_fkey`, `relationship "${relationshipName}" constraint`)
   validatePhysicalIdentifier(`${relationshipName}_${value.field}_idx`, `relationship "${relationshipName}" index`)
-  return { field: value.field, inverse: value.inverse, target: value.target }
+  return {
+    ...(value.collection === undefined ? {} : { collection: value.collection as string }),
+    field: value.field,
+    ...(value.inverse === undefined ? {} : { inverse: value.inverse as string }),
+    target: value.target,
+  }
 }
 
 /**
@@ -1798,16 +1839,29 @@ function deriveNavigations(
   }
   for (const relationship of relationships) {
     const endpoints = relationship.between
-    for (const index of [0, 1] as const) {
-      const endpoint = endpoints[index]
-      const remote = endpoints[index === 0 ? 1 : 0]
-      addDirect(endpoint.target, {
-        endpoint: index,
-        kind: 'relationship',
-        name: endpoint.inverse,
-        relationship,
-        target: remote.target,
-      })
+    for (const [index, endpoint] of endpoints.entries()) {
+      if (endpoint.inverse !== undefined) {
+        const remote = endpoints[index === 0 ? 1 : 0]
+        if (remote === undefined) {
+          throw invalid(`relationship "${relationship.name}" inverse requires two endpoints`)
+        }
+        addDirect(endpoint.target, {
+          endpoint: index as 0 | 1,
+          kind: 'relationship',
+          name: endpoint.inverse,
+          relationship,
+          target: remote.target,
+        })
+      }
+      if (endpoint.collection !== undefined) {
+        addDirect(endpoint.target, {
+          endpoint: index,
+          kind: 'relationship-records',
+          name: endpoint.collection,
+          relationship,
+          target: relationship.name,
+        })
+      }
     }
   }
 
