@@ -15,6 +15,7 @@ export { waitFor } from '../react/testing/waitFor'
 export { describe, it, test } from './test'
 export { matchScreenshot } from './matchScreenshot'
 export type { ScreenshotSubject } from './matchScreenshot'
+export { toMatchIndented } from './matchers/toMatchIndented'
 export { comparePng } from './snapshots'
 export type { ScreenshotComparison, ScreenshotOptions } from './snapshots'
 

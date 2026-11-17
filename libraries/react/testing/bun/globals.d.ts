@@ -4,6 +4,7 @@ declare module 'bun:test' {
     toHaveClass(...classes: string[]): void,
     toHaveStyle(style: string | RegExp | Partial<CSSStyleDeclaration>): void,
     toHaveTextContent(text: string | RegExp): void,
+    toMatchIndented(expected: string): void,
     toRaise(mock: Mock<(...args: unknown[]) => void>, ...expected: unknown[]): void,
   }
 }

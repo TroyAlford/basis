@@ -69,6 +69,20 @@ const { find, instance, node } = await render(<Button>Save</Button>)
 
 `render`, `Simulate`, and `waitFor` are available from `basis/testing`.
 
+## Formatted indented text
+
+`toMatchIndented` compares two blocks after removing each block's common baseline indentation. It normalizes CRLF, ignores leading and trailing blank lines, trims trailing whitespace, and preserves relative indentation and internal spacing. It is a general text comparator, not a SQL parser. The `basis/testing/bun` preload registers it:
+
+```ts
+const rendered = ['SELECT id', 'FROM widgets'].join('\n')
+expect(rendered).toMatchIndented(`
+  SELECT id
+  FROM widgets
+`)
+```
+
+Use whole-string assertions with this matcher instead of checking fragments, so the expected block stays readable while the comparison remains exact.
+
 ## Visual snapshots
 
 ```tsx
