@@ -237,12 +237,12 @@ describe('Graph mutation authorization', () => {
     })
     if (!admin.userId) throw new Error('bootstrap did not create an administrator')
     administrator = admin.userId
-  }, 60_000)
+  })
 
   afterAll(async () => {
     await server.shutdown()
     removeService(install)
-  }, 60_000)
+  })
 
   test('selects READ-visible candidates and counts only writes passing READ plus the specific action', async () => {
     const authorization = server.auth
