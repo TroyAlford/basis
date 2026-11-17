@@ -115,7 +115,7 @@
     "graph:generate": "bun ./scripts/generate-graph.ts",
     "lint": "bun ./consumer/cli.ts lint",
     "lint:css": "bun ./node_modules/stylelint/bin/stylelint.mjs \"**/*.styles.ts\" --config ./stylelint.config.mjs --allow-empty-input",
-    "lint:es": "bun ./node_modules/eslint/bin/eslint.js .",
+    "lint:es": "mkdir -p .cache/eslint/style && bun ./node_modules/eslint/bin/eslint.js . --cache --cache-location .cache/eslint/style/.eslintcache",
     "lint:md": "bun ./libraries/markdown-plugin/bin.ts",
     "lint:ts": "bun ./consumer/cli.ts typecheck",
     "postinstall": "bun ./consumer/install.ts",
