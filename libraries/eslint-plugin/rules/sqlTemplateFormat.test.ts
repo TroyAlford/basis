@@ -178,6 +178,28 @@ describe('formatSQL', () => {
       `)
     })
 
+    test('formats a standalone DO block with comments', () => {
+      const once = formatSQL(`
+        do $$ begin
+          if exists (select 1 from widgets where active = true) then
+            -- disable
+            update widgets set active = false;
+          end if;
+        end $$
+      `)
+      expect(once).toMatchSql(`
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM widgets WHERE active = true) THEN
+            -- disable
+            UPDATE widgets SET active = false;
+          END IF;
+        END
+        $$
+      `)
+      expect(formatSQL(once)).toBe(once)
+    })
+
     test('formats DECLARE and EXCEPTION blocks', () => {
       expect(formatSQL(`
         create or replace function validate_widget() returns trigger as $$

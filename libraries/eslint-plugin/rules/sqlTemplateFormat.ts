@@ -25,16 +25,16 @@ interface Token {
 /** SQL and PL/pgSQL keywords normalized to uppercase outside literals. */
 const KEYWORDS = new Set([
   'add', 'all', 'alter', 'and', 'as', 'asc', 'begin', 'between', 'by', 'case',
-  'check', 'constraint', 'create', 'declare', 'default', 'deferrable', 'delete',
-  'desc', 'distinct', 'do', 'drop', 'else', 'elsif', 'end', 'exception',
+  'check', 'column', 'constraint', 'create', 'declare', 'default', 'deferrable',
+  'delete', 'desc', 'distinct', 'do', 'drop', 'else', 'elsif', 'end', 'exception',
   'execute', 'exists', 'for', 'foreign', 'from', 'function', 'gin', 'group',
   'having', 'if', 'in', 'index', 'initially', 'insert', 'into', 'is', 'join',
   'key', 'language', 'left', 'limit', 'loop', 'new', 'not', 'notice', 'null',
   'offset', 'old', 'on', 'or', 'order', 'outer', 'perform',
   'precision', 'primary', 'raise', 'recursive', 'references', 'replace', 'return',
-  'returning', 'returns', 'right', 'select', 'set', 'table', 'then', 'trigger',
-  'union', 'unique', 'update', 'using', 'values', 'view', 'when', 'where',
-  'while', 'with',
+  'rename', 'returning', 'returns', 'right', 'select', 'set', 'table', 'then',
+  'to', 'trigger', 'union', 'unique', 'update', 'using', 'values', 'view',
+  'when', 'where', 'while', 'with',
   'abs', 'array_length', 'array_position', 'array_remove', 'array_to_string',
   'avg', 'cast', 'coalesce', 'count', 'extract', 'jsonb_agg',
   'jsonb_build_object', 'length', 'lower', 'max', 'min', 'now', 'round',
@@ -249,16 +249,18 @@ export function formatSQL(sql: string, indent = ''): string {
  * @returns Wrapped lines.
  */
 function wrapLongLines(lines: readonly string[], width = 100): string[] {
-  return lines.flatMap(line => {
+  return lines.flatMap(line => line.split('\n')).flatMap(line => {
     if (line.length <= width || line.trimStart().startsWith('--')) return [line]
     const indent = line.match(/^\s*/u)?.[0] ?? ''
     const result: string[] = []
     let current = line
-    while (current.length > width) {
+    let guard = 0
+    while (current.length > width && guard < line.length) {
       const breakAt = safeBreak(current, width)
       if (breakAt <= indent.length) break
       result.push(current.slice(0, breakAt).trimEnd())
       current = `${indent}  ${current.slice(breakAt).trimStart()}`
+      guard += 1
     }
     result.push(current)
     return result
@@ -335,6 +337,7 @@ function formatStatement(tokens: readonly Token[], indent: string): string[] {
   if (startsWith(tokens, ['create', 'view'])) return formatCreateView(tokens, indent)
   if (startsWith(tokens, ['create', 'table'])) return formatCreateTable(tokens, indent)
   if (startsWith(tokens, ['create']) && dollarIndex !== -1) return formatFunction(tokens, dollarIndex, indent)
+  if (startsWith(tokens, ['do']) && dollarIndex !== -1) return formatDo(tokens, dollarIndex, indent)
   if (startsWith(tokens, ['with'])) return formatWith(tokens, indent)
   return formatQuery(tokens, indent)
 }
@@ -518,6 +521,21 @@ function formatFunction(tokens: readonly Token[], dollarIndex: number, indent: s
 }
 
 /**
+ * Format a standalone DO block with a dollar-quoted PL/pgSQL body.
+ * @param tokens - Statement tokens.
+ * @param dollarIndex - Index of the dollar-quoted body token.
+ * @param indent - Prefix for this block.
+ * @returns Formatted lines.
+ */
+function formatDo(tokens: readonly Token[], dollarIndex: number, indent: string): string[] {
+  const header = formatInline(tokens.slice(0, dollarIndex))
+  const dollar = tokens[dollarIndex] as Token
+  const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(dollar.text)?.[0] ?? '$$'
+  const body = dollar.text.slice(tag.length, dollar.text.length - tag.length)
+  return [`${indent}${header} ${tag}`, ...formatPlpgsql(tokenize(body), indent), `${indent}${tag}`]
+}
+
+/**
  * Format a PL/pgSQL body.
  * @param tokens - Body tokens.
  * @param indent - Prefix for the block.
@@ -580,6 +598,11 @@ function formatBlock(
   while (index < tokens.length) {
     const currentToken = tokens[index] as Token
     if (currentToken.kind === 'word' && stop.has(currentToken.upper)) break
+    if (currentToken.kind === 'line-comment' && currentToken.ownLine) {
+      lines.push(`${indent}${currentToken.text}`)
+      index += 1
+      continue
+    }
     if (currentToken.upper === 'if') {
       const result = formatIf(tokens, index, indent)
       lines.push(...result.lines)

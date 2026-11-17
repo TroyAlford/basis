@@ -454,7 +454,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     SELECT
       table_schema AS schema,
       table_name AS TABLE,
-      column_name AS column,
+      column_name AS COLUMN,
       is_nullable AS nullable,
       column_default AS DEFAULT,
       data_type AS type
