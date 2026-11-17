@@ -1788,6 +1788,108 @@ describe('Server database lifecycle', () => {
     expect(entities.ddl.join('\n')).not.toContain('create table "memberships"')
   })
 
+  isolatedTest('supports three-way relationship-record collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Deck' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Card' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { collection: 'entries', field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    await database.use(entities)
+    const deckA = '00000000-0000-4000-8000-000000000c01'
+    const deckB = '00000000-0000-4000-8000-000000000c02'
+    const cardA = '00000000-0000-4000-8000-000000000c11'
+    const cardB = '00000000-0000-4000-8000-000000000c12'
+    const printingA = '00000000-0000-4000-8000-000000000c21'
+    const printingB = '00000000-0000-4000-8000-000000000c22'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${deckA}, 'Deck A', 'Deck'),
+        (${deckB}, 'Deck B', 'Deck'),
+        (${cardA}, 'Card A', 'Card'),
+        (${cardB}, 'Card B', 'Card'),
+        (${printingA}, 'Printing A', 'Printing'),
+        (${printingB}, 'Printing B', 'Printing')
+    `
+    await database.sql`
+      INSERT INTO "Deck" ("id")
+      VALUES
+        (${deckA}),
+        (${deckB})
+    `
+    await database.sql`
+      INSERT INTO "Card" ("id")
+      VALUES
+        (${cardA}),
+        (${cardB})
+    `
+    await database.sql`
+      INSERT INTO "Printing" ("id")
+      VALUES
+        (${printingA}),
+        (${printingB})
+    `
+    await database.sql`
+      INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+      VALUES
+        (${deckA}, ${cardA}, ${printingA}, 1),
+        (${deckA}, ${cardB}, ${printingB}, 3)
+    `
+    const records = await queryEntity<{
+      entries: { $matched: number, $total: number, items: Record<string, unknown>[] },
+      id: string,
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'entries', 'entries.card', 'entries.printing'],
+      orderBy: 'id',
+    })
+    expect(records[0]?.entries.$matched).toBe(2)
+    expect(records[0]?.entries.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        card: expect.objectContaining({ id: cardA }),
+        printing: expect.objectContaining({ id: printingA }),
+        quantity: 1,
+      }),
+      expect.objectContaining({
+        card: expect.objectContaining({ id: cardB }),
+        printing: expect.objectContaining({ id: printingB }),
+        quantity: 3,
+      }),
+    ]))
+    expect(records[1]?.entries).toEqual({ $matched: 0, $total: 0, items: [] })
+    const filtered = await queryEntity<{
+      entries: { $matched: number, $total: number, items: Record<string, unknown>[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'entries[quantity > 1]', 'entries.printing'],
+      where: { id: deckA },
+    })
+    expect(filtered[0]?.entries.$matched).toBe(1)
+    expect(filtered[0]?.entries.items).toEqual([
+      expect.objectContaining({
+        printing: expect.objectContaining({ id: printingB }),
+        quantity: 3,
+      }),
+    ])
+    expect(entities.ddl.join('\n')).toContain('primary key ("deck.id", "card.id", "printing.id")')
+    expect(await database.captureError(async db => {
+      await db.sql`
+        INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity")
+        VALUES
+          (${deckA}, ${cardA}, ${printingA}, 1)
+      `
+    })).toMatchObject({ errno: '23505' })
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
