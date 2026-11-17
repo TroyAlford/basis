@@ -5,7 +5,7 @@ import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
-import type { ArrayScope, CollectionScope, CountScope, OrderBy, QueryScope } from './SQL'
+import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope } from './SQL'
 import { SQL } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
@@ -277,6 +277,8 @@ class QueryProjection {
   #alias = 0
   /** Filter-only expression overrides keyed by logical path. */
   readonly #filterExpressions = new Map<string, string>()
+  /** Predicate-only renderers that bind filtered collection count values. */
+  readonly #filterRenders = new Map<string, (bind: (value: BoundScalar) => string) => string>()
   /** Filter-only resolved fields keyed by logical path. */
   readonly #filterFields = new Map<string, QueryFieldDefinition>()
   /** Reusable collection relation plans keyed by logical collection path. */
@@ -405,9 +407,15 @@ class QueryProjection {
   /**
    * Render one root effective scalar field for predicates and ordering.
    * @param field - Effective scalar field.
+   * @param bind - Optional predicate value binder for filtered counts.
    * @returns Physical SQL expression.
    */
-  expression(field: QueryFieldDefinition): string {
+  expression(field: QueryFieldDefinition, bind?: (value: BoundScalar) => string): string {
+    const render = this.#filterRenders.get(field.name)
+    if (render) {
+      if (!bind) throw new Error(`Collection $matched field "${field.name}" is only valid in a predicate`)
+      return render(bind)
+    }
     const count = this.#countFields.get(field.name)
     if (count) return count.expression
     const filtered = this.#filterExpressions.get(field.name)
@@ -434,17 +442,42 @@ class QueryProjection {
     contextKey = '',
     depth = 0,
     scope: FilterJoinScope = this.#outerFilterScope(),
-  ): { count?: CountScope, expression: string, field: QueryFieldDefinition, identity: boolean } {
+  ): {
+    count?: CountScope,
+    expression: string,
+    field: QueryFieldDefinition,
+    identity: boolean,
+    render?: (bind: (value: BoundScalar) => string) => string,
+  } {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
     const rest = segments.slice(1)
-    if (rest.length === 1 && rest[0] === '$total') {
-      const collection = context.collections.get(segment)
+    if (rest.length === 1 && (rest[0] === '$total' || rest[0] === '$matched')) {
+      const directives = parseCollectionDirectives(segment)
+      if (directives.limit !== undefined
+        || directives.offset !== undefined
+        || directives.orderBy !== undefined) {
+        throw new Error(
+          `Collection ${rest[0]} does not accept limit, offset, or orderBy directives`,
+        )
+      }
+      const key = fullName.slice(0, -(rest[0].length + 1))
+      const collection = context.collections.get(directives.name)
       if (collection) {
-        const key = fullName.slice(0, -7)
         const plan = this.#collectionPlan(collection, context.baseAlias, key)
         this.#consume(plan.work)
-        const count = this.#collectionCountExpression(plan, `${fullName}\u0000${context.baseAlias}`)
+        if (rest[0] === '$matched' && directives.filter !== undefined) {
+          return {
+            expression: '',
+            field: { name: fullName, type: FieldType.Number },
+            identity: false,
+            render: this.#collectionMatchedRenderer(plan, collection, directives.filter),
+          }
+        }
+        const count = this.#collectionCountExpression(
+          plan,
+          `${fullName}\u0000${context.baseAlias}`,
+        )
         return {
           count,
           expression: '',
@@ -452,7 +485,10 @@ class QueryProjection {
           identity: false,
         }
       }
-      const countField = context.effective.get(segment)
+      if (directives.filter !== undefined) {
+        throw new Error(`Collection filter "${fullName}" requires a collection navigation`)
+      }
+      const countField = context.effective.get(directives.name)
       if (countField?.type === FieldType.Array) {
         const expression = this.#arrayCountExpression(context, countField, scope)
         const count = {
@@ -681,6 +717,89 @@ class QueryProjection {
     }
     this.#collectionPlans.set(planKey, plan)
     return plan
+  }
+
+  /**
+   * Correlate one child query to a collection relation plan.
+   * @param plan - Collection relation plan.
+   * @param alias - Child target alias.
+   * @returns Correlated existence condition.
+   */
+  #collectionCorrelation(plan: CollectionRelationPlan, alias: string): string {
+    return (
+      `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+      `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(alias)}.${quote('id')})`
+    )
+  }
+
+  /**
+   * Build flattened relationship metadata for one collection child query.
+   * @param plan - Collection relation plan.
+   * @param collection - Collection navigation.
+   * @param target - Child target entity.
+   * @returns Relationship metadata, or undefined for inverse collections.
+   */
+  #relationshipOptions(
+    plan: CollectionRelationPlan,
+    collection: DerivedCollectionDefinition,
+    target: EntityDefinition,
+  ): NonNullable<PolymorphicQueryOptions['relationship']> | undefined {
+    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
+    const relationshipAlias = plan.relationshipAlias
+    if (relationship === undefined || relationshipAlias === undefined) return undefined
+    const endpoint = collection.kind === 'relationship' ? collection.endpoint : 0
+    return {
+      expression: (field: string, targetAlias: string): string => {
+        const prefix = `${lowerFirst(relationship.name)}.`
+        const property = field.startsWith(prefix) ? field.slice(prefix.length) : field
+        const remote = relationship.between[endpoint === 0 ? 1 : 0]
+        return `(SELECT ${quote(relationshipAlias)}.${quote(property)} FROM ${plan.relation} ` +
+          `WHERE ${plan.condition} AND ${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
+          `${quote(targetAlias)}.${quote('id')})`
+      },
+      fields: new Map(relationship.fields
+        .filter(field => field.type !== FieldType.Array && field.type !== FieldType.JSON)
+        .map(field => [field.name, field])),
+      name: relationship.name,
+      targetFields: new Set(target.effectiveFields.map(field => field.name)),
+    }
+  }
+
+  /**
+   * Render the authorized count of collection members matching one filter.
+   * @param plan - Collection relation plan.
+   * @param collection - Collection navigation.
+   * @param filter - Collection member predicate.
+   * @returns Renderer that binds filter values into the outer predicate.
+   */
+  #collectionMatchedRenderer(
+    plan: CollectionRelationPlan,
+    collection: DerivedCollectionDefinition,
+    filter: string,
+  ): (bind: (value: BoundScalar) => string) => string {
+    const target = collection.target === 'Entity'
+      ? identityDefinition()
+      : this.#entities.entity(collection.target)
+    if (!target) throw new Error(`Unknown target entity "${collection.target}"`)
+    const childAlias = this.#nextAlias('cm')
+    const relationshipOptions = this.#relationshipOptions(plan, collection, target)
+    const child = compilePolymorphicQuery(this.#entities, target, {
+      aliasPrefix: `${childAlias}_`,
+      fields: ['id'],
+      limit: null,
+      offset: 0,
+      rawWhere: this.#collectionCorrelation(plan, childAlias),
+      ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
+      rootAlias: childAlias,
+      where: filter,
+    })
+    const values = child.values as readonly BoundScalar[]
+    return bind => {
+      const sql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+        bind(values[Number(value) - 1] as BoundScalar)
+      ))
+      return `(SELECT count(*) FROM (${sql}) AS "__matched")`
+    }
   }
 
   /**
@@ -955,12 +1074,13 @@ class QueryProjection {
   filterField(name: string): QueryFieldDefinition {
     const cached = this.#filterFields.get(name)
     if (cached) return cached
-    const segments = name.split('.')
+    const segments = splitFieldPath(name)
     if (segments.some(segment => segment.length === 0)) {
       throw new Error(`Invalid filter path "${name}"`)
     }
     const resolved = this.#resolveFilterPath(this.root, segments, name, '', 0)
-    if (resolved.count) this.#countFields.set(name, resolved.count)
+    if (resolved.render) this.#filterRenders.set(name, resolved.render)
+    else if (resolved.count) this.#countFields.set(name, resolved.count)
     else this.#filterExpressions.set(name, resolved.expression)
     this.#filterFields.set(name, resolved.field)
     if (resolved.identity) this.#filterIdentities.add(name)
@@ -1400,31 +1520,7 @@ class QueryProjection {
     const filter = spec.filters.size === 0
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
-    const relationship = spec.collection.kind === 'relationship' ? spec.collection.relationship : undefined
-    const endpoint = spec.collection.kind === 'relationship' ? spec.collection.endpoint : 0
-    const relationshipAlias = plan.relationshipAlias
-    let relationshipOptions: NonNullable<PolymorphicQueryOptions['relationship']> | undefined
-    if (relationship !== undefined && relationshipAlias !== undefined) {
-      relationshipOptions = {
-        expression: (field: string, targetAlias: string): string => {
-          const prefix = `${lowerFirst(relationship.name)}.`
-          const property = field.startsWith(prefix) ? field.slice(prefix.length) : field
-          const remote = relationship.between[endpoint === 0 ? 1 : 0]
-          return `(SELECT ${quote(relationshipAlias)}.${quote(property)} FROM ${plan.relation} ` +
-            `WHERE ${plan.condition} AND ${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
-            `${quote(targetAlias)}.${quote('id')})`
-        },
-        fields: new Map(relationship.fields
-          .filter(field => field.type !== FieldType.Array && field.type !== FieldType.JSON)
-          .map(field => [field.name, field])),
-        name: relationship.name,
-        targetFields: new Set(target.effectiveFields.map(field => field.name)),
-      }
-    }
-    const correlation = (alias: string): string => (
-      `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
-      `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(alias)}.${quote('id')})`
-    )
+    const relationshipOptions = this.#relationshipOptions(plan, spec.collection, target)
     const childAlias = this.#nextAlias('c')
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
@@ -1438,7 +1534,7 @@ class QueryProjection {
       limit: null,
       offset: 0,
       orderBy: orderings.map(order => (order.direction === 'DESC' ? `-${order.name}` : order.name)),
-      rawWhere: correlation(childAlias),
+      rawWhere: this.#collectionCorrelation(plan, childAlias),
       ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
       rootAlias: childAlias,
       ...(filter === undefined ? {} : { where: filter }),
@@ -1457,7 +1553,7 @@ class QueryProjection {
         fields: ['id'],
         limit: null,
         offset: 0,
-        rawWhere: correlation(availableAlias),
+        rawWhere: this.#collectionCorrelation(plan, availableAlias),
         rootAlias: availableAlias,
       })
       const totalBase = this.#valueStart + this.values.length
@@ -1793,7 +1889,7 @@ export function compilePolymorphicQuery(
     array: name => projection.arrayScope(name),
     collection: name => projection.collectionScope(name),
     definition: synthetic,
-    expression: value => projection.expression(value),
+    expression: (value, bind) => projection.expression(value, bind),
     field,
     filterCount: name => projection.filterCount(name),
     filterField: name => projection.filterField(name),
@@ -1823,12 +1919,12 @@ export function compilePolymorphicQuery(
   }
   const scope: QueryScope = relationship === undefined ? baseScope : {
     ...baseScope,
-    expression: value => {
+    expression: (value, bind) => {
       if (value.name.startsWith(relationshipPrefix)
         || (relationship.fields.has(value.name) && !relationship.targetFields.has(value.name))) {
         return relationship.expression(value.name, projection.root.baseAlias)
       }
-      return baseScope.expression(value)
+      return baseScope.expression(value, bind)
     },
     filterField: name => resolveRelationship(name) ?? baseScope.filterField?.(name) ?? baseScope.field(name),
   }

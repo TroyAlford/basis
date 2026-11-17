@@ -503,7 +503,7 @@ The gate covers:
 
 `QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization and RLS are deliberately outside this gate; collection `$total` and relational-planning validation are covered by stage 20a, and security deployment by 20b–20e.
 
-## Stage 20a — collection totals and relational planning (implemented)
+## Stage 20a — collection totals, matched counts, and relational planning (implemented)
 
 Inverse, named-relationship, and native-array collections expose a read-only `$total` intrinsic:
 
@@ -514,7 +514,7 @@ const countPredicates = [
 ]
 ```
 
-- `$total` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references. A projected collection envelope exposes both `$total` (the authorized population before its filter) and `$matched` (the authorized count after the filter and before paging); `$matched` is envelope metadata, not a predicate/projection field yet.
+- `$total` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references. A projected collection envelope exposes both `$total` (the authorized population before its filter) and `$matched` (the authorized count after the filter and before paging). `$matched` is also valid in predicates on a filter-qualified collection path (`members[role = 'GM'].$matched >= 2`); there, `$total` continues to count the whole authorized population and ignores the member filter. Pagination directives are not valid on count predicates.
 - Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
 - Relationship `collection.$total = 0` canonicalizes to `NOT EXISTS` and `collection.$total > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
 - Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.

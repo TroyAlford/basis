@@ -105,7 +105,7 @@ export interface QueryScope {
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
-  readonly expression: (field: QueryFieldDefinition) => string,
+  readonly expression: (field: QueryFieldDefinition, bind?: (value: BoundScalar) => string) => string,
   /** Resolve a root ordering field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
   /** Optional count expression metadata for canonical zero/existence forms. */
@@ -140,7 +140,7 @@ function select(
 }
 
 /** A validated scalar value bound into a query. */
-type BoundScalar = string | number | boolean | bigint | Date
+export type BoundScalar = string | number | boolean | bigint | Date
 
 /** The verified actor identity expression; `NULL` for anonymous requests. */
 const ACTOR_SQL = 'nullif(current_setting(\'actor.id\', true), \'\')'
@@ -410,7 +410,7 @@ function whereClause(
         )
       }
       const operand = comparison.validateOperand(field, comparisonFilter.operator, comparisonFilter.value)
-      const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field)
+      const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field, bind)
       if (isFieldOperand(operand)) {
         if (ACTOR_FIELD_NAME === operand.$field) {
           throw new Error('Query field references cannot target the actor sentinel')
@@ -423,7 +423,7 @@ function whereClause(
         }
         const referenceSql = reference.name === ACTOR_FIELD_NAME
           ? ACTOR_SQL
-          : active.expression(reference)
+          : active.expression(reference, bind)
         return comparison.build(field, column, operand, () => referenceSql)
       }
       return comparison.build(field, column, operand, bind)

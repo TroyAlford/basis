@@ -1405,6 +1405,7 @@ describe('Server database lifecycle', () => {
           fields: [
             { field: 'id', format: 'UUID' },
             { field: 'active', type: 'Boolean' },
+            { field: 'partner', target: 'User', type: 'Entity' },
           ],
           name: 'User',
         },
@@ -1436,6 +1437,7 @@ describe('Server database lifecycle', () => {
     )
     const campaign = '00000000-0000-4000-8000-000000000901'
     const tiedCampaign = '00000000-0000-4000-8000-000000000902'
+    const emptyCampaign = '00000000-0000-4000-8000-000000000903'
     const members = Array.from({ length: 30 }, (_, index) => ({
       active: index < 12,
       id: idFor(index),
@@ -1447,7 +1449,11 @@ describe('Server database lifecycle', () => {
       name: 'Tie',
       role: 'Player',
     }))
-    for (const [id, name] of [[campaign, 'Contract Campaign'], [tiedCampaign, 'Tied Campaign']] as const) {
+    for (const [id, name] of [
+      [campaign, 'Contract Campaign'],
+      [tiedCampaign, 'Tied Campaign'],
+      [emptyCampaign, 'Empty Campaign'],
+    ] as const) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
         VALUES (${id}, ${name}, 'Campaign')
@@ -1485,6 +1491,17 @@ describe('Server database lifecycle', () => {
         VALUES (${member.id}, ${tiedCampaign}, ${member.role})
       `
     }
+
+    await database.sql`
+      UPDATE "User"
+      SET "partner.id" = ${members[1]?.id}
+      WHERE "id" = ${members[0]?.id}
+    `
+    await database.sql`
+      UPDATE "User"
+      SET "partner.id" = ${members[20]?.id}
+      WHERE "id" = ${members[2]?.id}
+    `
 
     interface Member { id: string, name: string, role: string }
     interface Envelope { $matched: number, $total: number, items: Member[] }
@@ -1537,6 +1554,35 @@ describe('Server database lifecycle', () => {
       'M06',
       'M07',
       'M08',
+    ])
+
+    const roots = (where: string, fields: string[] = ['id']) => queryEntity<{ id: string }>(
+      database.sql,
+      entities,
+      'Campaign',
+      { fields, orderBy: 'id', where },
+    )
+    expect(await roots('members.$total >= 30')).toEqual([{ id: campaign }])
+    expect(await roots('members.$total = 0')).toEqual([{ id: emptyCampaign }])
+    expect(await roots("members[role = 'GM'].$matched = 12")).toEqual([{ id: campaign }])
+    expect(await roots("members[role = 'GM'].$total = 30")).toEqual([{ id: campaign }])
+    expect(await roots("members[role = 'GM'].$matched = 0")).toEqual([
+      { id: tiedCampaign },
+      { id: emptyCampaign },
+    ])
+    expect(await roots("members[role = 'GM'].$total = 0")).toEqual([{ id: emptyCampaign }])
+    expect((await roots('members.$matched = members.$total', [
+      'id',
+      'members{$limit:1}',
+      'members.name',
+    ])).map(row => row.id)).toEqual([campaign, tiedCampaign, emptyCampaign])
+    expect((await roots('members.$matched = members.$total')).map(row => row.id))
+      .toEqual([campaign, tiedCampaign, emptyCampaign])
+    expect(await roots('members[partner.active = true].$matched = 1'))
+      .toEqual([{ id: campaign }])
+    expect(await roots('members[partner.active = true].$matched = 0')).toEqual([
+      { id: tiedCampaign },
+      { id: emptyCampaign },
     ])
   })
 

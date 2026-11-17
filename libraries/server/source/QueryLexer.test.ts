@@ -205,6 +205,32 @@ describe('QueryLexer', () => {
       field('pets.$total'),
       field('scores.$total'),
     ])
+    assertLex(
+      "pets[age > 1].$matched pets.$matched members[role = 'GM'].$total",
+      [
+        field('pets[age > 1].$matched'),
+        field('pets.$matched'),
+        field("members[role = 'GM'].$total"),
+      ],
+    )
+  })
+
+  test('does not absorb array operands into collection count fields', () => {
+    assertLex('tags=[1, 2]', [
+      field('tags'),
+      operator('=', Operator.Comparison.Equal),
+      leftBracket(),
+      number('1'),
+      comma(),
+      number('2'),
+      rightBracket(),
+    ])
+  })
+
+  test('reports unterminated collection filters', () => {
+    assertLex('pets[age > 1.$matched', [field('pets[age > 1.$matched')], [
+      { message: 'Unterminated collection filter', raw: '[age > 1.$matched', start: 4 },
+    ])
   })
 
   test('recognizes array equality, overlaps, and JSON punctuation', () => {

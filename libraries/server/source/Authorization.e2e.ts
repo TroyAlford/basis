@@ -1159,6 +1159,19 @@ describe('Authorization RLS', () => {
         'Match 08',
       ])
 
+      const counts = (actorId: string | null, where: string) => asActor(actorId, () => (
+        server.db.query<{ id: string }>('Workspace', { fields: ['id'], where })
+      ))
+      expect(await counts(
+        actor,
+        "items.$total = 20 $and items[title ~= 'Match'].$matched = 12",
+      )).toEqual([{ id: workspace }])
+      expect(await counts(actor, 'items.$total = 30')).toEqual([])
+      expect(await counts(
+        bootstrap.userId,
+        "items.$total = 30 $and items[title ~= 'Match'].$matched = 22",
+      )).toEqual([{ id: workspace }])
+
       const administrator = await query(bootstrap.userId, ['id', 'items{$limit:null}', 'items.title'])
       expect(administrator[0]?.items.$matched).toBe(30)
       expect(administrator[0]?.items.$total).toBe(30)

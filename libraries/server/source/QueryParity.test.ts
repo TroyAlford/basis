@@ -286,6 +286,44 @@ describe('Query parity gate', () => {
     expect(() => source('Note', 'tags.$total.foo > 0')).toThrow('traverses non-reference field')
   })
 
+  test('supports filtered matched counts in predicates', () => {
+    const normalize = (query: ReturnType<typeof source>) => ({
+      sql: query.sql.replace(/\bcm\d+\b/gu, 'cm'),
+      values: query.values,
+    })
+    const sourceQuery = source('User', 'pets[age > 1].$matched >= 2')
+    const structuredQuery = structured('User', {
+      field: 'pets[age > 1].$matched',
+      operator: Operator.Comparison.GreaterThanOrEqual,
+      value: 2,
+    })
+    expect(normalize(sourceQuery)).toEqual(normalize(structuredQuery))
+    expect(sourceQuery.sql).toContain('__matched')
+    expect(sourceQuery.values).toEqual([1, 2, 25, 0])
+    expect(normalize(source('User', 'pets[age > 1].$total >= 2'))).toEqual(
+      normalize(structured('User', {
+        field: 'pets[age > 1].$total',
+        operator: Operator.Comparison.GreaterThanOrEqual,
+        value: 2,
+      })),
+    )
+    expect(normalize(source('User', 'pets.$matched >= 2')).sql)
+      .toBe(normalize(source('User', 'pets.$total >= 2')).sql)
+    expect(source('User', 'pets[owner.id = $me].$matched >= 2').sql).toContain('actor.id')
+    expect(source('User', "pets[owner.name = 'Ada'].$matched >= 2").sql).toContain('owner')
+    expect(() => source('Note', 'title.$matched > 0'))
+      .toThrow('requires a collection or native array field')
+    expect(() => structured('User', {
+      field: 'pets{$limit:2}.$matched',
+      operator: Operator.Comparison.GreaterThan,
+      value: 0,
+    })).toThrow('does not accept limit, offset, or orderBy directives')
+    expect(() => source('User', 'pets{$limit:2}.$matched > 0'))
+      .toThrow('does not accept limit, offset, or orderBy directives')
+    expect(() => source('User', 'pets{$offset:1}.$total > 0'))
+      .toThrow('does not accept limit, offset, or orderBy directives')
+  })
+
   test('rejects collection member lists without requirements in both forms', () => {
     expect(() => source('User', 'pets $contains []')).toThrow('at least one requirement')
     expect(() => structured('User', {

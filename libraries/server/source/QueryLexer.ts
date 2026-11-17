@@ -449,11 +449,29 @@ function fieldToken(source: string, start: number, diagnostics: QueryDiagnostic[
   while (end < source.length && IDENTIFIER_PART.test(source[end] as string)) end += 1
 
   let dotted = false
-  while (source[end] === '.') {
-    if (source.startsWith('$total', end + 1)
-      && !IDENTIFIER_PART.test(source[end + 7] ?? '')) {
+  let filtered = false
+  while (end < source.length) {
+    if (source[end] === '[' || source[end] === '{') {
+      const next = source[end] === '['
+        ? collectionFilterEnd(source, end, diagnostics)
+        : collectionOptionEnd(source, end, diagnostics)
+      if (next === -1) {
+        end = source.length
+        break
+      }
+      if (!countSuffix(source, next)) break
+      filtered = true
+      end = next
+      continue
+    }
+    if (source[end] !== '.') break
+    const special = ['$total', '$matched'].find(candidate => (
+      source.startsWith(candidate, end + 1)
+      && !IDENTIFIER_PART.test(source[end + 1 + candidate.length] ?? '')
+    ))
+    if (special !== undefined) {
       dotted = true
-      end += 7
+      end += special.length + 1
       continue
     }
     if (!IDENTIFIER_START.test(source[end + 1] ?? '')) {
@@ -470,7 +488,7 @@ function fieldToken(source: string, start: number, diagnostics: QueryDiagnostic[
   }
 
   const raw = source.slice(start, end)
-  if (!dotted) {
+  if (!dotted && !filtered) {
     if (raw === 'true' || raw === 'false') {
       return { end, raw, start, type: TokenType.Boolean, value: raw === 'true' }
     }
@@ -478,4 +496,92 @@ function fieldToken(source: string, start: number, diagnostics: QueryDiagnostic[
   }
 
   return { end, raw, start, type: TokenType.Field, value: raw }
+}
+
+/**
+ * Whether a directive group is followed by a matched/total count suffix.
+ * @param source - Query source.
+ * @param start - Offset immediately after the directive group.
+ * @returns True for `.$matched` or `.$total`.
+ */
+function countSuffix(source: string, start: number): boolean {
+  if (source[start] !== '.') return false
+  return ['$total', '$matched'].some(candidate => (
+    source.startsWith(candidate, start + 1)
+    && !IDENTIFIER_PART.test(source[start + 1 + candidate.length] ?? '')
+  ))
+}
+
+/**
+ * Read one balanced collection filter group.
+ * @param source - Query source.
+ * @param start - Opening bracket offset.
+ * @param diagnostics - Diagnostic sink.
+ * @returns Exclusive group end, or -1 when unbalanced.
+ */
+function collectionFilterEnd(
+  source: string,
+  start: number,
+  diagnostics: QueryDiagnostic[],
+): number {
+  return balancedGroupEnd(source, start, '[', ']', diagnostics, 'Unterminated collection filter')
+}
+
+/**
+ * Read one balanced collection options group.
+ * @param source - Query source.
+ * @param start - Opening brace offset.
+ * @param diagnostics - Diagnostic sink.
+ * @returns Exclusive group end, or -1 when unbalanced.
+ */
+function collectionOptionEnd(
+  source: string,
+  start: number,
+  diagnostics: QueryDiagnostic[],
+): number {
+  return balancedGroupEnd(source, start, '{', '}', diagnostics, 'Unterminated collection options')
+}
+
+/**
+ * Read one balanced directive group.
+ * @param source - Query source.
+ * @param start - Opening delimiter offset.
+ * @param open - Opening delimiter.
+ * @param close - Closing delimiter.
+ * @param diagnostics - Diagnostic sink.
+ * @param message - Unterminated diagnostic message.
+ * @returns Exclusive group end, or -1 when unbalanced.
+ */
+function balancedGroupEnd(
+  source: string,
+  start: number,
+  open: string,
+  close: string,
+  diagnostics: QueryDiagnostic[],
+  message: string,
+): number {
+  let depth = 1
+  let quote: string | null = null
+  let index = start + 1
+  while (index < source.length) {
+    const character = source[index] as string
+    if (quote !== null) {
+      if (character === '\\') index += 1
+      else if (character === quote) quote = null
+    } else if (character === '"' || character === "'" || character === '`') {
+      quote = character
+    } else if (character === open) {
+      depth += 1
+    } else if (character === close) {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+    index += 1
+  }
+  diagnostics.push({
+    end: source.length,
+    message,
+    start,
+  })
+  return -1
 }
