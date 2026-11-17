@@ -51,3 +51,34 @@ test('custom Graph fixtures install app-role RLS and select an actor', async () 
     await database.create('Resource', { name: 'Viewer resource', workspace })
   }, options)).rejects.toThrow(/row-level security|authorization/i)
 })
+
+test('asOwner swaps role and exposes the same fixture context', async () => {
+  await withDatabase('custom-graph-owner-api', owner, async database => {
+    const appRole = await database.sql<{ role: string }[]>`
+      SELECT current_role AS role
+    `
+    expect(appRole[0]?.role).toBe('basis_app')
+    const schema = database.schema
+
+    await database.asOwner(async ownerDatabase => {
+      expect(ownerDatabase.schema).toBe(schema)
+      const ownerRole = await ownerDatabase.sql<{ role: string }[]>`SELECT current_role AS role`
+      expect(ownerRole[0]?.role).not.toBe('basis_app')
+
+      await ownerDatabase.sql`CREATE TABLE "OwnerApiProof" ("id" uuid PRIMARY KEY)`
+      await ownerDatabase.tx(async () => {
+        await ownerDatabase.sql`INSERT INTO "OwnerApiProof" ("id") VALUES (gen_random_uuid())`
+      })
+      const [rolledBack] = await ownerDatabase.sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM "OwnerApiProof"
+      `
+      expect(rolledBack?.count).toBe(0)
+      await ownerDatabase.sql`DROP TABLE "OwnerApiProof"`
+    })
+
+    const restored = await database.sql<{ role: string }[]>`
+      SELECT current_role AS role
+    `
+    expect(restored[0]?.role).toBe('basis_app')
+  }, options)
+})
