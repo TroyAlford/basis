@@ -1,7 +1,7 @@
 import { generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from 'basis/codegen'
 import * as serverSurface from 'basis/server'
-import { Graph } from 'basis/server'
-import { tempDirectory, withIsolatedDatabase } from 'basis/testing'
+import { Action, Graph, Security } from 'basis/server'
+import { tempDirectory, withDatabase } from 'basis/testing'
 import { checksum } from 'basis/utilities'
 import { generateErd } from 'basis/visualization'
 import { expect, test } from 'bun:test'
@@ -12,9 +12,9 @@ const graph = new Graph({
   entities: [{
     fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],
     name: 'ConsumerNote',
+    security: { [Action.Read]: Security.Public },
   }],
 })
-const entities = graph.definitions
 
 test('consumer fixture extends the system User ontology', () => {
   const application = new Graph({
@@ -51,17 +51,21 @@ test('consumer codegen emitters resolve and write independent outputs', async ()
 })
 
 test('consumer fixture uses provided entities', async () => {
-  await withIsolatedDatabase('consumer-fixture', async database => {
-    const id = '00000000-0000-4000-8000-000000000001'
-    await database.sql`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${id}, 'Consumer', 'ConsumerNote')
-    `
-    await database.sql`
-      INSERT INTO "ConsumerNote" ("id", "label")
-      VALUES (${id}, 'isolated')
-    `
+  const id = '00000000-0000-4000-8000-000000000001'
+  await withDatabase('consumer-fixture', null, async database => {
     expect(await database.query('ConsumerNote', { fields: ['id', 'label'] }))
       .toEqual([{ id, label: 'isolated' }])
-  }, { entities })
+  }, {
+    graph,
+    setup: async database => {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, 'Consumer', 'ConsumerNote')
+      `
+      await database.sql`
+        INSERT INTO "ConsumerNote" ("id", "label")
+        VALUES (${id}, 'isolated')
+      `
+    },
+  })
 })

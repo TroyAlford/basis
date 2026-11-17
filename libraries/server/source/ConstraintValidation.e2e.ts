@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { fixtureRows, withCommittedDatabase, withDatabase } from '../testing/DatabaseFixture'
+import { fixtureRows, withDatabase } from '../testing/DatabaseFixture'
 import type { DatabaseTransaction } from './Database'
 import { MutationError } from './Mutation'
 import { Operator } from './Operator'
@@ -185,7 +185,7 @@ describe('Graph validation constraints', () => {
   })
 
   test('restores Graph write tracking when a savepoint rolls back', async () => {
-    await expect(withCommittedDatabase('validation-savepoint-invalid', null, async database => {
+    await expect(withDatabase('validation-savepoint-invalid', null, async database => {
       const savepoint = database.sql.savepoint as unknown as <T>(
         work: (sql: DatabaseTransaction) => T | Promise<T>,
       ) => Promise<T>
@@ -196,8 +196,7 @@ describe('Graph validation constraints', () => {
       }).catch(() => undefined)
     })).rejects.toThrow('documentFlag')
 
-    let invalid = ''
-    const valid = await withCommittedDatabase('validation-savepoint-valid', null, async database => {
+    await withDatabase('validation-savepoint-valid', null, async database => {
       const savepoint = database.sql.savepoint as unknown as <T>(
         work: (sql: DatabaseTransaction) => T | Promise<T>,
       ) => Promise<T>
@@ -211,7 +210,7 @@ describe('Graph validation constraints', () => {
         title: 'Savepoint valid',
       }))
       await savepoint(async sql => {
-        invalid = identify(await sql.create('Document', {
+        await sql.create('Document', {
           flag: true,
           name: `Savepoint invalid ${randomUUID()}`,
           note: 'note',
@@ -219,23 +218,18 @@ describe('Graph validation constraints', () => {
           revision: rows.revisionA,
           status: 'ok',
           title: 'Savepoint invalid',
-        }))
+        })
         throw new Error('roll back the invalid create')
       }).catch(() => undefined)
-      return document
+      expect(await database.query('Document', {
+        fields: ['id'],
+        where: { field: 'id', operator: Operator.Comparison.Equal, value: document },
+      })).toHaveLength(1)
+      expect(await database.query('Document', {
+        fields: ['id'],
+        where: { field: 'title', operator: Operator.Comparison.Equal, value: 'Savepoint invalid' },
+      })).toEqual([])
     })
-    expect(await withDatabase('validation-savepoint-read', null, database => (
-      database.query('Document', {
-        fields: ['id'],
-        where: { field: 'id', operator: Operator.Comparison.Equal, value: valid },
-      })
-    ))).toHaveLength(1)
-    expect(await withDatabase('validation-savepoint-invalid-read', null, database => (
-      database.query('Document', {
-        fields: ['id'],
-        where: { field: 'id', operator: Operator.Comparison.Equal, value: invalid },
-      })
-    ))).toEqual([])
   })
 
   test('exposes rollback, savepoint, and test transaction extensions', async () => {

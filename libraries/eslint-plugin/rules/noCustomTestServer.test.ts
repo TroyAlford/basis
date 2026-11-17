@@ -3,6 +3,7 @@ import { lintRule } from './complianceTestUtils'
 import { noCustomTestServer } from './noCustomTestServer'
 
 const lint = (code: string) => lintRule(noCustomTestServer, code, 'fixture.test.ts')
+const lintApplication = (code: string) => lintRule(noCustomTestServer, code, 'fixture.e2e.ts')
 
 const expectsReport = (code: string): void => {
   const messages = lint(code)
@@ -11,7 +12,61 @@ const expectsReport = (code: string): void => {
   expect(messages[0]?.message).toContain('useApplication')
 }
 
+const expectsApplicationReport = (code: string): void => {
+  const messages = lintApplication(code)
+  expect(messages).toHaveLength(1)
+  expect(messages[0]?.messageId).toBe('noCustomTestServer')
+  expect(messages[0]?.message).toContain('useApplication')
+}
+
+const expectsDatabaseReport = (code: string): void => {
+  const messages = lintApplication(code)
+  expect(messages).toHaveLength(1)
+  expect(messages[0]?.messageId).toBe('noCustomTestDatabase')
+  expect(messages[0]?.message).toContain('withDatabase')
+}
+
 describe('noCustomTestServer', () => {
+  test('reports a Basis Server in an application test', () => {
+    expectsApplicationReport("import { Server } from 'basis/server'\nnew Server()")
+  })
+
+  test('reports an aliased Basis Server in an application test', () => {
+    expectsApplicationReport(
+      "import { Server as AppServer } from 'basis/server'\nnew AppServer()",
+    )
+  })
+
+  test('reports a relative Basis Server in an application test', () => {
+    expectsApplicationReport("import { Server } from './Server'\nnew Server().database()")
+  })
+
+  test('reports a default Basis Server in an application test', () => {
+    expectsApplicationReport("import Server from './Server'\nnew Server().database().start({ port: 0 })")
+  })
+
+  test('reports a Basis Server assigned before database configuration', () => {
+    expectsApplicationReport(
+      "import { Server } from 'basis/server'\nconst server = new Server()\nserver.database()",
+    )
+  })
+
+  test('reports a direct managed database provisioner in an application test', () => {
+    expectsDatabaseReport(
+      "import { createDatabase } from './Database'\ncreateDatabase({ authorization: true })",
+    )
+  })
+
+  test('reports a direct managed Postgres service in an application test', () => {
+    expectsDatabaseReport(
+      "import { ManagedPostgresService } from './ManagedPostgresService'\nnew ManagedPostgresService()",
+    )
+  })
+
+  test('allows a Basis Server in a unit test', () => {
+    expect(lint("import { Server } from 'basis/server'\nnew Server()")).toHaveLength(0)
+  })
+
   test('reports Bun.serve', () => {
     expectsReport('Bun.serve({ fetch: () => new Response(\'ok\') })')
   })

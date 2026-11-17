@@ -1,4 +1,5 @@
 import { run, runAsync } from 'basis/utilities'
+import type { TransactionSQL } from 'bun'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
@@ -15,7 +16,8 @@ import { Constraint } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
-import { validateTransactionState } from '../source/Mutation'
+import { mutationRunner, validateTransactionState } from '../source/Mutation'
+import { installBasis } from '../source/Schema'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -104,7 +106,7 @@ export const articleDefinition = {
 /** Restricted role used by fixture graph policies. */
 const FIXTURE_APP_ROLE = 'basis_app'
 /** Single schema owned by the one fixture graph. */
-const FIXTURE_SCHEMA = 'basis_fixture'
+const FIXTURE_SCHEMA = 'basis_fixture_v2'
 
 /** Deterministic identities and rows seeded into the one fixture graph. */
 export const fixtureRows = {
@@ -175,6 +177,81 @@ const fixtureGraph = new Graph({
           { field: 'owner', target: 'User', type: 'Entity' },
         ],
         name: 'Article',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+          { field: 'favorite', target: 'Entity', type: 'Entity' },
+          { field: 'manager', target: 'User', type: 'Entity' },
+          { field: 'permissions', type: 'String' },
+        ],
+        name: 'SystemUser',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+          { field: 'company', type: 'String' },
+        ],
+        name: 'Client',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+        ],
+        name: 'MtiUser',
+      },
+      {
+        extends: 'MtiUser',
+        fields: [
+          { field: 'favorite', target: 'Entity', type: 'Entity' },
+          { field: 'manager', target: 'MtiUser', type: 'Entity' },
+          { field: 'permissions', type: 'String' },
+        ],
+        name: 'MtiSystemUser',
+      },
+      {
+        extends: 'MtiUser',
+        fields: [{ field: 'company', type: 'String' }],
+        name: 'MtiClient',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'Snowflake' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Book',
+      },
+      {
+        extends: 'Book',
+        fields: [{ field: 'genre', type: 'String' }],
+        name: 'Novel',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'car', target: 'CycleCar', type: 'Entity' },
+        ],
+        name: 'CycleUser',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'user', target: 'CycleUser', type: 'Entity' },
+        ],
+        name: 'CycleCar',
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'parent', target: 'TreeNode', type: 'Entity' },
+        ],
+        name: 'TreeNode',
       },
       {
         fields: [{ field: 'title', type: 'String' }],
@@ -422,28 +499,243 @@ export interface FixtureSchemaOptions {
 
 /** Options for a custom-Graph actor-aware database fixture. */
 export interface DatabaseTestOptions {
+  /** Commit an owner proof instead of rolling it back. Internal proof option. */
+  readonly commit?: boolean,
+  /** Entity definitions for an owner proof. Internal proof option. */
+  readonly entities?: EntityDefinitions,
+  /** Allocate a disposable unique schema for an owner proof. Internal proof option. */
+  readonly fresh?: boolean,
   /** Consumer Graph to install with Basis's restricted fixture role. */
   readonly graph?: Graph,
+  /** Run the proof through the owner role instead of the app role. Internal proof option. */
+  readonly owner?: boolean,
   /** Seed or prepare data as the trusted owner before entering the app role. */
   readonly setup?: (database: DatabaseContext) => Promise<void>,
 }
 
 /** The one shared-fixture transaction context. */
 export interface DatabaseContext {
+  /** Switch to the owner role for explicit DDL, owner SQL, or commit proofs. */
+  asOwner: <T>(work: (database: DatabaseContext) => Promise<T>) => Promise<T>,
+  /** Run one expected-failure savepoint unit. */
+  captureError: (work: (database: DatabaseContext) => Promise<unknown>) => Promise<unknown>,
   /** Run one Graph-native mutation; validation runs before the savepoint releases. */
   create: Database['create'],
   /** Delete through the Graph-native mutation vocabulary. */
   delete: Database['delete'],
   /** Edit through the Graph-native mutation vocabulary. */
   edit: Database['edit'],
+  /** Entity definitions attached to the active context. */
+  readonly entities: EntityDefinitions,
   /** Query through the canonical entity compiler under RLS. */
   query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
+  /** Schema selected for the active context. */
+  readonly schema: string,
   /** Reserved transaction connection already scoped to the app role. */
   readonly sql: DatabaseTransaction,
   /** Run one transaction-final validation unit. */
-  tx: <T>(work: (transaction: MutationDatabase) => T | Promise<T>) => Promise<T>,
+  tx: <T>(work: (transaction: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
   /** Upsert through the Graph-native mutation vocabulary. */
   upsert: Database['upsert'],
+  /** Select a cached schema for one exact entity definition set. */
+  use(entities: EntityDefinitions): Promise<void>,
+}
+
+/** A reserved connection owned by one owner-role proof. */
+type ReservedSQL = Awaited<ReturnType<BunSQL['reserve']>>
+
+/** Saved savepoint name prefix for owner proofs. */
+const OWNER_SAVEPOINT_PREFIX = 'basis_owner_savepoint_'
+
+/**
+ * Owner-role view over one reserved fixture connection.
+ *
+ * `sql` is autocommit until `tx` starts a transaction. `tx` always rolls back,
+ * matching the ordinary test transaction's auto-rollback contract.
+ */
+class OwnerDatabaseContext implements DatabaseContext {
+  #entities: EntityDefinitions
+  #savepoint = 0
+  #schema: string
+  #transaction: BunSQL | null = null
+
+  constructor(
+    private readonly connection: ReservedSQL,
+    schema: string,
+    entities: EntityDefinitions,
+    private readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
+  ) {
+    this.#schema = schema
+    this.#entities = entities
+  }
+
+  get entities(): EntityDefinitions {
+    return this.#entities
+  }
+
+  get schema(): string {
+    return this.#schema
+  }
+
+  get sql(): DatabaseTransaction {
+    return (this.#transaction ?? this.connection) as unknown as DatabaseTransaction
+  }
+
+  asOwner<T>(work: (database: DatabaseContext) => Promise<T>): Promise<T> {
+    return work(this)
+  }
+
+  /** Begin the outer owner test transaction. */
+  async begin(): Promise<void> {
+    await this.connection.unsafe('begin').simple()
+    this.#transaction = this.connection
+    await this.connection.unsafe(
+      `set local search_path to ${quoteIdentifier(this.#schema)}`,
+    ).simple()
+  }
+
+  /** Roll back the outer owner test transaction. */
+  async rollback(): Promise<void> {
+    this.#transaction = null
+    await this.connection.unsafe('rollback').simple()
+  }
+
+  /** Commit the outer owner transaction for an explicit commit proof. */
+  async commit(): Promise<void> {
+    this.#transaction = null
+    await this.connection.unsafe('commit').simple()
+  }
+
+  async captureError(work: (database: DatabaseContext) => Promise<unknown>): Promise<unknown> {
+    const name = `${OWNER_SAVEPOINT_PREFIX}${this.#savepoint}`
+    this.#savepoint += 1
+    await this.connection.unsafe(`savepoint ${quoteIdentifier(name)}`).simple()
+    try {
+      await work(this)
+    } catch (error) {
+      await this.connection.unsafe(`rollback to savepoint ${quoteIdentifier(name)}`).simple()
+      await this.connection.unsafe(`release savepoint ${quoteIdentifier(name)}`).simple()
+      return error
+    }
+    await this.connection.unsafe(`release savepoint ${quoteIdentifier(name)}`).simple()
+    throw new Error('Expected owner database operation to fail')
+  }
+
+  create(entity: string, values: MutationValues | Iterable<MutationValues>) {
+    return this.#mutations().create(entity, values)
+  }
+
+  delete(entity: string, filter: MutationFilter) {
+    return this.#mutations().delete(entity, filter)
+  }
+
+  edit(entity: string, filter: MutationFilter, changes: MutationValues) {
+    return this.#mutations().edit(entity, filter, changes)
+  }
+
+  query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
+    return queryEntity<T>(this.sql, this.#entities, entity, options)
+  }
+
+  async tx<T>(work: (transaction: DatabaseTransaction) => T | Promise<T>): Promise<T> {
+    if (this.#transaction) {
+      const name = `${OWNER_SAVEPOINT_PREFIX}${this.#savepoint}`
+      this.#savepoint += 1
+      await this.connection.unsafe(`savepoint ${quoteIdentifier(name)}`).simple()
+      try {
+        const result = await work(
+          transactionWithMutations(this.#entities, this.#transaction as unknown as TransactionSQL),
+        )
+        await this.connection.unsafe(`release savepoint ${quoteIdentifier(name)}`).simple()
+        return result
+      } catch (error) {
+        await this.connection.unsafe(`rollback to savepoint ${quoteIdentifier(name)}`).simple()
+        await this.connection.unsafe(`release savepoint ${quoteIdentifier(name)}`).simple()
+        throw error
+      }
+    }
+
+    await this.connection.unsafe('begin').simple()
+    this.#transaction = this.connection
+    try {
+      await this.connection.unsafe(
+        `set local search_path to ${quoteIdentifier(this.#schema)}, public, basis, pg_temp`,
+      ).simple()
+      return await work(transactionWithMutations(this.#entities, this.connection as unknown as TransactionSQL))
+    } finally {
+      this.#transaction = null
+      await this.connection.unsafe('rollback').simple()
+    }
+  }
+
+  upsert(entity: string, filter: MutationFilter, values: MutationValues) {
+    return this.#mutations().upsert(entity, filter, values)
+  }
+
+  async use(entities: EntityDefinitions): Promise<void> {
+    const schema = await this.schemaFor(entities)
+    if (schema !== this.#schema) {
+      await this.sql.unsafe(
+        `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
+      ).simple()
+      this.#schema = schema
+    }
+    this.#entities = entities
+  }
+
+  #mutations(): MutationDatabase {
+    return mutationRunner(this.#entities, this.sql)
+  }
+}
+
+/**
+ * Return a reserved fixture connection to a clean session state.
+ * @param connection - Reserved Bun SQL connection.
+ */
+async function resetConnection(connection: BunSQL): Promise<void> {
+  await connection.unsafe('rollback').simple().catch(() => undefined)
+  await connection.unsafe('reset all').simple().catch(() => undefined)
+}
+
+/**
+ * Wrap a reserved connection so every release resets it first.
+ * @param connection - Reserved Bun SQL connection.
+ * @returns The wrapped connection.
+ */
+function guardedConnection(connection: BunSQL): BunSQL {
+  return new Proxy(connection, {
+    apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
+    get: (target, property, receiver) => {
+      if (property === 'release') {
+        return async () => {
+          await resetConnection(target);
+          (target as unknown as { release: () => void }).release()
+        }
+      }
+      return Reflect.get(target, property, receiver)
+    },
+  })
+}
+
+/**
+ * Wrap a fixture pool so direct reserves acquire and release clean connections.
+ * @param pool - The fixture Bun SQL pool.
+ * @returns The guarded pool.
+ */
+function guardedPool(pool: BunSQL): BunSQL {
+  return new Proxy(pool, {
+    apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
+    get: (target, property, receiver) => {
+      if (property === 'reserve') {
+        return async () => {
+          const connection = await target.reserve()
+          await resetConnection(connection as unknown as BunSQL)
+          return guardedConnection(connection as unknown as BunSQL)
+        }
+      }
+      return Reflect.get(target, property, receiver)
+    },
+  })
 }
 
 /** The test-owned pool connected to the one seeded database container. */
@@ -451,6 +743,7 @@ class FixtureDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
   #entities: EntityDefinitions
+  #guarded: BunSQL | null = null
   #sql: BunSQL
 
   /**
@@ -476,7 +769,8 @@ class FixtureDatabase implements Database {
    * @returns The underlying SQL client.
    */
   get sql(): BunSQL {
-    return this.#sql
+    this.#guarded ??= guardedPool(this.#sql)
+    return this.#guarded
   }
 
   /**
@@ -720,7 +1014,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       entities: EntityDefinitions,
       options: FixtureSchemaOptions = {},
     ): Promise<string> => {
-      const schema = fixtureSchemaName(entities, options.appRole, options.graph)
+      const schema = assertTestSchema(fixtureSchemaName(entities, options.appRole, options.graph))
       let pending = schemas.get(schema)
       if (!pending) {
         pending = ensureSchema(database as FixtureDatabase, schema, entities, options)
@@ -730,6 +1024,8 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       return pending
     }
 
+    await ensureApplicationRole(database)
+    await installBasis(database.sql, FIXTURE_APP_ROLE)
     const fixture: DatabaseFixture = {
       database,
       entities: sharedEntities,
@@ -893,15 +1189,34 @@ function fixtureSchemaName(entities: EntityDefinitions, appRole?: string, graph?
   return `basis_fixture_${hash}`
 }
 
+/** Roles already created or normalized by this fixture process. */
+const ensuredApplicationRoles = new Map<string, Promise<void>>()
+
 /**
- * Ensure the restricted role used by the fixture graph exists.
+ * Ensure the restricted role used by the fixture graph exists once.
  * @param database - Connected fixture pool.
  * @param roleName - Application role to create or normalize.
+ * @returns A promise that settles once the role is ready.
  */
-async function ensureApplicationRole(
+function ensureApplicationRole(
   database: Database,
   roleName = FIXTURE_APP_ROLE,
 ): Promise<void> {
+  let pending = ensuredApplicationRoles.get(roleName)
+  if (!pending) {
+    pending = createApplicationRole(database, roleName)
+    ensuredApplicationRoles.set(roleName, pending)
+    void pending.catch(() => ensuredApplicationRoles.delete(roleName))
+  }
+  return pending
+}
+
+/**
+ * Create or normalize one application role.
+ * @param database - Connected fixture pool.
+ * @param roleName - Application role to create or normalize.
+ */
+async function createApplicationRole(database: Database, roleName: string): Promise<void> {
   const role = quoteIdentifier(roleName)
   await database.sql.unsafe(`
     DO $$
@@ -1147,17 +1462,42 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
 /**
  * Run one test on the shared fixture with an optional custom Graph and actor.
  * @param label - Fixture acquisition label.
- * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
  * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after rollback.
  */
-export async function withDatabase<T>(
+export function withDatabase<T>(
+  label: string,
+  callback: (database: DatabaseContext) => Promise<T>,
+  options?: DatabaseTestOptions,
+): Promise<T>
+export function withDatabase<T>(
   label: string,
   actor: string | null,
   callback: (database: DatabaseContext) => Promise<T>,
-  options: DatabaseTestOptions = {},
+  options?: DatabaseTestOptions,
+): Promise<T>
+export async function withDatabase<T>(
+  label: string,
+  actorOrCallback: string | null | ((database: DatabaseContext) => Promise<T>),
+  callbackOrOptions?: ((database: DatabaseContext) => Promise<T>) | DatabaseTestOptions,
+  maybeOptions: DatabaseTestOptions = {},
 ): Promise<T> {
+  const inline = typeof actorOrCallback === 'function'
+  const actor = inline ? null : actorOrCallback
+  const callback = inline
+    ? actorOrCallback
+    : callbackOrOptions as (database: DatabaseContext) => Promise<T>
+  const options = inline
+    ? (callbackOrOptions as DatabaseTestOptions | undefined) ?? {}
+    : maybeOptions
+  if (inline || options.owner || options.commit) {
+    return withOwnerDatabase(label, callback, {
+      commit: options.commit,
+      entities: options.entities,
+      fresh: options.fresh,
+    })
+  }
   const fixture = await useDatabaseFixture(label)
   const custom = options.graph !== undefined
   const entities = options.graph?.definitions ?? fixtureGraph.definitions
@@ -1172,27 +1512,82 @@ export async function withDatabase<T>(
       await sql.unsafe(
         `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
       ).simple()
+      let currentEntities = entities
+      let currentSchema = schema
+      let active = sql as DatabaseTransaction
       const context = (): DatabaseContext => {
-        const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
-          const savepoint = sql.savepoint as unknown as <Value>(
+        const tx = async <Result>(work: (sql: DatabaseTransaction) => Result | Promise<Result>) => {
+          const savepoint = active.savepoint as unknown as <Value>(
             callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
           ) => Promise<Value>
           return savepoint(async savepointSql => {
             const result = await work(savepointSql)
-            await validateTransactionState(entities, transactionClient(savepointSql))
+            await validateTransactionState(currentEntities, transactionClient(savepointSql))
             return result
           })
         }
+        const captureError = async (work: (database: DatabaseContext) => Promise<unknown>) => {
+          let failure: unknown
+          try {
+            await tx(async () => {
+              failure = await work(context())
+              throw failure
+            })
+          } catch (error) {
+            if (error !== failure) throw error
+          }
+          return failure
+        }
+        const asOwner = async <Result>(
+          work: (database: DatabaseContext) => Promise<Result>,
+        ): Promise<Result> => {
+          const connection = await fixture.database.sql.reserve()
+          try {
+            await connection.unsafe('reset role').simple()
+            await connection.unsafe(
+              `set search_path to ${quoteIdentifier(currentSchema)}, public, basis, pg_temp`,
+            ).simple()
+            return await work(new OwnerDatabaseContext(
+              connection,
+              currentSchema,
+              currentEntities,
+              nextEntities => fixture.schemaFor(nextEntities),
+            ))
+          } finally {
+            await connection.unsafe('rollback').simple().catch(() => undefined)
+            await connection.unsafe('reset all').simple().catch(() => undefined)
+            connection.release()
+          }
+        }
+        const use = async (nextEntities: EntityDefinitions): Promise<void> => {
+          const nextSchema = await fixture.schemaFor(nextEntities)
+          if (nextSchema !== currentSchema) {
+            await sql.unsafe(
+              `set local search_path to ${quoteIdentifier(nextSchema)}, public, basis, pg_temp`,
+            ).simple()
+            currentSchema = nextSchema
+          }
+          currentEntities = nextEntities
+          active = transactionWithMutations(
+            currentEntities,
+            transactionClient(active) as unknown as TransactionSQL,
+          )
+        }
         return {
+          asOwner,
+          captureError,
           create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
           delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
           edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
+          entities: currentEntities,
           query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-            queryEntity<Result>(sql, entities, entity, queryOptions)
+            queryEntity<Result>(sql, currentEntities, entity, queryOptions)
           ),
+          schema: currentSchema,
           sql,
           tx,
           upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
+          use,
         }
       }
       await options.setup?.(context())
@@ -1205,68 +1600,64 @@ export async function withDatabase<T>(
   ))
 }
 
-/** A real committed app-role transaction context for commit-boundary proofs. */
-export interface CommittedDatabaseContext extends MutationDatabase {
-  /** Query through the canonical entity compiler under RLS. */
-  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
-  /** Graph-native transaction connection already scoped to the app role. */
-  readonly sql: DatabaseTransaction,
+/** Entity and schema options for one internal owner proof. */
+export interface OwnerDatabaseOptions {
+  /** Commit instead of rolling back for an explicit commit proof. */
+  readonly commit?: boolean,
+  /** Entity definitions to prepare and query; defaults to the fixture model. */
+  readonly entities?: EntityDefinitions,
+  /** Allocate a disposable unique schema for the proof. */
+  readonly fresh?: boolean,
 }
 
 /**
- * Run one real committed Graph-native transaction on the shared fixture.
+ * Run one internal owner-role proof inside the fixture transaction.
+ *
+ * This is the fixture/engine proof path. It does not select the app role and it
+ * does not publish a second consumer testing API.
  * @param label - Fixture acquisition label.
- * @param actor - Verified actor identity, or null for anonymous.
- * @param callback - Work using the app-role transaction.
- * @param options - Custom Graph and owner-run setup.
- * @returns The callback result after commit.
+ * @param callback - Work using the owner transaction context.
+ * @param options - Entity definitions and disposable-schema selection.
+ * @returns The callback result after rollback.
  */
-export async function withCommittedDatabase<T>(
+export async function withOwnerDatabase<T>(
   label: string,
-  actor: string | null,
-  callback: (database: CommittedDatabaseContext) => Promise<T>,
-  options: DatabaseTestOptions = {},
+  callback: (database: DatabaseContext) => Promise<T>,
+  options: OwnerDatabaseOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  const custom = options.graph !== undefined
-  const entities = options.graph?.definitions ?? fixtureGraph.definitions
-  const appRole = FIXTURE_APP_ROLE
-  if (!custom) await ensureGraphSchema(fixture.database)
-  const schema = custom
-    ? await fixture.schemaFor(entities, { appRole, graph: options.graph })
-    : fixture.fixtureSchema
-  return runAsActor({ id: actor }, () => fixture.database.tx(async sql => {
-    await sql.unsafe(
-      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
-    ).simple()
-    if (options.setup) {
-      await options.setup({
-        create: (entity, values) => sql.create(entity, values),
-        delete: (entity, filter) => sql.delete(entity, filter),
-        edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
-        query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-          queryEntity<Result>(sql, entities, entity, queryOptions)
-        ),
-        sql,
-        tx: async work => work(sql),
-        upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
-      })
+  const entities = options.entities ?? fixture.entities
+  const schema = options.fresh ? committedSchemaName() : await fixture.schemaFor(entities)
+  const connection = await fixture.database.sql.reserve()
+  const context = new OwnerDatabaseContext(
+    connection,
+    schema,
+    entities,
+    nextEntities => fixture.schemaFor(nextEntities),
+  )
+  let completed = false
+  try {
+    await connection.unsafe('reset role').simple()
+    if (options.fresh) {
+      await connection.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
     }
-    await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
-    await sql`
-      SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
-    `
-    return callback({
-      create: (entity, values) => sql.create(entity, values),
-      delete: (entity, filter) => sql.delete(entity, filter),
-      edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
-      query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
-        queryEntity<Result>(sql, entities, entity, queryOptions)
-      ),
-      sql,
-      upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
-    })
-  }))
+    await context.begin()
+    const result = await callback(context)
+    if (options.commit) {
+      await context.commit()
+      completed = true
+    }
+    return result
+  } finally {
+    if (!completed) await context.rollback().catch(() => undefined)
+    await connection.unsafe('rollback').simple().catch(() => undefined)
+    await connection.unsafe('reset all').simple().catch(() => undefined)
+    if (options.fresh) {
+      await connection.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`)
+        .simple().catch(() => undefined)
+    }
+    connection.release()
+  }
 }
 
 /**
@@ -1283,6 +1674,7 @@ async function ensureSchema(
   entities: EntityDefinitions,
   options: FixtureSchemaOptions = {},
 ): Promise<string> {
+  assertTestSchema(schema)
   const appRole = options.appRole
   if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
@@ -1326,7 +1718,6 @@ async function ensureSchema(
  */
 async function ensureGraphSchema(database: Database): Promise<string> {
   const schema = FIXTURE_SCHEMA
-  await ensureApplicationRole(database)
   await database.tx(async sql => {
     await sql`
       SELECT pg_advisory_xact_lock(hashtext(${schema}))
@@ -1347,6 +1738,28 @@ async function ensureGraphSchema(database: Database): Promise<string> {
           break
         }
       }
+    }
+    if (complete) {
+      for (const trigger of fixtureGraph.physicalSchema(FIXTURE_APP_ROLE, true).triggers) {
+        const [found] = await sql<{ present: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
+            trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
+            namespace.nspname = ${schema} AND trigger.tgname = ${trigger.name} ) AS present
+        `
+        if (!found?.present) {
+          complete = false
+          break
+        }
+      }
+    }
+    if (complete) {
+      const [legacy] = await sql<{ present: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
+          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
+          namespace.nspname = ${schema} AND (trigger.tgname ILIKE '%enroll%' OR pg_get_triggerdef(trigger.oid)
+          ILIKE '%enroll_identity%' ) ) AS present
+      `
+      if (legacy?.present) complete = false
     }
     if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
@@ -1388,6 +1801,38 @@ async function ensureGraphSchema(database: Database): Promise<string> {
  */
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`
+}
+
+/** Schemas Basis never creates through test schema registration. */
+const RESERVED_SCHEMAS = new Set([
+  'basis',
+  'public',
+  'pg_catalog',
+  'information_schema',
+  'pg_temp',
+  'pg_toast',
+])
+
+/**
+ * Fail closed before any test schema registration can claim a reserved schema.
+ * @param schema - Proposed test schema.
+ * @returns The same schema when it is safe to create.
+ * @throws {Error} When the schema is reserved or PostgreSQL-owned.
+ */
+function assertTestSchema(schema: string): string {
+  const normalized = schema.toLowerCase()
+  if (RESERVED_SCHEMAS.has(normalized) || normalized.startsWith('pg_')) {
+    throw new Error(`Test schema registration refuses reserved schema "${schema}"`)
+  }
+  return schema
+}
+
+/**
+ * Create a unique per-proof schema name.
+ * @returns A safe schema identifier.
+ */
+function committedSchemaName(): string {
+  return assertTestSchema(`basis_test_${randomUUID().replaceAll('-', '')}`)
 }
 
 /**

@@ -97,11 +97,11 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 
 ## Consumer database fixtures
 
-`basis/testing` exports `withIsolatedDatabase` and `withDurableDatabase` with the same fixture implementation Basis uses. Pass the consumer's entity definitions explicitly to prepare and query that model in a transaction-isolated schema:
+`withDatabase` is the only consumer database fixture exported by `basis/testing`. It acquires the single run-scoped PostgreSQL fixture — the same lifecycle model as `useApplication` — and runs one test transaction that always rolls back. Use it for ordinary data tests, custom Graphs, actor-scoped RLS, owner-run setup, savepoints, and expected failures. The public options are `graph` and `setup`; committed writes, owner-proof selection, fresh schemas, and internal entity definitions are not part of the consumer type and cannot be selected through `withDatabase`. Owner setup runs inside the same rollback transaction, and the public callback context does not expose privileged owner switching.
 
 ```ts
 import { Graph } from 'basis/server'
-import { withIsolatedDatabase } from 'basis/testing'
+import { withDatabase } from 'basis/testing'
 
 const graph = new Graph({
   entities: [{
@@ -109,38 +109,29 @@ const graph = new Graph({
     name: 'ConsumerNote',
   }],
 })
+const noteId = '00000000-0000-4000-8000-000000000001'
 
-await withIsolatedDatabase('consumer', async database => {
-  await database.sql`INSERT INTO "Entity" ("id", "name", "entity") VALUES (... )`
-  await database.sql`INSERT INTO "ConsumerNote" ("id", "label") VALUES (... )`
-  const rows = await database.query('ConsumerNote', { fields: ['id', 'label'] })
-}, { entities: graph.definitions })
-```
-
-`test:consumer` proves this import and a real PostgreSQL transaction from a fresh Git-dependency install.
-
-## Actor-aware custom Graph fixtures
-
-Use `withDatabase` when a consumer Graph needs its own RLS policies and a selected actor. Pass the canonical `Graph`; Basis installs it under its fixed restricted fixture role. The owner-run `setup` callback executes before the role is selected, so it can seed canonical users, Workspaces and membership rows without weakening the policies:
-
-```ts
-import { withDatabase } from 'basis/testing'
-
-await withDatabase('consumer-owner', ownerId, async database => {
-  await database.create('Resource', {
-    name: 'Owner resource',
-    workspace: workspaceId,
-  })
+await withDatabase('consumer-note', null, async database => {
+  expect(await database.query('ConsumerNote', { fields: ['id', 'label'] }))
+    .toEqual([{ id: noteId, label: 'Example' }])
 }, {
   graph,
   setup: async database => {
-    await database.create('Workspace', { id: workspaceId, name: 'Consumer' })
-    await database.sql`INSERT INTO "WorkspaceMembership" ...`
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${noteId}, 'ConsumerNote', 'ConsumerNote')
+    `
+    await database.sql`
+      INSERT INTO "ConsumerNote" ("id", "label")
+      VALUES (${noteId}, 'Example')
+    `
   },
 })
 ```
 
-The custom Graph is installed in a cached disposable schema with its policies and grants. `withDatabase` rolls every test back. `withIsolatedDatabase` remains the lighter option when a test needs a custom schema and Graph mutations but not actor-scoped RLS.
+A custom Graph is installed once per exact Graph identity in a cached disposable schema with its RLS policies and grants. The owner-run `setup` callback executes before the fixed Basis restricted role is selected, so it can seed canonical users, Workspaces, and membership rows without weakening the policies. The callback then runs as the selected actor. `database.tx` uses savepoints; expected failures roll back to the savepoint, and the outer test transaction always rolls back.
+
+Do not create a second database, schema, container, or committed-write path. Basis's own lifecycle and recovery proofs may use internal primitives, but those are not part of the consumer surface.
 
 ## Database isolation
 
@@ -161,7 +152,7 @@ The image already contains the 500,000-row seeded dataset in its own data direct
 
 The concurrency bound is eight tests against a ten-connection pool, leaving headroom for the fixture's own schema and cleanup work. `--concurrent` overlaps async tests inside a file; files share the same process-wide fixture, so the database is never restarted between files. The suite does not use `--parallel`.
 
-The first run installs the canonical shared schema once and caches one migrated schema per exact entity-definition set. It also installs the single authorization schema and its deterministic seed rows; authorization tests reserve one transaction, switch to the restricted app role, and roll back, so no test starts a second server or database. Runs are run-scoped by default: the fixture makes exactly one cleanup decision and removes the container and its anonymous volume at the end; no test volume exists. Ordinary tests run inside one reserved transaction, set the cached schema transaction-locally, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Reserved connections used outside a transaction reset `search_path` before they return to the pool. `BASIS_TEST_FIXTURE_ROOT` overrides the fixture directory.
+The first run installs the canonical shared schema once and caches one migrated schema per exact entity-definition set. It also installs the single authorization schema and its deterministic seed rows; authorization tests reserve one transaction, switch to the restricted app role, and roll back, so no test starts a second server or database. Runs are run-scoped by default: the fixture makes exactly one cleanup decision and removes the container and its anonymous volume at the end; no test volume exists. Ordinary tests run inside one reserved transaction, set the cached schema transaction-locally, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Basis's internal committed-transaction proofs may use a disposable unique schema and drop it in cleanup; consumer tests use `withDatabase` and always roll back. Reserved connections used outside a transaction reset `search_path` before they return to the pool. `BASIS_TEST_FIXTURE_ROOT` overrides the fixture directory.
 
 ### Database execution inventory
 

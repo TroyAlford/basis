@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { containers, noteDefinition, removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { EntityDefinitions } from './EntityDefinitions'
+import { installBasis } from './Schema'
 import { Server } from './Server'
 
 /*
@@ -129,6 +130,7 @@ test('supports independent installs, durable restart, and same-install reconnect
       expect(await a.db.sql<{ present: boolean }[]>`
         SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
       `).toEqual([{ present: false }])
+      await installBasis(a.db.sql)
       await installSchema(a.db.sql, aEntities, { schema: 'public' })
       expect(await a.db.sql<{ present: boolean }[]>`
         SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present

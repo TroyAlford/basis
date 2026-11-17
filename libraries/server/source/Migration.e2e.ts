@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { useDatabaseFixture } from '../testing/DatabaseFixture'
-import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Action, Graph, Security } from './Graph'
 import { DDL } from './Schema'
@@ -32,7 +32,7 @@ function migrationVersion(label: string): string {
 describe('Reviewed schema evolution', () => {
   test('applies a reviewed artifact, records it once, verifies readiness, and rejects drift', async () => {
     const desired = model('Note')
-    await withIsolatedDatabase('migration-apply', async database => {
+    await withLifecycleDatabase('migration-apply', async database => {
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired })
       const attemptVersion = migrationVersion('001-note')
@@ -55,12 +55,6 @@ describe('Reviewed schema evolution', () => {
       const readiness = await DDL.readiness(database.sql, artifact)
       expect(readiness.ready).toBe(true)
       expect(readiness.discrepancies).toEqual([])
-      await database.sql.unsafe(
-        'DROP FUNCTION IF EXISTS basis.has_role(text) CASCADE; ' +
-        'DROP FUNCTION IF EXISTS basis.resolve_identity(text) CASCADE; ' +
-        'DROP FUNCTION IF EXISTS basis.enroll_identity(text, text, text, text) CASCADE',
-      ).simple()
-
       const [afterApply] = await database.sql<{ present: boolean }[]>`
         SELECT to_regclass(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
       `
@@ -105,7 +99,7 @@ describe('Reviewed schema evolution', () => {
     const desired = EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'NewNote' }],
     }))
-    await withIsolatedDatabase('migration-rename', async database => {
+    await withLifecycleDatabase('migration-rename', async database => {
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
@@ -139,7 +133,7 @@ describe('Reviewed schema evolution', () => {
   test('applies an additive transition from a reviewed previous artifact', async () => {
     const previous = model('Note')
     const desired = model('Note', 'Tag')
-    await withIsolatedDatabase('migration-additive', async database => {
+    await withLifecycleDatabase('migration-additive', async database => {
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
@@ -163,7 +157,7 @@ describe('Reviewed schema evolution', () => {
   })
 
   test('applies and verifies a Graph security schema', async () => {
-    await withIsolatedDatabase('migration-graph', async database => {
+    await withLifecycleDatabase('migration-graph', async database => {
       const appRole = `basis_graph_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
       const graph = new Graph({
@@ -200,7 +194,7 @@ describe('Reviewed schema evolution', () => {
         { extends: 'Profile', fields: [], name: 'Employee' },
       ],
     }))
-    await withIsolatedDatabase('migration-mti', async database => {
+    await withLifecycleDatabase('migration-mti', async database => {
       const empty = await DDL.introspect(database.sql)
       const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
         schema: database.schema,
@@ -218,7 +212,7 @@ describe('Reviewed schema evolution', () => {
     const desired = EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ field: 'amount', type: 'Number' }], name: 'Note' }],
     }))
-    await withIsolatedDatabase('migration-data', async database => {
+    await withLifecycleDatabase('migration-data', async database => {
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
@@ -256,7 +250,7 @@ describe('Reviewed schema evolution', () => {
 
   test('rolls back an interrupted migration before writing the ledger', async () => {
     const desired = model('Note')
-    await withIsolatedDatabase('migration-interrupted', async database => {
+    await withLifecycleDatabase('migration-interrupted', async database => {
       const empty = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual: empty, desired })
       const failing = plan.operations.find(operation => (
@@ -369,7 +363,7 @@ describe('Reviewed schema evolution', () => {
 
   test('rejects application when the live source drifted from the approved plan', async () => {
     const desired = model('Note')
-    await withIsolatedDatabase('migration-drift', async database => {
+    await withLifecycleDatabase('migration-drift', async database => {
       const empty = await DDL.introspect(database.sql)
       const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
         schema: database.schema,

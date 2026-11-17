@@ -59,10 +59,10 @@ describe('noCustomDatabaseFixture', () => {
     ].join('\n'))).toHaveLength(0)
   })
 
-  test('allows the Basis isolation helpers', () => {
+  test('allows the internal Basis lifecycle helper', () => {
     expect(lint([
-      'import { withIsolatedDatabase } from \'basis/testing\'',
-      'await withIsolatedDatabase(\'test\', () => undefined)',
+      'import { withLifecycleDatabase } from \'../testing/DatabaseLifecycle\'',
+      'await withLifecycleDatabase(\'test\', () => undefined)',
     ].join('\n'))).toHaveLength(0)
   })
 

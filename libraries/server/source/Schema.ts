@@ -1909,6 +1909,60 @@ export interface MigrationApplyOptions {
 }
 
 /**
+ * Install the canonical Basis substrate schema and its stable utility functions.
+ *
+ * This is not a Graph install. It owns `basis` once and never depends on a
+ * Graph model. Callers install Graph schemas afterward.
+ * @param sql - Trusted PostgreSQL capability with DDL privileges.
+ * @param appRole - Restricted application role granted execute on the utilities.
+ */
+export async function installBasis(sql: BunSQL, appRole = 'basis_app'): Promise<void> {
+  await sql.unsafe('create schema if not exists basis').simple()
+  await sql.unsafe('drop function if exists basis.has_role(text) cascade').simple()
+  await sql.unsafe('drop function if exists basis.enroll_identity(text, text, text, text) cascade').simple()
+  await sql.unsafe('drop function if exists basis.resolve_identity(text) cascade').simple()
+  await sql.unsafe(`
+    CREATE OR REPLACE FUNCTION basis.has_role(target_schema text, role_id text)
+    RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+    DECLARE
+      present boolean;
+    BEGIN
+      EXECUTE format(
+        'SELECT EXISTS (SELECT 1 FROM %I.%I ur WHERE ur."role.id" = $1 ' ||
+          'AND ur."user.id" = nullif(current_setting(''actor.id'', true), ''''))',
+        target_schema,
+        'UserRole'
+      ) INTO present USING role_id;
+      RETURN present;
+    END $$;
+  `).simple()
+  await sql.unsafe('revoke all on function basis.has_role(text, text) from public').simple()
+  await sql.unsafe(`
+    CREATE OR REPLACE FUNCTION basis.resolve_identity(target_schema text, candidate text)
+    RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+    DECLARE
+      present text;
+    BEGIN
+      EXECUTE format(
+        'SELECT u."id" FROM %I.%I u ' ||
+          'WHERE u."id" = $1 AND EXISTS (' ||
+            'SELECT 1 FROM %I.%I e ' ||
+            'WHERE e."user.id" = u."id" AND e."revoked" = false' ||
+          ') LIMIT 1',
+        target_schema, 'User', target_schema, 'ExternalIdentity'
+      ) INTO present USING candidate;
+      RETURN present;
+    END $$;
+  `).simple()
+  await sql.unsafe('revoke all on function basis.resolve_identity(text, text) from public').simple()
+  await sql.unsafe(
+    `grant execute on function basis.resolve_identity(text, text) to ${JSON.stringify(appRole)}`,
+  ).simple()
+}
+
+/**
  * Apply one reviewed migration artifact through the administrative connection.
  * @param sql - Trusted PostgreSQL capability with DDL privileges.
  * @param artifact - Reviewed immutable migration artifact.

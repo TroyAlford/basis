@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withDatabase } from '../testing/DatabaseFixture'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { installSchema } from '../testing/Schema'
 import { transactionWithMutations } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
@@ -58,7 +59,7 @@ async function mutationFailure(work: () => Promise<unknown>): Promise<MutationEr
 
 describe('Graph mutations', () => {
   test('creates one object, finite batches, MTI chains, arrays, and JSON', async () => {
-    await withIsolatedDatabase('mutation-create', async database => {
+    await withLifecycleDatabase('mutation-create', async database => {
       await database.use(definitions)
       const user = await database.create('User', {
         email: 'ada@example.com',
@@ -124,7 +125,7 @@ describe('Graph mutations', () => {
   })
 
   test('returns hydrated records for single mutations and counts only for sets', async () => {
-    await withIsolatedDatabase('mutation-records', async database => {
+    await withLifecycleDatabase('mutation-records', async database => {
       await database.use(definitions)
       const user = await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       expect(user.record).toMatchObject({ email: 'ada@example.com', entity: 'User', name: 'Ada' })
@@ -227,7 +228,7 @@ describe('Graph mutations', () => {
         },
       ],
     }))
-    await withIsolatedDatabase('mutation-wide-record', async database => {
+    await withLifecycleDatabase('mutation-wide-record', async database => {
       await database.use(wide)
       const created = await database.create('WideThing', { name: 'Wide' })
       expect(created.record).toMatchObject({ entity: 'WideThing', name: 'Wide' })
@@ -264,7 +265,7 @@ describe('Graph mutations', () => {
   })
 
   test('validates payloads and rolls an entire batch back on a database constraint', async () => {
-    await withIsolatedDatabase('mutation-create-rollback', async database => {
+    await withLifecycleDatabase('mutation-create-rollback', async database => {
       await database.use(definitions)
       await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
@@ -299,7 +300,7 @@ describe('Graph mutations', () => {
   })
 
   test('edits zero-to-many frozen sets with string and structured filters', async () => {
-    await withIsolatedDatabase('mutation-edit', async database => {
+    await withLifecycleDatabase('mutation-edit', async database => {
       await database.use(definitions)
       await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
@@ -340,7 +341,7 @@ describe('Graph mutations', () => {
   })
 
   test('deletes filtered sets and preserves references and inheritance integrity', async () => {
-    await withIsolatedDatabase('mutation-delete', async database => {
+    await withLifecycleDatabase('mutation-delete', async database => {
       await database.use(definitions)
       await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
@@ -365,7 +366,7 @@ describe('Graph mutations', () => {
   })
 
   test('upserts with zero, one, and ambiguous authorized matches', async () => {
-    await withIsolatedDatabase('mutation-upsert', async database => {
+    await withLifecycleDatabase('mutation-upsert', async database => {
       await database.use(definitions)
       await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
@@ -410,7 +411,7 @@ describe('Graph mutations', () => {
   })
 
   test('requires upsert create values to satisfy the selector and repeat stably', async () => {
-    await withIsolatedDatabase('mutation-upsert-selector', async database => {
+    await withLifecycleDatabase('mutation-upsert-selector', async database => {
       await database.use(definitions)
       await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
@@ -452,45 +453,36 @@ describe('Graph mutations', () => {
   })
 
   test('serializes concurrent upserts for the same filter', async () => {
-    await withDurableDatabase('mutation-upsert-concurrency', async database => {
-      await database.tx(async sql => installSchema(sql, definitions))
-      await database.tx(async sql => transactionWithMutations(definitions, sql).create(
-        'User',
-        { email: 'concurrent@example.com', name: 'Concurrent' },
-      ))
-      const [user] = await database.tx(async sql => sql<{ id: string }[]>`
-        SELECT "id"
-        FROM "Person"
-        WHERE "email" = 'concurrent@example.com'
-      `)
-      if (!user) throw new Error('Concurrent user was not created')
-      const results = await Promise.all(Array.from({ length: 6 }, (_value, index) => (
-        database.tx(async sql => transactionWithMutations(definitions, sql).upsert(
+    await withDatabase('mutation-upsert-concurrency', async database => {
+      const user = await database.create('User', {
+        email: 'concurrent@example.com',
+        label: 'Concurrent',
+        name: 'Concurrent',
+      })
+      const owner = user.record?.id
+      if (!owner) throw new Error('Concurrent user was not created')
+
+      const results = []
+      for (let index = 0; index < 6; index += 1) {
+        results.push(await database.upsert(
           'Article',
           index % 2 === 0
             ? 'title == \'Concurrent\''
             : { field: 'title', operator: '$eq', value: 'Concurrent' },
-          {
-            name: 'Concurrent',
-            owner: user.id,
-            score: 5,
-            title: 'Concurrent',
-          },
+          { name: 'Concurrent', owner, title: 'Concurrent' },
         ))
-      )))
+      }
       expect(results.filter(result => result.created === 1)).toHaveLength(1)
       expect(results.filter(result => result.edited === 1)).toHaveLength(5)
-      const [count] = await database.tx(async sql => sql<{ count: number }[]>`
-        SELECT count(*)::int AS count
-        FROM "Article"
-        WHERE "title" = 'Concurrent'
-      `)
-      expect(count?.count).toBe(1)
+      expect(await database.query('Article', {
+        fields: ['title'],
+        where: { title: 'Concurrent' },
+      })).toHaveLength(1)
     })
   })
 
   test('shares one native transaction between SQL and mutation verbs', async () => {
-    await withDurableDatabase('mutation-transaction', async database => {
+    await withDatabase('mutation-transaction', async database => {
       await database.tx(async sql => installSchema(sql, definitions))
       await database.tx(async sql => {
         const mutations = transactionWithMutations(definitions, sql)
@@ -535,6 +527,6 @@ describe('Graph mutations', () => {
         WHERE "email" = 'rollback@example.com'
       `)
       expect(rolledBack[0]?.count).toBe(0)
-    })
+    }, { fresh: true })
   })
 })
