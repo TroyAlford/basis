@@ -539,6 +539,86 @@ describe('EntityDefinitions', () => {
     })).toThrow('top-level')
   })
 
+  test('parses via directives through the canonical Graph path syntax', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]',
+            },
+            {
+              field: 'orderedEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$orderBy:-quantity}',
+            },
+            {
+              field: 'conditionalEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and (quantity > 1 $or quantity = 0)]',
+            },
+            {
+              field: 'cards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @].card',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(entities.entity('Deck')?.collections).toContainEqual(expect.objectContaining({
+      name: 'orderedEntries',
+      viaOrderBy: '-quantity',
+    }))
+    expect(entities.entity('Deck')?.collections).toContainEqual(expect.objectContaining({
+      name: 'conditionalEntries',
+    }))
+    expect(entities.entity('Deck')?.collections).toContainEqual(expect.objectContaining({
+      name: 'cards',
+      target: 'Card',
+    }))
+
+    const invalid = (via: string) => () => load({
+      entities: [
+        { fields: [{ field: 'entries', target: 'DeckCardPrinting', type: 'Collection', via }], name: 'Deck' },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(invalid('DeckCardPrinting[deck = @')).toThrow(/unbalanced|invalid/i)
+    expect(invalid('DeckCardPrinting[deck = @ $and missing > 1]')).toThrow(/unknown field/i)
+    expect(invalid('DeckCardPrinting[deck = @ $and quantity >]')).toThrow(/invalid where/i)
+    expect(invalid('DeckCardPrinting[deck = @ $and quantity = "high"]')).toThrow(/operand|type|valid/i)
+    expect(invalid('DeckCardPrinting[deck = @]{$unknown:1}')).toThrow(/unknown collection option/i)
+  })
+
   test('allows inherited Collection owners and rejects incompatible aliases', () => {
     const definitions = load({
       entities: [

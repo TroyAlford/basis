@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
 import { Operator } from './Operator'
 import { comparableFieldType, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayMemberEntity, arrayMemberField, arrayMemberResolver, isFieldOperand, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalCheck, PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
+import type { OrderBy } from './SQL'
 
 /** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
@@ -316,6 +318,12 @@ export interface ExplicitCollectionDefinition {
   readonly via: string,
   /** Additional relationship-record predicate declared inside `via`. */
   readonly viaFilter?: Filter,
+  /** Default page size declared inside `via`. */
+  readonly viaLimit?: number | null,
+  /** Default page offset declared inside `via`. */
+  readonly viaOffset?: number,
+  /** Default ordering declared inside `via`. */
+  readonly viaOrderBy?: OrderBy,
 }
 
 /** One collection navigation available in the query model. */
@@ -1968,75 +1976,6 @@ function containsOwnerField(filter: Filter): boolean {
   return false
 }
 
-/** One parsed segment of a `via` Graph path. */
-interface ViaSegment {
-  /** Optional bracket filter text. */
-  readonly filter?: string,
-  /** Relationship, collection, or endpoint name. */
-  readonly name: string,
-}
-
-/**
- * Split one `via` path while respecting bracket filter groups and quoting.
- * @param value - Authored via path.
- * @returns Parsed path segments.
- */
-function splitCollectionPath(value: string): readonly ViaSegment[] {
-  const raw: string[] = []
-  let current = ''
-  let depth = 0
-  let quote: string | undefined
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index] as string
-    if (quote !== undefined) {
-      current += character
-      if (character === '\\') {
-        index += 1
-        current += value[index] ?? ''
-      } else if (character === quote) {
-        quote = undefined
-      }
-      continue
-    }
-    if (character === '\'' || character === '"' || character === '`') {
-      quote = character
-      current += character
-      continue
-    }
-    if (character === '[') {
-      depth += 1
-      current += character
-      continue
-    }
-    if (character === ']') {
-      depth -= 1
-      current += character
-      continue
-    }
-    if (character === '.' && depth === 0) {
-      raw.push(current)
-      current = ''
-      continue
-    }
-    current += character
-  }
-  if (quote !== undefined || depth !== 0) {
-    throw invalid(`collection via path "${value}" is unbalanced`)
-  }
-  raw.push(current)
-  return raw.map(segment => {
-    const open = segment.indexOf('[')
-    if (open === -1) return { name: segment }
-    if (!segment.endsWith(']')) {
-      throw invalid(`collection via segment "${segment}" must end its filter group`)
-    }
-    return {
-      filter: segment.slice(open + 1, -1),
-      name: segment.slice(0, open),
-    }
-  })
-}
-
 /**
  * Derive reciprocal and relationship navigations from canonical metadata.
  * @param entities - Resolved entity graph.
@@ -2163,12 +2102,23 @@ function deriveNavigations(
       throw invalid(`collection field "${owner}.${field.name}" has a cyclic via path`)
     }
     resolvingCollections.add(cacheKey)
-    const segments = splitCollectionPath(field.via)
+    let segments
+    try {
+      segments = splitFieldPath(field.via).map(segment => parseCollectionDirectives(segment))
+    } catch (error) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" has an invalid via path: ` +
+        `${(error as Error).message}`,
+      )
+    }
     const first = segments[0]
     if (!first) throw invalid(`collection field "${owner}.${field.name}" via path is empty`)
     let relationship: RelationshipDefinition
     let ownerEndpoint: RelationshipEndpointDefinition
     let projection: readonly string[]
+    let viaLimit = first.limit
+    let viaOffset = first.offset
+    let viaOrderBy = first.orderBy
     const directRelationship = relationshipsByName.get(first.name)
     let viaFilter: Filter | undefined
     if (directRelationship) {
@@ -2188,8 +2138,9 @@ function deriveNavigations(
       ownerEndpoint = parsedFilter.ownerEndpoint
       viaFilter = parsedFilter.filter
       projection = segments.slice(1).map(segment => {
-        if (segment.filter !== undefined) {
-          throw invalid(`collection field "${owner}.${field.name}" via cannot filter a projection`)
+        if (segment.filter !== undefined || segment.limit !== undefined
+          || segment.offset !== undefined || segment.orderBy !== undefined) {
+          throw invalid(`collection field "${owner}.${field.name}" via projection cannot carry directives`)
         }
         return segment.name
       })
@@ -2210,6 +2161,9 @@ function deriveNavigations(
       } else {
         viaFilter = resolvedSource.viaFilter
       }
+      viaLimit = first.limit ?? resolvedSource.viaLimit
+      viaOffset = first.offset ?? resolvedSource.viaOffset
+      viaOrderBy = first.orderBy ?? resolvedSource.viaOrderBy
       validateOwnerEndpoint(owner, field, resolvedSource.ownerEndpoint, resolvedSource.relationship)
       relationship = resolvedSource.relationship
       ownerEndpoint = resolvedSource.ownerEndpoint
@@ -2220,8 +2174,9 @@ function deriveNavigations(
         )
       }
       projection = segments.slice(1).map(segment => {
-        if (segment.filter !== undefined) {
-          throw invalid(`collection field "${owner}.${field.name}" via cannot filter a projection`)
+        if (segment.filter !== undefined || segment.limit !== undefined
+          || segment.offset !== undefined || segment.orderBy !== undefined) {
+          throw invalid(`collection field "${owner}.${field.name}" via projection cannot carry directives`)
         }
         return segment.name
       })
@@ -2260,6 +2215,9 @@ function deriveNavigations(
       target,
       via: field.via,
       ...(viaFilter === undefined ? {} : { viaFilter }),
+      ...(viaLimit === undefined ? {} : { viaLimit }),
+      ...(viaOffset === undefined ? {} : { viaOffset }),
+      ...(viaOrderBy === undefined ? {} : { viaOrderBy }),
     }
     resolvingCollections.delete(cacheKey)
     resolvedCollections.set(cacheKey, resolved)
