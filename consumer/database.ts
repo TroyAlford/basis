@@ -5,7 +5,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 /** Database operator command names. */
-type DatabaseCommand = 'backup' | 'plan' | 'release' | 'restore' | 'rollback' | 'upgrade'
+enum DatabaseCommand {
+  Backup = 'backup',
+  Plan = 'plan',
+  Release = 'release',
+  Restore = 'restore',
+  Rollback = 'rollback',
+  Upgrade = 'upgrade',
+}
 
 /** One resolved application database context. */
 interface DatabaseContext {
@@ -77,15 +84,8 @@ async function loadContext(): Promise<DatabaseContext> {
  */
 export async function runDatabase(args: readonly string[]): Promise<number> {
   const [rawCommand, ...rest] = args
-  const command = rawCommand as DatabaseCommand | undefined
-  if (
-    command !== 'backup'
-    && command !== 'plan'
-    && command !== 'release'
-    && command !== 'restore'
-    && command !== 'rollback'
-    && command !== 'upgrade'
-  ) {
+  const command = Object.values(DatabaseCommand).find(candidate => candidate === rawCommand)
+  if (command === undefined) {
     usage()
     return 1
   }
@@ -93,13 +93,13 @@ export async function runDatabase(args: readonly string[]): Promise<number> {
   try {
     let archive: string | undefined
     let image: string | undefined
-    if (command === 'restore' || command === 'rollback') {
+    if (command === DatabaseCommand.Restore || command === DatabaseCommand.Rollback) {
       archive = rest[0]
       if (archive === undefined || archive.startsWith('--')) {
         throw new Error(`db ${command} requires an archive path`)
       }
       image = imageOption(rest)
-    } else if (command === 'upgrade') {
+    } else if (command === DatabaseCommand.Upgrade) {
       image = rest[0]
       if (image === undefined || image.startsWith('--')) {
         throw new Error('db upgrade requires a PostgreSQL image')
@@ -115,11 +115,11 @@ export async function runDatabase(args: readonly string[]): Promise<number> {
     })
     const operations = new ManagedPostgresOperations({ artifact: context.artifact })
     const result = await (() => {
-      if (command === 'plan') return release.plan()
-      if (command === 'release') return release.apply()
-      if (command === 'backup') return operations.backup()
-      if (command === 'restore') return operations.restore(archive as string, { image })
-      if (command === 'upgrade') return operations.upgrade(image as string)
+      if (command === DatabaseCommand.Plan) return release.plan()
+      if (command === DatabaseCommand.Release) return release.apply()
+      if (command === DatabaseCommand.Backup) return operations.backup()
+      if (command === DatabaseCommand.Restore) return operations.restore(archive as string, { image })
+      if (command === DatabaseCommand.Upgrade) return operations.upgrade(image as string)
       return operations.rollback(archive as string, image)
     })()
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
