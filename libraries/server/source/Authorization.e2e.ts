@@ -1360,6 +1360,121 @@ describe('Authorization RLS', () => {
     }
   }, 60_000)
 
+  test('authorizes through filtered relationship-record via collections', async () => {
+    const filteredViaGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            {
+              field: 'memberships',
+              target: 'DeckMembership',
+              type: 'Collection',
+              via: 'DeckMembership[deck = @]',
+            },
+            {
+              field: 'editorMemberships',
+              target: 'DeckMembership',
+              type: 'Collection',
+              via: "DeckMembership[deck = @ $and role = 'Editor']",
+            },
+          ],
+          name: 'Deck',
+          security: {
+            [Action.Read]: [{ where: 'editorMemberships $contains (user = $me)' }],
+          },
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'user', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'DeckMembership',
+        security: {
+          [Action.Read]: [{ where: 'user = $me' }],
+        },
+      }],
+    })
+    const install = tempDirectory('basis-authorization-filtered-via-')
+    const server = await start(install, filteredViaGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      const charlie = await authorization.enrollIdentity('test', 'charlie', { email: 'charlie@example.com' })
+      if (!alice || !bob || !charlie) throw new Error('filtered-via users were not enrolled')
+      const first = randomUUID()
+      const second = randomUUID()
+      await admin.sql.begin(async tx => {
+        for (const [id, name] of [[first, 'First Deck'], [second, 'Second Deck']] as const) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${name}, 'Deck')
+          `
+          await tx`INSERT INTO "Deck" ("id") VALUES (${id})`
+        }
+        await tx`
+          INSERT INTO "DeckMembership" ("deck.id", "user.id", "role")
+          VALUES (${first}, ${alice}, 'Editor'),
+            (${first}, ${bob}, 'Viewer'),
+            (${second}, ${charlie}, 'Editor')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const read = (actor: string | null) => asActor(actor, () => server.db.query('Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+      }))
+      expect(await read(alice)).toEqual([{ id: first }])
+      expect(await read(bob)).toEqual([])
+      expect(await read(charlie)).toEqual([{ id: second }])
+      expect(await read(null)).toEqual([])
+      const direct = await asActor(alice, () => server.db.tx(async sql => (
+        sql<{ id: string }[]>`
+          SELECT "id"
+          FROM "Deck"
+          ORDER BY "id"
+        `
+      )))
+      expect(direct).toEqual([{ id: first }])
+      const membershipRows = await asActor(alice, () => server.db.tx(async sql => (
+        sql<{ role: string }[]>`
+          SELECT "role"
+          FROM "DeckMembership"
+          ORDER BY "role"
+        `
+      )))
+      expect(membershipRows).toEqual([{ role: 'Editor' }])
+      expect(await asActor(bob, () => server.db.tx(async sql => (
+        sql<{ role: string }[]>`
+          SELECT "role"
+          FROM "DeckMembership"
+        `
+      )))).toEqual([{ role: 'Viewer' }])
+      await admin.sql`
+        UPDATE "DeckMembership"
+        SET "role" = 'Viewer'
+        WHERE "deck.id" = ${first} AND "user.id" = ${alice}
+      `
+      expect(await read(alice)).toEqual([])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 60_000)
+
   test('applies relationship RLS to three-way record collections', async () => {
     const threeWayGraph = new Graph({
       entities: [

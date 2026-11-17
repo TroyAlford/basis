@@ -939,6 +939,20 @@ export class Graph {
     const relationship = collection.kind === 'explicit' && collection.targetEndpoint
       ? collection.relationship
       : undefined
+    let viaFilter: string | undefined
+    if (collection.kind === 'explicit'
+      && collection.viaFilter !== undefined
+      && sql.relationshipAlias !== undefined) {
+      viaFilter = this.#compileFilterPredicate(
+        collection.viaFilter,
+        this.#policyEntity(collection.relationship.name) as EntityDefinition,
+        quoteIdentifier(sql.relationshipAlias),
+        true,
+      )
+    }
+    const condition = viaFilter === undefined
+      ? sql.condition
+      : `(${sql.condition}) AND ${viaFilter}`
     const resolverAlias = sql.targetAlias ?? sql.rootAlias
     const resolver = this.#policyResolver(
       target,
@@ -1005,7 +1019,7 @@ export class Graph {
         true,
         depth + 1,
       ),
-      condition: sql.condition,
+      condition,
       definition: target,
       expression: field => {
         const expression = expressions.get(field.name)
@@ -1244,17 +1258,6 @@ export class Graph {
     return `((${readable.join(' OR ')}) AND (${conditions.join(' OR ')}))`
   }
 
-  /**
-   * Compile the direct action rules before the READ prerequisite is applied.
-   * @param leaf - Concrete entity or relationship table.
-   * @param action - Action being evaluated.
-   * @param alias - Row alias.
-   * @param roleOnly - Whether predicates are omitted.
-   * @param table - Grant target table.
-   * @param direct - Whether to bypass helper functions for proposed-row compilation.
-   * @param createTarget - Physical table that owns the create rule, when creating.
-   * @returns Matching rule expressions.
-   */
   #actionConditions(
     leaf: string,
     action: Action,
@@ -1329,6 +1332,24 @@ export class Graph {
     const entity = entityOverride ??
       (grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target))
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
+    if (!grant.predicate) return 'TRUE'
+    return this.#compileFilterPredicate(grant.predicate as Filter, entity, alias, allowSubqueries)
+  }
+
+  /**
+   * Compile one normalized filter against an explicit policy entity view.
+   * @param filter - Normalized predicate.
+   * @param entity - Entity or relationship-record view.
+   * @param alias - Row alias.
+   * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @returns Inlined SQL predicate.
+   */
+  #compileFilterPredicate(
+    filter: Filter,
+    entity: EntityDefinition,
+    alias: string,
+    allowSubqueries: boolean,
+  ): string {
     const rootAlias = entity.name === 'Entity' ? alias : undefined
     const resolver = this.#policyResolver(entity, alias, rootAlias, allowSubqueries)
     const expressions = new Map<string, string>()
@@ -1365,7 +1386,7 @@ export class Graph {
       field,
       filterField: field,
     }
-    const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
+    const where = SQL.where(this.definitions, entity.name, filter, scope)
     return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
   }
 
