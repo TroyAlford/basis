@@ -1254,19 +1254,25 @@ describe('Server database lifecycle', () => {
     const toy = '00000000-0000-4000-8000-000000000103'
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${user}, 'Ada', 'User'), (${pet}, 'Rex', 'Pet'), (${toy}, 'Ball', 'Toy')
+      VALUES
+        (${user}, 'Ada', 'User'),
+        (${pet}, 'Rex', 'Pet'),
+        (${toy}, 'Ball', 'Toy')
     `
     await database.sql`
       INSERT INTO "User" ("id")
-      VALUES (${user})
+      VALUES
+        (${user})
     `
     await database.sql`
       INSERT INTO "Pet" ("id", "owner.id", "label")
-      VALUES (${pet}, ${user}, 'Dog')
+      VALUES
+        (${pet}, ${user}, 'Dog')
     `
     await database.sql`
       INSERT INTO "Toy" ("id", "pet.id", "label")
-      VALUES (${toy}, ${pet}, 'Red')
+      VALUES
+        (${toy}, ${pet}, 'Red')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
       fields: ['id', 'pets', 'pets.label', 'pets.toys', 'pets.toys.label'],
@@ -1322,24 +1328,29 @@ describe('Server database lifecycle', () => {
     ] as const
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${campaign}, 'Campaign', 'Campaign')
+      VALUES
+        (${campaign}, 'Campaign', 'Campaign')
     `
     await database.sql`
       INSERT INTO "Campaign" ("id")
-      VALUES (${campaign})
+      VALUES
+        (${campaign})
     `
     for (const [id, name] of users) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, ${name}, 'User')
+        VALUES
+          (${id}, ${name}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id")
-        VALUES (${id})
+        VALUES
+          (${id})
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES (${id}, ${campaign}, 'Player')
+        VALUES
+          (${id}, ${campaign}, 'Player')
       `
     }
 
@@ -1446,39 +1457,47 @@ describe('Server database lifecycle', () => {
     ] as const) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, ${name}, 'Campaign')
+        VALUES
+          (${id}, ${name}, 'Campaign')
       `
       await database.sql`
         INSERT INTO "Campaign" ("id")
-        VALUES (${id})
+        VALUES
+          (${id})
       `
     }
     for (const member of members) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${member.id}, ${member.name}, 'User')
+        VALUES
+          (${member.id}, ${member.name}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id", "active")
-        VALUES (${member.id}, ${member.active})
+        VALUES
+          (${member.id}, ${member.active})
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES (${member.id}, ${campaign}, ${member.role})
+        VALUES
+          (${member.id}, ${campaign}, ${member.role})
       `
     }
     for (const member of tied) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${member.id}, ${member.name}, 'User')
+        VALUES
+          (${member.id}, ${member.name}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id", "active")
-        VALUES (${member.id}, TRUE)
+        VALUES
+          (${member.id}, TRUE)
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES (${member.id}, ${tiedCampaign}, ${member.role})
+        VALUES
+          (${member.id}, ${tiedCampaign}, ${member.role})
       `
     }
 
@@ -1609,24 +1628,29 @@ describe('Server database lifecycle', () => {
     const expected = [...members].sort((left, right) => left[1].localeCompare(right[1]))
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${campaign}, 'Ordering Campaign', 'Campaign')
+      VALUES
+        (${campaign}, 'Ordering Campaign', 'Campaign')
     `
     await database.sql`
       INSERT INTO "Campaign" ("id")
-      VALUES (${campaign})
+      VALUES
+        (${campaign})
     `
     for (const [id, email] of members) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, ${email}, 'User')
+        VALUES
+          (${id}, ${email}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id", "email")
-        VALUES (${id}, ${email})
+        VALUES
+          (${id}, ${email})
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES (${id}, ${campaign}, 'GM')
+        VALUES
+          (${id}, ${campaign}, 'GM')
       `
     }
 
