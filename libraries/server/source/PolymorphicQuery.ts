@@ -1526,36 +1526,33 @@ class QueryProjection {
     relationship: RelationshipDefinition,
     orderBy: OrderBy | undefined,
   ): readonly { column: string, direction: 'ASC' | 'DESC', endpoint: boolean, field: string }[] {
-    const requested = orderBy === undefined ? [] : Array.isArray(orderBy) ? [...orderBy] : [orderBy]
-    const orderings = requested.map(entry => {
-      const descending = typeof entry === 'string'
-        ? entry.startsWith('-')
-        : entry.direction === 'desc'
-      const name = typeof entry === 'string'
-        ? descending ? entry.slice(1) : entry
-        : entry.field
-      const property = relationship.fields.find(field => field.name === name)
+    const orderings = parseCollectionOrdering(orderBy, []).map(order => {
+      const property = relationship.fields.find(field => field.name === order.name)
       if (property) {
         if (property.type === FieldType.Array || property.type === FieldType.JSON) {
-          throw new Error(`Relationship record order field "${name}" is not a scalar field`)
+          throw new Error(
+            `Relationship record order field "${order.name}" is not a scalar field`,
+          )
         }
         return {
           column: property.name,
-          direction: descending ? 'DESC' as const : 'ASC' as const,
+          direction: order.direction,
           endpoint: false,
           field: property.name,
         }
       }
-      const endpoint = relationship.between.find(candidate => candidate.field === name)
+      const endpoint = relationship.between.find(candidate => candidate.field === order.name)
       if (endpoint) {
         return {
           column: `${endpoint.field}.id`,
-          direction: descending ? 'DESC' as const : 'ASC' as const,
+          direction: order.direction,
           endpoint: true,
           field: endpoint.field,
         }
       }
-      throw new Error(`Unknown relationship record order field "${relationship.name}.${name}"`)
+      throw new Error(
+        `Unknown relationship record order field "${relationship.name}.${order.name}"`,
+      )
     })
     for (const endpoint of relationship.between) {
       if (orderings.some(order => order.endpoint && order.field === endpoint.field)) continue
@@ -1665,22 +1662,7 @@ class QueryProjection {
       : this.#entities.entity(spec.collection.target)
     if (!target) throw new Error(`Unknown target entity "${spec.collection.target}"`)
     const page = this.#collectionPage(spec, key, 3, 0)
-    const requestedOrder = spec.orderBy === undefined
-      ? ['id']
-      : Array.isArray(spec.orderBy) ? [...spec.orderBy] : [spec.orderBy]
-    const orderings = requestedOrder.map(entry => {
-      if (typeof entry === 'string') {
-        const descending = entry.startsWith('-')
-        return {
-          direction: descending ? 'DESC' : 'ASC',
-          name: descending ? entry.slice(1) : entry,
-        }
-      }
-      return {
-        direction: entry.direction === 'desc' ? 'DESC' : 'ASC',
-        name: entry.field,
-      }
-    })
+    const orderings = parseCollectionOrdering(spec.orderBy, ['id'])
     if (!orderings.some(order => order.name === 'id')) {
       orderings.push({ direction: 'ASC', name: 'id' })
     }
@@ -2386,6 +2368,34 @@ function fieldContract(field: FieldDefinition): string {
   if (field.type === FieldType.Collection) return `Collection:${field.target}:${field.via}`
   if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
   return `${field.type}:${field.format ?? ''}`
+}
+
+/**
+ * Parse collection ordering into canonical field/direction entries.
+ * @param orderBy - Requested collection ordering.
+ * @param fallback - Default ordering when absent.
+ * @returns Canonical ordering entries.
+ */
+function parseCollectionOrdering(
+  orderBy: OrderBy | undefined,
+  fallback: readonly OrderBy[],
+): { direction: 'ASC' | 'DESC', name: string }[] {
+  const requested = orderBy === undefined
+    ? [...fallback]
+    : Array.isArray(orderBy) ? [...orderBy] : [orderBy]
+  return requested.map(entry => {
+    if (typeof entry === 'string') {
+      const descending = entry.startsWith('-')
+      return {
+        direction: descending ? 'DESC' as const : 'ASC' as const,
+        name: descending ? entry.slice(1) : entry,
+      }
+    }
+    return {
+      direction: entry.direction === 'desc' ? 'DESC' as const : 'ASC' as const,
+      name: entry.field,
+    }
+  })
 }
 
 /**

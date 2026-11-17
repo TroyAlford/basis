@@ -1773,14 +1773,16 @@ function parseRelationshipField(
  * @param field - Collection field.
  * @param relationship - Relationship traversed by the collection.
  * @param source - Authored filter text.
- * @returns The owner endpoint and any remaining record filter.
+ * @param requireOwner - Whether the filter must contain exactly one `@` owner comparison.
+ * @returns The normalized predicate and owner endpoint when required.
  */
-function normalizeViaFilter(
+function normalizeViaPredicate(
   owner: string,
   field: CollectionFieldDefinition,
   relationship: RelationshipDefinition,
   source: string,
-): { filter?: Filter, ownerEndpoint: RelationshipEndpointDefinition } {
+  requireOwner: boolean,
+): { filter?: Filter, ownerEndpoint?: RelationshipEndpointDefinition } {
   const view = relationshipEntity(relationship)
   const resolve = (name: string): QueryFieldDefinition => {
     if (name === '@' || name === '@.id') {
@@ -1805,12 +1807,20 @@ function normalizeViaFilter(
       resolve,
       () => undefined,
       () => undefined,
-    )
+    ) ?? undefined
   } catch (error) {
     throw invalid(
       `collection field "${owner}.${field.name}" has an invalid via filter: ` +
       `${(error as Error).message}`,
     )
+  }
+  if (!requireOwner) {
+    if (normalized !== undefined && containsOwnerField(normalized)) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via alias filter cannot repeat @`,
+      )
+    }
+    return normalized === undefined ? {} : { filter: normalized }
   }
   if (normalized === undefined) {
     throw invalid(
@@ -1828,56 +1838,6 @@ function normalizeViaFilter(
     ...(extracted.filter === undefined ? {} : { filter: extracted.filter }),
     ownerEndpoint: extracted.ownerEndpoint,
   }
-}
-
-/**
- * Normalize an additional filter attached to an intermediate collection alias.
- * @param owner - Entity declaring the outer collection.
- * @param field - Outer collection field.
- * @param relationship - Relationship traversed by the collection.
- * @param source - Authored filter text.
- * @returns The normalized additional predicate, or undefined.
- */
-function normalizeViaAdditionalFilter(
-  owner: string,
-  field: CollectionFieldDefinition,
-  relationship: RelationshipDefinition,
-  source: string,
-): Filter | undefined {
-  const view = relationshipEntity(relationship)
-  const resolve = (name: string): QueryFieldDefinition => {
-    const candidate = view.effectiveFields.find(fieldDefinition => fieldDefinition.name === name)
-    if (!candidate) {
-      throw invalid(
-        `collection field "${owner}.${field.name}" via references unknown field ` +
-        `"${relationship.name}.${name}"`,
-      )
-    }
-    return candidate.type === FieldType.Entity
-      ? { name: candidate.name, type: FieldType.ID }
-      : candidate
-  }
-  let normalized: Filter | undefined
-  try {
-    normalized = QueryNormalizer.normalize(
-      view,
-      source,
-      resolve,
-      () => undefined,
-      () => undefined,
-    )
-  } catch (error) {
-    throw invalid(
-      `collection field "${owner}.${field.name}" has an invalid via filter: ` +
-      `${(error as Error).message}`,
-    )
-  }
-  if (normalized !== undefined && containsOwnerField(normalized)) {
-    throw invalid(
-      `collection field "${owner}.${field.name}" via alias filter cannot repeat @`,
-    )
-  }
-  return normalized ?? undefined
 }
 
 /**
@@ -2127,11 +2087,12 @@ function deriveNavigations(
           `collection field "${owner}.${field.name}" via relationship must identify its owner endpoint with @`,
         )
       }
-      const parsedFilter = normalizeViaFilter(
+      const parsedFilter = normalizeViaPredicate(
         owner,
         field,
         directRelationship,
         first.filter,
+        true,
       )
       validateOwnerEndpoint(owner, field, parsedFilter.ownerEndpoint, directRelationship)
       relationship = directRelationship
@@ -2156,7 +2117,13 @@ function deriveNavigations(
       if (first.filter !== undefined) {
         viaFilter = combineViaFilters(
           resolvedSource.viaFilter,
-          normalizeViaAdditionalFilter(owner, field, resolvedSource.relationship, first.filter),
+          normalizeViaPredicate(
+            owner,
+            field,
+            resolvedSource.relationship,
+            first.filter,
+            false,
+          ).filter,
         )
       } else {
         viaFilter = resolvedSource.viaFilter
