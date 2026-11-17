@@ -40,6 +40,17 @@ export function collectionSqlRelation(
   aliases: CollectionSqlAliases,
 ): CollectionSqlRelation {
   const targetName = collection.target
+  if (collection.kind === 'relationship-records') {
+    const relationship = collection.relationship
+    const local = relationship.between[collection.endpoint]
+    if (!local) throw new Error(`Unknown relationship endpoint ${collection.endpoint}`)
+    return {
+      condition: `${quote(aliases.relationship)}.${quote(`${local.field}.id`)} = ${parentId}`,
+      relation: `${quote(relationship.name)} ${quote(aliases.relationship)}`,
+      relationshipAlias: aliases.relationship,
+      rootAlias: aliases.relationship,
+    }
+  }
   if (collection.kind === 'inverse') {
     if (targetName === 'Entity') {
       return {

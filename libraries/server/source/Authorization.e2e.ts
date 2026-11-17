@@ -1201,6 +1201,102 @@ describe('Authorization RLS', () => {
     }
   }, 60_000)
 
+  test('authorizes through explicit relationship-record collections', async () => {
+    const recordGraph = new Graph({
+      entities: [
+        {
+          fields: [],
+          name: 'Deck',
+          security: {
+            [Action.Read]: [{ where: 'memberships $contains (user = $me)' }],
+          },
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { collection: 'memberships', field: 'deck', target: 'Deck' },
+          { collection: 'deckMemberships', field: 'user', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'DeckMembership',
+        security: {
+          [Action.Read]: [{ where: 'user = $me' }],
+        },
+      }],
+    })
+    const install = tempDirectory('basis-authorization-record-collections-')
+    const server = await start(install, recordGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      const charlie = await authorization.enrollIdentity('test', 'charlie', { email: 'charlie@example.com' })
+      if (!alice || !bob || !charlie) throw new Error('record users were not enrolled')
+      const first = randomUUID()
+      const second = randomUUID()
+      await admin.sql.begin(async tx => {
+        for (const [id, name] of [[first, 'First Deck'], [second, 'Second Deck']] as const) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${name}, 'Deck')
+          `
+          await tx`
+            INSERT INTO "Deck" ("id")
+            VALUES (${id})
+          `
+        }
+        await tx`
+          INSERT INTO "DeckMembership" ("deck.id", "user.id", "role")
+          VALUES (${first}, ${alice}, 'Owner'), (${second}, ${bob}, 'Owner')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const read = (actor: string | null) => asActor(actor, () => server.db.query('Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+      }))
+      expect(await read(alice)).toEqual([{ id: first }])
+      expect(await read(bob)).toEqual([{ id: second }])
+      expect(await read(charlie)).toEqual([])
+      expect(await read(null)).toEqual([])
+
+      const memberships = await asActor(alice, () => server.db.query<{
+        memberships: { $matched: number, $total: number, items: { role: string }[] },
+      }>('Deck', {
+        fields: ['id', "memberships[role = 'Owner']"],
+        where: { id: first },
+      }))
+      expect(memberships[0]?.memberships.$matched).toBe(1)
+      expect(memberships[0]?.memberships.items).toEqual([
+        expect.objectContaining({ role: 'Owner' }),
+      ])
+
+      const direct = await asActor(alice, () => server.db.tx(async sql => (
+        sql<{ id: string }[]>`
+          SELECT "id"
+          FROM "Deck"
+          ORDER BY "id"
+        `
+      )))
+      expect(direct).toEqual([{ id: first }])
+      expect(await asActor(charlie, () => server.db.query('Deck', { fields: ['id'] }))).toEqual([])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 60_000)
+
   test('enforces explicit actor presence on the shared authorization fixture', async () => {
     const noteRows = [{ id: fixtureRows.linkedNote }, { id: fixtureRows.memberNote }]
     const verify = async (actor: string | null, label: string, expected: {

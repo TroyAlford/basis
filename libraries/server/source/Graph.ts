@@ -916,7 +916,13 @@ export class Graph {
       target: targetAlias,
     })
     const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
-    const resolver = this.#policyResolver(target, quoteIdentifier(targetAlias), quoteIdentifier(rootAliasName), true)
+    const resolverAlias = sql.targetAlias ?? sql.rootAlias
+    const resolver = this.#policyResolver(
+      target,
+      quoteIdentifier(resolverAlias),
+      quoteIdentifier(resolverAlias),
+      true,
+    )
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
     const resolve = (path: string): QueryFieldDefinition => {
@@ -970,9 +976,9 @@ export class Graph {
       collection: nested => this.#collectionSqlScope(
         target,
         nested,
-        quoteIdentifier(sql.targetAlias ?? sql.rootAlias),
-        quoteIdentifier(sql.targetAlias ?? sql.rootAlias),
-        quoteIdentifier(sql.rootAlias),
+        quoteIdentifier(resolverAlias),
+        quoteIdentifier(resolverAlias),
+        quoteIdentifier(resolverAlias),
         true,
         depth + 1,
       ),

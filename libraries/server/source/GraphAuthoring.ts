@@ -208,18 +208,20 @@ export interface AuthoredEntity {
 
 /** One authored relationship endpoint. */
 export interface AuthoredRelationshipEndpoint {
+  /** Optional relationship-record collection name on the target entity. */
+  readonly collection?: string,
   /** Endpoint field name, in camelCase. */
   readonly field: string,
-  /** Inverse navigation name on the target. */
-  readonly inverse: string,
+  /** Optional inverse navigation name on the target entity. */
+  readonly inverse?: string,
   /** Referenced entity name. */
   readonly target: string,
 }
 
 /** One authored named relationship. */
 export interface AuthoredRelationship {
-  /** The two relationship endpoints. */
-  readonly between: readonly [AuthoredRelationshipEndpoint, AuthoredRelationshipEndpoint],
+  /** The relationship endpoints in authored order. */
+  readonly between: readonly AuthoredRelationshipEndpoint[],
   /** Declarative constraints owned by this relationship. */
   readonly constraints?: readonly GraphConstraint[],
   /** Relationship-owned fields. */
