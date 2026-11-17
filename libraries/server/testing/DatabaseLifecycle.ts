@@ -1,6 +1,6 @@
 import type { EntityDefinitions } from '../source/EntityDefinitions'
 import type { DatabaseContext } from './DatabaseFixture'
-import { withOwnerDatabase } from './DatabaseFixture'
+import { withDatabase } from './DatabaseFixture'
 
 /**
  * The internal fixture context used by Basis's database engine and schema
@@ -29,5 +29,5 @@ export async function withLifecycleDatabase<T>(
   callback: (database: LifecycleDatabase) => Promise<T>,
   options: LifecycleDatabaseOptions = {},
 ): Promise<T> {
-  return withOwnerDatabase(label, callback, options)
+  return withDatabase(label, null, callback, { owner: true, ...options })
 }

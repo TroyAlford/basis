@@ -422,8 +422,16 @@ export interface FixtureSchemaOptions {
 
 /** Options for a custom-Graph actor-aware database fixture. */
 export interface DatabaseTestOptions {
+  /** Commit an owner proof instead of rolling it back. Internal proof option. */
+  readonly commit?: boolean,
+  /** Entity definitions for an owner proof. Internal proof option. */
+  readonly entities?: EntityDefinitions,
+  /** Allocate a disposable unique schema for an owner proof. Internal proof option. */
+  readonly fresh?: boolean,
   /** Consumer Graph to install with Basis's restricted fixture role. */
   readonly graph?: Graph,
+  /** Run the proof through the owner role instead of the app role. Internal proof option. */
+  readonly owner?: boolean,
   /** Seed or prepare data as the trusted owner before entering the app role. */
   readonly setup?: (database: DatabaseContext) => Promise<void>,
 }
@@ -513,6 +521,12 @@ class OwnerDatabaseContext implements DatabaseContext {
   async rollback(): Promise<void> {
     this.#transaction = null
     await this.connection.unsafe('rollback').simple()
+  }
+
+  /** Commit the outer owner transaction for an explicit commit proof. */
+  async commit(): Promise<void> {
+    this.#transaction = null
+    await this.connection.unsafe('commit').simple()
   }
 
   async captureError(work: (database: DatabaseContext) => Promise<unknown>): Promise<unknown> {
@@ -1303,6 +1317,13 @@ export async function withDatabase<T>(
   callback: (database: DatabaseContext) => Promise<T>,
   options: DatabaseTestOptions = {},
 ): Promise<T> {
+  if (options.owner) {
+    return withOwnerDatabase(label, callback, {
+      commit: options.commit,
+      entities: options.entities,
+      fresh: options.fresh,
+    })
+  }
   const fixture = await useDatabaseFixture(label)
   const custom = options.graph !== undefined
   const entities = options.graph?.definitions ?? fixtureGraph.definitions
@@ -1404,6 +1425,8 @@ export async function withDatabase<T>(
 
 /** Entity and schema options for one internal owner proof. */
 export interface OwnerDatabaseOptions {
+  /** Commit instead of rolling back for an explicit commit proof. */
+  readonly commit?: boolean,
   /** Entity definitions to prepare and query; defaults to the fixture model. */
   readonly entities?: EntityDefinitions,
   /** Allocate a disposable unique schema for the proof. */
@@ -1435,15 +1458,21 @@ export async function withOwnerDatabase<T>(
     entities,
     nextEntities => fixture.schemaFor(nextEntities),
   )
+  let completed = false
   try {
     await connection.unsafe('reset role').simple()
     if (options.fresh) {
       await connection.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
     }
     await context.begin()
-    return await callback(context)
+    const result = await callback(context)
+    if (options.commit) {
+      await context.commit()
+      completed = true
+    }
+    return result
   } finally {
-    await context.rollback().catch(() => undefined)
+    if (!completed) await context.rollback().catch(() => undefined)
     await connection.unsafe('reset role').simple().catch(() => undefined)
     await connection.unsafe('reset search_path').simple().catch(() => undefined)
     if (options.fresh) {
