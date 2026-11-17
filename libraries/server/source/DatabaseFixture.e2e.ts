@@ -35,8 +35,8 @@ const options = {
     await database.create('User', { id: viewer, name: 'Viewer' })
     await database.create('Workspace', { id: workspace, name: 'Workspace' })
     await database.sql`
-      INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
-      VALUES (${workspace}, ${owner}, 'owner'), (${workspace}, ${viewer}, 'viewer')
+      INSERT INTO "WorkspaceMembership"("workspace.id", "user.id", "role")
+      VALUES (${workspace}, ${owner}, 'owner'),(${workspace}, ${viewer}, 'viewer')
     `
   },
 }

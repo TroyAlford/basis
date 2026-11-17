@@ -191,11 +191,11 @@ describe('Authorization RLS', () => {
           [otherArticle, 'Other', other],
         ] as const) {
           await sql`
-            INSERT INTO "Entity" ("id", "name", "entity")
+            INSERT INTO "Entity"("id", "name", "entity")
             VALUES (${id}, ${title}, 'Article')
           `
           await sql`
-            INSERT INTO "Article" ("id", "title", "owner.id")
+            INSERT INTO "Article"("id", "title", "owner.id")
             VALUES (${id}, ${title}, ${owner})
           `
         }
@@ -204,11 +204,11 @@ describe('Authorization RLS', () => {
           [otherPost, 'Other post', other],
         ] as const) {
           await sql`
-            INSERT INTO "Entity" ("id", "name", "entity")
+            INSERT INTO "Entity"("id", "name", "entity")
             VALUES (${id}, ${title}, 'Post')
           `
           await sql`
-            INSERT INTO "Post" ("id", "title", "owner.id")
+            INSERT INTO "Post"("id", "title", "owner.id")
             VALUES (${id}, ${title}, ${owner})
           `
         }
@@ -279,7 +279,7 @@ describe('Authorization RLS', () => {
         ALTER TABLE "Article" DISABLE ROW LEVEL SECURITY
       `))).rejects.toThrow()
       await expect(asActor(other, () => server.db.tx(async sql => sql`
-        INSERT INTO "UserRole" ("user.id", "role.id")
+        INSERT INTO "UserRole"("user.id", "role.id")
         VALUES (${other}, ${ADMIN_ROLE_ID})
       `))).rejects.toThrow()
 
@@ -297,22 +297,22 @@ describe('Authorization RLS', () => {
       const allowed = randomUUID()
       await asActor(user, () => server.db.tx(async sql => {
         await sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
+          INSERT INTO "Entity"("id", "name", "entity")
           VALUES (${allowed}, 'Allowed', 'Article')
         `
         await sql`
-          INSERT INTO "Article" ("id", "title", "owner.id")
+          INSERT INTO "Article"("id", "title", "owner.id")
           VALUES (${allowed}, 'Allowed', ${user})
         `
       }))
       await expect(asActor(user, () => server.db.tx(async sql => {
         const denied = randomUUID()
         await sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
+          INSERT INTO "Entity"("id", "name", "entity")
           VALUES (${denied}, 'Denied', 'Article')
         `
         await sql`
-          INSERT INTO "Article" ("id", "title", "owner.id")
+          INSERT INTO "Article"("id", "title", "owner.id")
           VALUES (${denied}, 'Denied', ${user})
         `
       }))).rejects.toThrow()
@@ -349,27 +349,27 @@ describe('Authorization RLS', () => {
       const applicationUserId = randomUUID()
       await asActor(admin.userId, () => server.db.tx(async sql => {
         await sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
+          INSERT INTO "Entity"("id", "name", "entity")
           VALUES (${employeeId}, 'employee@example.com', 'Employee')
         `
         await sql`
-          INSERT INTO "Profile" ("id", "email")
+          INSERT INTO "Profile"("id", "email")
           VALUES (${employeeId}, 'employee@example.com')
         `
         await sql`
-          INSERT INTO "Employee" ("id")
+          INSERT INTO "Employee"("id")
           VALUES (${employeeId})
         `
         await sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
+          INSERT INTO "Entity"("id", "name", "entity")
           VALUES (${applicationUserId}, 'application@example.com', 'ApplicationUser')
         `
         await sql`
-          INSERT INTO "User" ("id", "email")
+          INSERT INTO "User"("id", "email")
           VALUES (${applicationUserId}, 'application@example.com')
         `
         await sql`
-          INSERT INTO "ApplicationUser" ("id")
+          INSERT INTO "ApplicationUser"("id")
           VALUES (${applicationUserId})
         `
       }))
@@ -926,11 +926,11 @@ describe('Authorization RLS', () => {
         server.db.tx(async sql => {
           const id = randomUUID()
           await sql`
-            INSERT INTO "Entity" ("id", "name", "entity")
+            INSERT INTO "Entity"("id", "name", "entity")
             VALUES (${id}, ${title}, 'Note')
           `
           await sql`
-            INSERT INTO "Note" ("id", "owner.id", "title")
+            INSERT INTO "Note"("id", "owner.id", "title")
             VALUES (${id}, ${owner}, ${title})
           `
           return id

@@ -127,22 +127,26 @@ test('supports independent installs, durable restart, and same-install reconnect
       expect(portOf(aId)).not.toBe(portOf(bId))
 
       expect(await a.db.sql<{ present: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
+        SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS present
       `).toEqual([{ present: false }])
       await installSchema(a.db.sql, aEntities, { schema: 'public' })
       expect(await a.db.sql<{ present: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
+        SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS present
       `).toEqual([{ present: true }])
 
       await a.db.sql`
-        CREATE TABLE install_probe (value text)
+        CREATE TABLE install_probe (
+          value TEXT
+        )
       `
       await a.db.sql`
         INSERT INTO install_probe
         VALUES ('A')
       `
       await b.db.sql`
-        CREATE TABLE install_probe (value text)
+        CREATE TABLE install_probe (
+          value TEXT
+        )
       `
       await b.db.sql`
         INSERT INTO install_probe
