@@ -164,6 +164,38 @@ describe('Server', () => {
     }
   })
 
+  test('applies context headers and cookies to SSR and API responses', async () => {
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./ContextApplication.tsx')
+      .context(async ({ cookies }) => ({
+        context: { greeting: cookies.get('seen') ?? 'missing' },
+        cookies: [cookies.set('theme', 'dark', { path: '/' })],
+        headers: { 'X-Context': 'applied' },
+      }))
+      .api([HttpVerb.Get], 'context', (_params, context) => Response.json(context.context))
+      .start({ hostname: '127.0.0.1', port: 0 })
+
+    try {
+      await server.ready()
+      const base = `http://127.0.0.1:${server.port}`
+      const response = await Bun.fetch(base, { headers: { cookie: 'seen=request-value' } })
+
+      expect(await response.text()).toContain('request-value')
+      expect(response.headers.get('x-context')).toBe('applied')
+      expect(response.headers.get('set-cookie')).toContain('theme=dark')
+
+      const api = await server.handle(new Request(`${base}/api/context`, {
+        headers: new Headers({ cookie: 'seen=request-value' }),
+      }))
+      expect(await api?.json()).toEqual({ greeting: 'missing' })
+      expect(api?.headers.get('x-context')).toBe('applied')
+      expect(api?.headers.get('set-cookie')).toContain('theme=dark')
+    } finally {
+      await server.shutdown()
+    }
+  })
+
   test('never reports healthy when a development build fails', async () => {
     const server = await startServer({ ENTRY: './Broken.tsx' })
     const base = `http://127.0.0.1:${server.port}`

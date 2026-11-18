@@ -20,6 +20,8 @@ import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { runAsActor } from './ActorContext'
 import { Authorization } from './Authorization'
+import type { CookieChange } from './Cookies'
+import { Cookies, serializeCookie } from './Cookies'
 import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
 import { createDatabase, NullDatabase, openAdmin } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell, writeHydrationEntry } from './DevShell'
@@ -35,6 +37,43 @@ import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
 import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+
+/** Request-scoped data supplied to a {@link Server.context} loader. */
+export interface ContextInput<CookieSchema extends Record<string, string> = Record<string, string>> {
+  /** Parsed request cookies. */
+  readonly cookies: Cookies<CookieSchema>,
+  /** Request-scoped database capability. */
+  readonly db: Database,
+  /** Verified canonical user id, or null for anonymous. */
+  readonly identity: string | null,
+  /** Server lifecycle logger. */
+  readonly logger: ILogger,
+  /** The incoming request. */
+  readonly request: Request,
+}
+
+/** Application context plus optional response metadata. */
+export interface ContextResult<AppContext extends object> {
+  /** Application context value. */
+  readonly context: AppContext,
+  /** Response cookies. */
+  readonly cookies?: CookieChange | readonly CookieChange[],
+  /** Response headers, excluding cookies. */
+  readonly headers?: HeadersInit,
+}
+
+type ContextLoader<
+  AppContext extends object,
+  CookieSchema extends Record<string, string>,
+> = (
+  input: ContextInput<CookieSchema>,
+) => AppContext | ContextResult<AppContext> | Promise<AppContext | ContextResult<AppContext>>
+
+interface ResolvedContext<AppContext extends object> {
+  readonly context: AppContext,
+  readonly cookies: readonly CookieChange[],
+  readonly headers: Headers,
+}
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
@@ -77,7 +116,10 @@ export interface ServerOptions {
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities.
  */
-export class Server<AppContext extends object = Record<string, never>> {
+export class Server<
+  AppContext extends object = Record<string, never>,
+  CookieSchema extends Record<string, string> = Record<string, string>,
+> {
   static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
   static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
 
@@ -88,8 +130,8 @@ export class Server<AppContext extends object = Record<string, never>> {
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
   #databaseOptions: DatabaseOptions | null = null
-  #contextCache = new WeakMap<Request, Promise<AppContext>>()
-  #contextLoader: ((request: Request) => AppContext | Promise<AppContext>) | null = null
+  #contextCache = new WeakMap<Request, Promise<ResolvedContext<AppContext>>>()
+  #contextLoader: ContextLoader<AppContext, CookieSchema> | null = null
   #mainComponent: React.ComponentType<AppContext> | null = null
   #mainComponentVersion = -1
   #mainBuilds = new Map<number, Promise<React.ComponentType<AppContext>>>()
@@ -200,27 +242,70 @@ export class Server<AppContext extends object = Record<string, never>> {
    * @param loader - Request-scoped context resolver.
    * @returns The server, typed with the resolved context.
    */
-  context<C extends object>(loader: (request: Request) => C | Promise<C>): Server<C> {
-    const typed = this as unknown as Server<C>
-    typed.#contextLoader = loader as (request: Request) => C | Promise<C>
+  context<C extends object, S extends Record<string, string> = CookieSchema>(
+    loader: ContextLoader<C, S>,
+  ): Server<C, S> {
+    const typed = this as unknown as Server<C, S>
+    typed.#contextLoader = loader
     return typed
   }
 
   /**
    * Resolves the application context once for a request.
    * @param request - The incoming request.
+   * @param identity - The verified canonical user id, or null.
    * @returns The cached context promise.
    */
-  #resolveContext(request: Request): Promise<AppContext> {
+  #resolveContext(request: Request, identity: string | null): Promise<ResolvedContext<AppContext>> {
     const cached = this.#contextCache.get(request)
     if (cached) return cached
 
     const loader = this.#contextLoader
-    const resolved = loader
-      ? Promise.resolve(loader(request))
-      : Promise.resolve({} as AppContext)
+    const resolved = (async () => {
+      if (!loader) {
+        return { context: {} as AppContext, cookies: [], headers: new Headers() }
+      }
+
+      const value = await loader({
+        cookies: new Cookies<CookieSchema>(request.headers.get('cookie')),
+        db: this.#database,
+        identity,
+        logger: this.#logger,
+        request,
+      })
+      if (isContextResult<AppContext>(value)) {
+        const cookies = value.cookies === undefined
+          ? []
+          : Array.isArray(value.cookies) ? value.cookies : [value.cookies]
+        return { context: value.context, cookies, headers: new Headers(value.headers) }
+      }
+
+      return { context: value, cookies: [], headers: new Headers() }
+    })()
     this.#contextCache.set(request, resolved)
     return resolved
+  }
+
+  /**
+   * Merge context response metadata onto a handler or SSR response.
+   * @param response - The response produced by the route or shell.
+   * @param resolved - The request context metadata.
+   * @returns A response with app headers and cookies applied.
+   */
+  #withContextResponse(
+    response: Response,
+    resolved: ResolvedContext<AppContext>,
+  ): Response {
+    for (const [name, value] of resolved.headers) {
+      if (name.toLowerCase() === 'set-cookie') {
+        throw new Error('Basis: set response cookies through context.cookies, not context.headers')
+      }
+      response.headers.append(name, value)
+    }
+    for (const cookie of resolved.cookies) {
+      response.headers.append('Set-Cookie', serializeCookie(cookie))
+    }
+    return response
   }
 
   /**
@@ -239,8 +324,9 @@ export class Server<AppContext extends object = Record<string, never>> {
       ? await this.#authorization.resolve(verified)
       : verified
     return runAsActor({ id: identity }, async () => {
+      const resolved = await this.#resolveContext(request, identity)
       const context: RouteContext<AppContext> = {
-        context: await this.#resolveContext(request),
+        context: resolved.context,
         db: this.#database,
         identity,
         logger: this.#logger,
@@ -256,7 +342,7 @@ export class Server<AppContext extends object = Record<string, never>> {
           const params = parseTemplateURI(target, template)
           if (!params) continue
 
-          return await handler(params, context)
+          return this.#withContextResponse(await handler(params, context), resolved)
         }
       }
 
@@ -302,14 +388,15 @@ export class Server<AppContext extends object = Record<string, never>> {
           ? await this.#authorization.resolve(verified)
           : verified
         return runAsActor({ id: identity }, async () => {
+          const resolved = await this.#resolveContext(request, identity)
           const context = {
-            context: await this.#resolveContext(request),
+            context: resolved.context,
             db: this.#database,
             identity,
             logger: this.#logger,
             request,
           } as RouteContext
-          return sseResponse(params, context, handler)
+          return this.#withContextResponse(await sseResponse(params, context, handler), resolved)
         })
       }
     }
@@ -368,7 +455,10 @@ export class Server<AppContext extends object = Record<string, never>> {
     const runtime: BasisRuntime = { ...this.runtime, identity }
 
     return runAsActor({ id: identity }, async () => {
-      const context = request ? await this.#resolveContext(request) : {} as AppContext
+      const resolved = request
+        ? await this.#resolveContext(request, identity)
+        : { context: {} as AppContext, cookies: [], headers: new Headers() }
+      const context = resolved.context
       const component = await this.#loadMain()
       const head: HeadCollector = {}
       const rendered = component
@@ -398,13 +488,13 @@ export class Server<AppContext extends object = Record<string, never>> {
         const html = fallback
           .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
           .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
-        return new Response(html, {
+        return this.#withContextResponse(new Response(html, {
           headers: { 'Content-Type': 'text/html' },
-        })
+        }), resolved)
       }
 
       const response = await Bun.fetch(this.#devShellURL())
-      return new HTMLRewriter()
+      return this.#withContextResponse(new HTMLRewriter()
         .on('title', {
           element: element => { element.setInnerContent(title) },
         })
@@ -414,7 +504,7 @@ export class Server<AppContext extends object = Record<string, never>> {
         .on('#root', {
           element: element => { element.setInnerContent(application, { html: true }) },
         })
-        .transform(response)
+        .transform(response), resolved)
     })
   }
 
@@ -1229,6 +1319,20 @@ function serializeBootstrap(value: unknown): string {
     .replace(/&/g, '\\u0026')
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029')
+}
+
+/**
+ * Distinguish an application context value from a context result wrapper.
+ * @param value - Loader return value.
+ * @returns Whether the value carries response metadata.
+ */
+function isContextResult<AppContext extends object>(
+  value: AppContext | ContextResult<AppContext>,
+): value is ContextResult<AppContext> {
+  return typeof value === 'object'
+    && value !== null
+    && 'context' in value
+    && ('headers' in value || 'cookies' in value)
 }
 
 /**
