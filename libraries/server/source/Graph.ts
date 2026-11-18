@@ -8,7 +8,7 @@ import { Operator } from './Operator'
 import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
-import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
+import { ACTOR_FIELD_NAME, isReadableFilter, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 import type { CollectionScope, QueryScope } from './SQL'
@@ -619,6 +619,13 @@ export class Graph {
     if (input === null || input === undefined) return null
     const entity = this.#policyEntity(target)
     if (!entity) throw new Error(`Graph: unknown security target "${target}"`)
+    if (isReadableFilter(input)) {
+      const field = entity.effectiveFields.find(candidate => candidate.name === input.field)
+      if (!field || field.type !== FieldType.Entity || field.owner !== target) {
+        throw new Error(`Graph: reference readability requires a direct entity field on "${target}"`)
+      }
+      return { field: input.field, operator: '$readable' } as unknown as Filter
+    }
     const collection = (name: string): CollectionFilterScope | undefined => (
       this.#collectionFilterScope(entity, name)
     )
@@ -1317,6 +1324,7 @@ export class Graph {
   }
 
   #requiresHelper(grant: GraphGrant, table: string): boolean {
+    if (isReadableFilter(grant.predicate)) return false
     if (grant.target !== table || !grant.predicate) return grant.target !== table
     const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
     if (!entity) return true
@@ -1335,6 +1343,37 @@ export class Graph {
     return `policy_${hash}`
   }
 
+  /**
+   * Compile a reference-readability check from the referenced concrete entity
+   * read policies. The correlated subqueries run in the request role, so
+   * target RLS remains active; no SECURITY DEFINER wrapper is introduced.
+   * @param leaf - Entity owning the reference field.
+   * @param fieldName - Direct entity reference field.
+   * @param alias - SQL alias of the referencing row.
+   * @returns The Boolean reference-readability expression.
+   */
+  #readableReferenceExpression(leaf: string, fieldName: string, alias: string): string {
+    const entity = this.#policyEntity(leaf)
+    if (!entity) throw new Error(`Graph: unknown readability owner "${leaf}"`)
+    const field = entity.effectiveFields.find(candidate => candidate.name === fieldName)
+    if (!field || field.type !== FieldType.Entity) {
+      throw new Error(`Graph: reference readability requires a direct entity field on "${leaf}"`)
+    }
+    const reference = `${alias}.${quoteIdentifier(field.column)}`
+    const conditions: string[] = []
+    const leaves = this.definitions.concreteDescendants(field.target)
+    for (const [index, descendant] of leaves.entries()) {
+      const targetAlias = `__readable_${index}`
+      const expression = this.#leafExpression(descendant.name, Action.Read, targetAlias, false)
+      if (!expression) continue
+      conditions.push(
+        `EXISTS (SELECT 1 FROM ${quoteIdentifier(descendant.name)} ${targetAlias} ` +
+        `WHERE ${targetAlias}.${quoteIdentifier('id')} = ${reference} AND (${expression}))`,
+      )
+    }
+    return conditions.length === 0 ? 'FALSE' : `(${conditions.join(' OR ')})`
+  }
+
   #compileDirectPredicate(
     grant: GraphGrant,
     alias: string,
@@ -1342,6 +1381,10 @@ export class Graph {
     allowSubqueries: boolean,
     entityOverride?: EntityDefinition,
   ): string {
+    const predicate: unknown = grant.predicate
+    if (isReadableFilter(predicate)) {
+      return this.#readableReferenceExpression(table, predicate.field, alias)
+    }
     const entity = entityOverride ??
       (grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target))
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
