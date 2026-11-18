@@ -5,7 +5,7 @@ import { parseSync } from 'libpg-query'
 import type { SqlDoc } from './doc'
 import { concat, group, hardline, indent, join, line, text } from './doc'
 import type { ValueOf } from './expressions'
-import { empty, printResTarget, printTypeName, quoteIdentifier } from './expressions'
+import { empty, functionName, printResTarget, printTypeName, quoteIdentifier } from './expressions'
 import type { PrintContext } from './printer'
 import { SourceText } from './source'
 import { printSelect } from './statements'
@@ -68,7 +68,7 @@ export function printCreateFunctionStmt(node: ValueOf<'CreateFunctionStmt'>, ctx
   const normalParameters = parameters.filter(parameter => bodyOf<{ mode?: string }>(parameter).mode !== 'FUNC_PARAM_TABLE')
   const header: SqlDoc[] = [
     text(`CREATE ${node.replace ? 'OR REPLACE ' : ''}${node.is_procedure ? 'PROCEDURE' : 'FUNCTION'} `),
-    text((node.funcname ?? []).map(name => quoteIdentifier(stringValue(name))).join('.')),
+    text(functionName((node.funcname ?? []).map(name => stringValue(name)))),
     text('('),
     join(text(', '), normalParameters.map(parameter => printFunctionParameter(bodyOf<ValueOf<'FunctionParameter'>>(parameter), ctx))),
     text(')'),
@@ -812,8 +812,13 @@ function exprQuery(value: unknown): string {
  * @param value
  */
 function printPlTarget(value: unknown): SqlDoc {
-  const name = plTargetName(value)
-  return text(name)
+  if (!value || typeof value !== 'object') return text('')
+  const datum = bodyOf<Record<string, unknown>>(value)
+  const refname = datum.refname
+  if (typeof refname === 'string' && refname !== '(unnamed row)') return text(quoteIdentifier(refname))
+  const fields = datum.fields as { name?: string }[] | undefined
+  const names = (fields ?? []).map(field => field.name ?? '').filter(name => name !== '')
+  return text(names.map(quoteIdentifier).join(', '))
 }
 
 /**

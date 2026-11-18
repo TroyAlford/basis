@@ -12,8 +12,12 @@ import { tagNode } from './types'
 export interface PrintContext {
   /** Create a child context for a separately parsed string (PL/pgSQL expressions). */
   readonly child: (source: SourceText) => PrintContext,
+  /** Interpolation placeholder identifiers that must remain byte-exact and unquoted. */
+  readonly opaque: ReadonlySet<string>,
   /** Recursively print a protocol node. */
   readonly print: (node: Node) => SqlDoc,
+  /** FROM aliases in scope, keyed by their folded name. */
+  relations: ReadonlyMap<string, string>,
   /** The source text the current AST was parsed from. */
   readonly source: SourceText,
   /** A statement printer must not consume comments beyond this source offset. */
@@ -27,11 +31,17 @@ export interface PrintContext {
  * @param source
  * @param plFunctions
  */
-export function createPrinter(source: SourceText, plFunctions: readonly PlFunction[] = []): PrintContext {
+export function createPrinter(
+  source: SourceText,
+  plFunctions: readonly PlFunction[] = [],
+  opaque: ReadonlySet<string> = new Set(),
+): PrintContext {
   let plIndex = 0
   const context: PrintContext = {
-    child: childSource => createPrinter(childSource),
+    child: childSource => createPrinter(childSource, [], opaque),
+    opaque,
     print: node => printNode(node, context),
+    relations: new Map(),
     source,
     statementEnd: Number.POSITIVE_INFINITY,
     takePlFunction: () => {
@@ -74,7 +84,7 @@ function printNode(node: Node, ctx: PrintContext): SqlDoc {
     case 'RangeSubselect': return printRangeSubselect(tagged.value, ctx)
     case 'RangeFunction': return printRangeFunction(tagged.value, ctx)
     case 'JoinExpr': return printJoin(tagged.value, ctx)
-    case 'Alias': return printAlias(tagged.value)
+    case 'Alias': return printAlias(tagged.value, ctx)
     case 'ResTarget': return printResTarget(tagged.value, ctx)
     case 'SortBy': return printSortBy(tagged.value, ctx)
     case 'ColumnDef': return printColumnDef(tagged.value, ctx)

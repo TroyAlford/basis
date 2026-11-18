@@ -46,9 +46,9 @@ describe('Reviewed schema evolution', () => {
       expect(applied.version).toBe(attemptVersion)
 
       const [ledger] = await database.sql<{ count: number }[]>`
-        SELECT COUNT(*)::INTEGER AS count
-        FROM basis.schema_migration
-        WHERE checksum = ${artifact.checksum}
+        SELECT COUNT(*)::INTEGER AS "count"
+        FROM "basis"."schema_migration"
+        WHERE "checksum" = ${artifact.checksum}
       `
       expect(ledger?.count).toBe(1)
 
@@ -56,7 +56,7 @@ describe('Reviewed schema evolution', () => {
       expect(readiness.ready).toBe(true)
       expect(readiness.discrepancies).toEqual([])
       const [afterApply] = await database.sql<{ present: boolean }[]>`
-        SELECT TO_REGCLASS(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
+        SELECT TO_REGCLASS(${`"${database.schema}"."Note"`}) IS NOT NULL AS "present"
       `
       expect(afterApply?.present).toBe(true)
       const noopPlan = DDL.plan({
@@ -268,20 +268,20 @@ describe('Reviewed schema evolution', () => {
       })
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow()
       const [ledgerTable] = await database.sql<{ present: boolean }[]>`
-        SELECT TO_REGCLASS('basis.schema_migration') IS NOT NULL AS present
+        SELECT TO_REGCLASS('basis.schema_migration') IS NOT NULL AS "present"
       `
       let ledgerCount = 0
       if (ledgerTable?.present) {
         const [ledger] = await database.sql<{ count: number }[]>`
-          SELECT COUNT(*)::INTEGER AS count
-          FROM basis.schema_migration
-          WHERE checksum = ${artifact.checksum}
+          SELECT COUNT(*)::INTEGER AS "count"
+          FROM "basis"."schema_migration"
+          WHERE "checksum" = ${artifact.checksum}
         `
         ledgerCount = ledger?.count ?? 0
       }
       expect(ledgerCount).toBe(0)
       const [table] = await database.sql<{ present: boolean }[]>`
-        SELECT TO_REGCLASS(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
+        SELECT TO_REGCLASS(${`"${database.schema}"."Note"`}) IS NOT NULL AS "present"
       `
       expect(table?.present).toBe(false)
     }, { fresh: true })

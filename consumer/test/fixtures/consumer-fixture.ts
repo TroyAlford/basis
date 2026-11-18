@@ -59,12 +59,12 @@ test('consumer fixture uses provided entities', async () => {
     graph,
     setup: async database => {
       await database.sql`
-        INSERT INTO "Entity" (id, name, entity)
+        INSERT INTO "Entity" ("id", "name", "entity")
         VALUES
           (${id}, 'Consumer', 'ConsumerNote')
       `
       await database.sql`
-        INSERT INTO "ConsumerNote" (id, label)
+        INSERT INTO "ConsumerNote" ("id", "label")
         VALUES
           (${id}, 'isolated')
       `

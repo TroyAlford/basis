@@ -4,7 +4,7 @@ import type { Node } from 'libpg-query'
 import type { SqlDoc } from './doc'
 import { concat, group, hardline, indent, join, line, text } from './doc'
 import type { ValueOf } from './expressions'
-import { empty, printRangeVar, printTypeName, quoteIdentifier } from './expressions'
+import { empty, functionName, printRangeVar, printSortBy, printTypeName, quoteIdentifier, quotePart } from './expressions'
 import type { PrintContext } from './printer'
 import type { SourceText } from './source'
 import { bodyOf, booleanValue, kindOf, stringValue, stringValues, UnsupportedNodeError } from './types'
@@ -57,6 +57,8 @@ export function printSelect(node: ValueOf<'SelectStmt'>, ctx: PrintContext, opti
   }
   if (!node.targetList?.length) throw new UnsupportedNodeError('SelectStmt', 'missing target list')
 
+  const previousRelations = ctx.relations
+  ctx.relations = collectFromAliases(node.fromClause, ctx, new Map(previousRelations))
   let distinct = empty
   if (node.distinctClause?.length) {
     const onlyList = node.distinctClause.length === 1 && kindOf(node.distinctClause[0]) === 'List'
@@ -100,7 +102,8 @@ export function printSelect(node: ValueOf<'SelectStmt'>, ctx: PrintContext, opti
     previousEnd = lastNodeEnd(node.windowClause, ctx.source)
   }
   if (node.sortClause?.length) {
-    pushClause(parts, 'ORDER BY ', firstNode(node.sortClause), previousEnd, ctx, () => list((node.sortClause ?? []).map(ctx.print)))
+    const aliases = outputAliases(node.targetList, ctx)
+    pushClause(parts, 'ORDER BY ', firstNode(node.sortClause), previousEnd, ctx, () => list((node.sortClause ?? []).map(item => printSortBy(bodyOf<ValueOf<'SortBy'>>(item), ctx, aliases))))
     previousEnd = lastNodeEnd(node.sortClause, ctx.source)
   }
   if (node.limitCount) {
@@ -114,6 +117,44 @@ export function printSelect(node: ValueOf<'SelectStmt'>, ctx: PrintContext, opti
     pushClause(parts, 'OFFSET ', node.limitOffset as Node, previousEnd, ctx, () => ctx.print(node.limitOffset as Node))
   }
   return concat(...parts)
+}
+
+/** Collect FROM aliases into a folded-name map. */
+function collectFromAliases(
+  nodes: readonly Node[] | undefined,
+  ctx: PrintContext,
+  aliases: Map<string, string>,
+): Map<string, string> {
+  for (const node of nodes ?? []) {
+    const kind = kindOf(node)
+    if (kind === 'RangeVar') {
+      const relation = bodyOf<ValueOf<'RangeVar'>>(node)
+      if (relation.alias) {
+        const source = ctx.source.relationAlias(relation.location) ?? relation.alias.aliasname ?? ''
+        aliases.set(foldedIdentifier(source), quotePart(source, ctx))
+      }
+    } else if (kind === 'RangeSubselect' || kind === 'RangeFunction') {
+      const value = bodyOf<{ alias?: { aliasname?: string } }>(node)
+      if (value.alias?.aliasname) {
+        aliases.set(value.alias.aliasname.toLowerCase(), quoteIdentifier(value.alias.aliasname))
+      }
+    } else if (kind === 'JoinExpr') {
+      const joinNode = bodyOf<ValueOf<'JoinExpr'>>(node)
+      collectFromAliases([joinNode.larg as Node, joinNode.rarg as Node], ctx, aliases)
+      if (joinNode.alias?.aliasname) {
+        aliases.set(joinNode.alias.aliasname.toLowerCase(), quoteIdentifier(joinNode.alias.aliasname))
+      }
+    }
+  }
+  return aliases
+}
+
+/** Fold an identifier to its PostgreSQL comparison name. */
+function foldedIdentifier(source: string): string {
+  const identifier = source.startsWith('"') && source.endsWith('"')
+    ? source.slice(1, -1).replace(/""/gu, '"')
+    : source
+  return identifier.toLowerCase()
 }
 
 /**
@@ -218,8 +259,9 @@ export function printCommonTableExpr(node: ValueOf<'CommonTableExpr'>, ctx: Prin
   const materialized = node.ctematerialized === 'CTEMaterializeAlways' ? 'MATERIALIZED '
     : node.ctematerialized === 'CTEMaterializeNever' ? 'NOT MATERIALIZED '
       : ''
+  const queryStart = ctx.source.span(node.ctequery as Node)?.start ?? 0
   return concat(
-    text(quoteIdentifier(node.ctename ?? '')),
+    text(ctx.source.quotedIdentifierBefore(queryStart, node.ctename ?? '')),
     columns,
     text(` AS ${materialized}(`),
     indent(concat(hardline(), ctx.print(node.ctequery as Node))),
@@ -241,7 +283,7 @@ export function printInsert(node: ValueOf<'InsertStmt'>, ctx: PrintContext): Sql
     parts.push(text(' ('), join(text(', '), node.cols.map(column => {
       const target = bodyOf<ValueOf<'ResTarget'>>(column)
       if (target.name === undefined) throw new UnsupportedNodeError('InsertStmt', 'column target')
-      return printName(target.name)
+      return text(quotePart(ctx.source.identifierAt(target.location, target.name), ctx))
     })), text(')'))
   }
   if (node.override === 'OVERRIDING_SYSTEM_VALUE') parts.push(text(' OVERRIDING SYSTEM VALUE'))
@@ -304,7 +346,7 @@ function printReturning(node: ValueOf<'ReturningClause'>, ctx: PrintContext): Sq
  */
 function printAssignment(node: ValueOf<'ResTarget'>, ctx: PrintContext): SqlDoc {
   if (node.name === undefined) throw new UnsupportedNodeError('ResTarget', 'assignment name')
-  return concat(printName(node.name), text(' = '), ctx.print(node.val as Node))
+  return concat(text(quotePart(ctx.source.identifierAt(node.location, node.name), ctx)), text(' = '), ctx.print(node.val as Node))
 }
 
 /**
@@ -401,7 +443,7 @@ export function printColumnDef(node: ValueOf<'ColumnDef'>, ctx: PrintContext): S
   if (node.compression) throw new UnsupportedNodeError('ColumnDef', 'compression')
   if (node.storage) throw new UnsupportedNodeError('ColumnDef', 'storage')
   const parts: SqlDoc[] = [
-    printName(node.colname ?? ''),
+    text(quotePart(ctx.source.identifierAt(node.location, node.colname ?? ''), ctx)),
     text(' '),
     printTypeName(node.typeName as ValueOf<'TypeName'>, ctx),
   ]
@@ -441,7 +483,7 @@ export function printConstraint(node: ValueOf<'Constraint'>, ctx: PrintContext):
   const keyword = CONSTRAINT_KEYWORDS[node.contype ?? '']
   if (!keyword) throw new UnsupportedNodeError('Constraint', String(node.contype))
   const parts: SqlDoc[] = []
-  if (node.conname) parts.push(text(`CONSTRAINT ${quoteIdentifier(node.conname)} `))
+  if (node.conname) parts.push(text(`CONSTRAINT ${ctx.source.quotedIdentifierNear(node.location ?? 0, node.conname)} `))
   switch (node.contype) {
     case 'CONSTR_DEFAULT':
       parts.push(text('DEFAULT '), ctx.print(node.raw_expr as Node))
@@ -454,16 +496,16 @@ export function printConstraint(node: ValueOf<'Constraint'>, ctx: PrintContext):
     case 'CONSTR_UNIQUE': {
       parts.push(text(keyword))
       if (node.nulls_not_distinct) parts.push(text(' NULLS NOT DISTINCT'))
-      if (node.keys?.length) parts.push(text('('), join(text(', '), node.keys.map(key => printKey(key))), text(')'))
-      if (node.including?.length) parts.push(text(' INCLUDE ('), join(text(', '), node.including.map(key => printKey(key))), text(')'))
+      if (node.keys?.length) parts.push(text('('), join(text(', '), node.keys.map(key => printKey(key, ctx, node.location ?? 0))), text(')'))
+      if (node.including?.length) parts.push(text(' INCLUDE ('), join(text(', '), node.including.map(key => printKey(key, ctx, node.location ?? 0))), text(')'))
       break
     }
     case 'CONSTR_FOREIGN': {
       if (node.fk_attrs?.length) {
-        parts.push(text('FOREIGN KEY ('), join(text(', '), node.fk_attrs.map(key => printKey(key))), text(')'))
+        parts.push(text('FOREIGN KEY ('), join(text(', '), node.fk_attrs.map(key => printKey(key, ctx, node.location ?? 0))), text(')'))
       }
       parts.push(text(node.fk_attrs?.length ? ' REFERENCES ' : 'REFERENCES '), ctx.print({ RangeVar: node.pktable } as Node))
-      if (node.pk_attrs?.length) parts.push(text('('), join(text(', '), node.pk_attrs.map(key => printKey(key))), text(')'))
+      if (node.pk_attrs?.length) parts.push(text('('), join(text(', '), node.pk_attrs.map(key => printKey(key, ctx, node.pktable?.location ?? node.location ?? 0))), text(')'))
       if (node.fk_matchtype && node.fk_matchtype !== 's') parts.push(text(` MATCH ${fkMatch(node.fk_matchtype)}`))
       if (node.fk_del_action && node.fk_del_action !== 'a') parts.push(text(` ON DELETE ${fkAction(node.fk_del_action)}`))
       if (node.fk_upd_action && node.fk_upd_action !== 'a') parts.push(text(` ON UPDATE ${fkAction(node.fk_upd_action)}`))
@@ -490,9 +532,9 @@ export function printConstraint(node: ValueOf<'Constraint'>, ctx: PrintContext):
  * Print one key or identifier node.
  * @param node
  */
-function printKey(node: Node): SqlDoc {
+function printKey(node: Node, ctx: PrintContext, position: number): SqlDoc {
   if (kindOf(node) !== 'String') throw new UnsupportedNodeError('Constraint', 'non-name key')
-  return text(quoteIdentifier(stringValue(node)))
+  return text(ctx.source.quotedIdentifierNear(position, stringValue(node)))
 }
 
 /**
@@ -531,7 +573,9 @@ export function printIndexStmt(node: ValueOf<'IndexStmt'>, ctx: PrintContext): S
     text(' ON '),
     ctx.print({ RangeVar: node.relation } as Node),
   ]
-  if (node.accessMethod) parts.push(text(` USING ${quoteIdentifier(node.accessMethod)}`))
+  const relationEnd = ctx.source.span(node.relation as Node)?.end ?? 0
+  const explicitUsing = ctx.source.tokens.some(token => token.start >= relationEnd && token.text.toLowerCase() === 'using')
+  if (node.accessMethod && explicitUsing) parts.push(text(` USING ${quoteIdentifier(node.accessMethod)}`))
   parts.push(text(' ('), list((node.indexParams ?? []).map(ctx.print), text(', ')), text(')'))
   if (node.indexIncludingParams?.length) {
     parts.push(text(' INCLUDE ('), list(node.indexIncludingParams.map(ctx.print), text(', ')), text(')'))
@@ -636,7 +680,7 @@ export function printCreateTrigStmt(node: ValueOf<'CreateTrigStmt'>, ctx: PrintC
   if (node.whenClause) parts.push(text(' WHEN ('), ctx.print(node.whenClause as Node), text(')'))
   parts.push(
     line(),
-    text(`EXECUTE FUNCTION ${stringValues(node.funcname).map(quoteIdentifier).join('.')}(`),
+    text(`EXECUTE FUNCTION ${functionName(stringValues(node.funcname))}(`),
     join(text(', '), (node.args ?? []).map(argument => {
       if (kindOf(argument) === 'String') return text(`'${stringValue(argument).replace(/'/gu, "''")}'`)
       return ctx.print(argument)
@@ -864,10 +908,18 @@ export function printDefElemOption(node: Node, ctx: PrintContext): SqlDoc {
   return concat(text(name), text(' '), ctx.print(option.arg))
 }
 
-/**
- * Render a small document as inline text (used only for SET arguments).
- * @param doc
- */
+/** Map folded output alias names to their canonical quoted spelling. */
+function outputAliases(targets: readonly Node[] | undefined, ctx: PrintContext): Map<string, string> {
+  const aliases = new Map<string, string>()
+  for (const target of targets ?? []) {
+    const value = bodyOf<ValueOf<'ResTarget'>>(target)
+    if (value.name === undefined) continue
+    const alias = ctx.source.aliasAfter(ctx.source.span(value.val as Node)?.start ?? 0)
+    aliases.set(value.name.toLowerCase(), alias === undefined ? quoteIdentifier(value.name) : quotePart(alias, ctx))
+  }
+  return aliases
+}
+
 /**
  * Print one-item-per-line list with comments attached to their source items.
  * @param items

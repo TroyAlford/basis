@@ -13,28 +13,65 @@ export type ValueOf<K extends PgKind> = Extract<PgNode, { kind: K }>['value']
 /** Empty document. */
 export const empty = text('')
 
-/** Reserved PostgreSQL words that cannot be emitted as bare identifiers. */
-const RESERVED = new Set([
-  'all', 'analyse', 'analyze', 'and', 'any', 'array', 'as', 'asc', 'asymmetric', 'authorization',
-  'binary', 'both', 'case', 'cast', 'check', 'collate', 'collation', 'column', 'concurrently',
-  'constraint', 'create', 'cross', 'current_catalog', 'current_date', 'current_role', 'current_schema',
-  'current_time', 'current_timestamp', 'current_user', 'default', 'deferrable', 'desc', 'distinct',
-  'do', 'else', 'end', 'except', 'false', 'fetch', 'for', 'foreign', 'freeze', 'from', 'full',
-  'grant', 'group', 'having', 'ilike', 'in', 'initially', 'inner', 'intersect', 'into', 'is',
-  'isnull', 'join', 'lateral', 'leading', 'left', 'like', 'limit', 'localtime', 'localtimestamp',
-  'natural', 'not', 'notnull', 'null', 'offset', 'on', 'only', 'or', 'order', 'outer', 'overlaps',
-  'placing', 'primary', 'references', 'returning', 'right', 'select', 'session_user', 'similar',
-  'some', 'symmetric', 'table', 'tablesample', 'then', 'to', 'trailing', 'true', 'union', 'unique',
-  'user', 'using', 'variadic', 'verbose', 'when', 'where', 'window', 'with',
+/** Built-in SQL functions formatted with canonical uppercase names. */
+const BUILTIN_FUNCTIONS = new Set([
+  'abs', 'aclexplode', 'array_agg', 'array_length', 'array_position', 'array_remove',
+  'array_to_string', 'avg', 'bool_and', 'bool_or', 'cardinality', 'chr', 'coalesce', 'concat',
+  'count', 'current_database', 'current_schema', 'current_schemas', 'current_setting', 'date_part',
+  'date_trunc', 'format', 'generate_series', 'gen_random_uuid', 'greatest', 'has_column_privilege',
+  'has_schema_privilege', 'has_table_privilege', 'hashtext', 'json_agg', 'json_build_object',
+  'jsonb_agg', 'jsonb_build_object', 'jsonb_set', 'least', 'length', 'lower', 'make_interval',
+  'max', 'md5', 'min', 'now', 'nullif', 'pg_advisory_xact_lock', 'pg_get_constraintdef',
+  'pg_get_function_identity_arguments', 'pg_get_functiondef', 'pg_get_indexdef',
+  'pg_get_serial_sequence', 'pg_get_triggerdef', 'pg_get_userbyid', 'position', 'random',
+  'regexp_replace', 'round', 'row_to_json', 'session_user', 'set_config', 'setweight', 'split_part',
+  'string_agg', 'string_to_array', 'substring', 'sum', 'to_char', 'to_date', 'to_json', 'to_jsonb',
+  'to_regclass', 'to_regprocedure', 'to_timestamp', 'to_tsvector', 'transaction_timestamp', 'trim',
+  'unaccent', 'unnest', 'upper', 'user',
 ])
 
 /**
- * Quote an identifier only when PostgreSQL would not read it back identically.
+ * Quote an identifier.
+ *
+ * The formatter quotes every identifier position so folded source spellings do
+ * not silently change case-sensitive identity and so canonical output is
+ * independent of how an identifier happened to be written.
  * @param name
  */
 export function quoteIdentifier(name: string): string {
-  if (/^[a-z_][a-z0-9_$]*$/u.test(name) && !RESERVED.has(name)) return name
   return `"${name.replace(/"/gu, '""')}"`
+}
+
+/**
+ * Quote an exact source identifier component, preserving existing quotes.
+ * @param source
+ */
+export function quoteSourceIdentifier(source: string): string {
+  return source.startsWith('"') && source.endsWith('"') ? source : quoteIdentifier(source)
+}
+
+/**
+ * Quote an exact source identifier unless it is an opaque interpolation marker.
+ * @param source
+ * @param ctx
+ */
+export function quotePart(source: string, ctx: PrintContext): string {
+  const raw = source.startsWith('"') && source.endsWith('"')
+    ? source.slice(1, -1).replace(/""/gu, '"')
+    : source
+  return ctx.opaque.has(raw) ? source : quoteSourceIdentifier(source)
+}
+
+/**
+ * Print a function name: built-ins uppercase, user-defined names lowercase and unquoted.
+ * @param names
+ */
+export function functionName(names: readonly string[]): string {
+  const last = (names[names.length - 1] ?? '').toLowerCase()
+  if (BUILTIN_FUNCTIONS.has(last)) return last.toUpperCase()
+  return names.map(name => (
+    /^[a-z_][a-z0-9_$]*$/u.test(name) ? name.toLowerCase() : quoteIdentifier(name)
+  )).join('.')
 }
 
 /**
@@ -267,15 +304,32 @@ function printColumn(node: ValueOf<'ColumnRef'>, ctx: PrintContext): SqlDoc {
   const names = fields.filter(field => kindOf(field) === 'String').map(stringValue)
   const star = fields.some(field => kindOf(field) === 'A_Star')
   if (names.length === fields.length) {
-    return text(ctx.source.qualified(node.location, names.map(quoteIdentifier).join('.')))
+    return text(columnParts(node, names, ctx))
   }
   if (star && names.length === fields.length - 1) {
-    const base = names.length === 0
-      ? ''
-      : ctx.source.qualified(node.location, names.map(quoteIdentifier).join('.'))
+    const base = names.length === 0 ? '' : columnParts(node, names, ctx)
     return text(base === '' ? '*' : `${base}.*`)
   }
   throw new UnsupportedNodeError('ColumnRef', 'non-name field')
+}
+
+/** Quote a column reference, resolving a FROM alias case-insensitively. */
+function columnParts(node: ValueOf<'ColumnRef'>, names: readonly string[], ctx: PrintContext): string {
+  const parts = ctx.source.qualifiedParts(node.location, names)
+  const first = parts[0]
+  if (parts.length > 1 && first !== undefined) {
+    const folded = unquoteIdentifier(first).toLowerCase()
+    const relation = ctx.relations.get(folded)
+    if (relation !== undefined) parts[0] = relation
+  }
+  return parts.map(part => quotePart(part, ctx)).join('.')
+}
+
+/** Remove surrounding double quotes from a source identifier. */
+function unquoteIdentifier(source: string): string {
+  return source.startsWith('"') && source.endsWith('"')
+    ? source.slice(1, -1).replace(/""/gu, '"')
+    : source
 }
 
 /**
@@ -484,7 +538,7 @@ function printFuncCall(node: ValueOf<'FuncCall'>, ctx: PrintContext): SqlDoc {
   const last = names[names.length - 1] ?? ''
   if (node.funcformat === 'COERCE_SQL_SYNTAX') return printSqlSyntaxFunction(last, node, ctx)
 
-  const name = ctx.source.qualified(node.location, names.map(quoteIdentifier).join('.'))
+  const name = functionName(names)
   const args = node.args ?? []
   const inner: SqlDoc[] = []
   if (node.agg_star) {
@@ -738,7 +792,8 @@ export function printResTarget(node: ValueOf<'ResTarget'>, ctx: PrintContext): S
   if (node.indirection?.length) throw new UnsupportedNodeError('ResTarget', 'indirection')
   const value = ctx.print(node.val as Node)
   if (node.name === undefined) return value
-  return concat(value, text(' AS '), text(quoteIdentifier(node.name)))
+  const alias = ctx.source.aliasAfter(ctx.source.span(node.val as Node)?.start ?? 0)
+  return concat(value, text(' AS '), text(alias === undefined ? quoteIdentifier(node.name) : quotePart(alias, ctx)))
 }
 
 /**
@@ -746,24 +801,44 @@ export function printResTarget(node: ValueOf<'ResTarget'>, ctx: PrintContext): S
  * @param node
  * @param ctx
  */
-export function printSortBy(node: ValueOf<'SortBy'>, ctx: PrintContext): SqlDoc {
+export function printSortBy(
+  node: ValueOf<'SortBy'>,
+  ctx: PrintContext,
+  aliases: ReadonlyMap<string, string> = new Map(),
+): SqlDoc {
   const direction = node.sortby_dir === 'SORTBY_ASC' ? ' ASC'
     : node.sortby_dir === 'SORTBY_DESC' ? ' DESC'
       : node.sortby_dir === 'SORTBY_USING' ? ' USING ' : ''
   const nulls = node.sortby_nulls === 'SORTBY_NULLS_FIRST' ? ' NULLS FIRST'
     : node.sortby_nulls === 'SORTBY_NULLS_LAST' ? ' NULLS LAST' : ''
-  return concat(ctx.print(node.node as Node), text(direction), text(nulls))
+  return concat(printOrderNode(node.node as Node, ctx, aliases), text(direction), text(nulls))
+}
+
+/** Print an ORDER BY expression, resolving unquoted output-alias references. */
+function printOrderNode(node: Node, ctx: PrintContext, aliases: ReadonlyMap<string, string>): SqlDoc {
+  if (kindOf(node) === 'ColumnRef') {
+    const column = bodyOf<ValueOf<'ColumnRef'>>(node)
+    const fields = column.fields ?? []
+    if (fields.length === 1 && kindOf(fields[0]) === 'String') {
+      const name = stringValue(fields[0])
+      const source = ctx.source.tokenAt(column.location)
+      const alias = aliases.get(name.toLowerCase())
+      if (source !== undefined && !source.text.startsWith('"') && alias !== undefined) return text(alias)
+    }
+  }
+  return ctx.print(node)
 }
 
 /**
  * Print an alias, including its optional column list.
  * @param node
  */
-export function printAlias(node: ValueOf<'Alias'>): SqlDoc {
+export function printAlias(node: ValueOf<'Alias'>, ctx: PrintContext): SqlDoc {
+  const aliasName = node.aliasname ?? ''
   const columns = node.colnames?.length
     ? concat(text('('), join(text(', '), stringValues(node.colnames).map(name => text(quoteIdentifier(name)))), text(')'))
     : empty
-  return concat(text(quoteIdentifier(node.aliasname ?? '')), columns)
+  return concat(text(ctx.opaque.has(aliasName) ? aliasName : quoteIdentifier(aliasName)), columns)
 }
 
 /**
@@ -773,7 +848,7 @@ export function printAlias(node: ValueOf<'Alias'>): SqlDoc {
  */
 export function printRangeSubselect(node: ValueOf<'RangeSubselect'>, ctx: PrintContext): SqlDoc {
   const lateral = node.lateral ? text('LATERAL ') : empty
-  const alias = node.alias ? concat(text(' '), printAlias(node.alias)) : empty
+  const alias = node.alias ? concat(text(' '), printAlias(node.alias, ctx)) : empty
   return concat(
     lateral,
     text('('),
@@ -796,7 +871,7 @@ export function printRangeFunction(node: ValueOf<'RangeFunction'>, ctx: PrintCon
     if (items.length === 0) throw new UnsupportedNodeError('RangeFunction', 'missing function')
     return ctx.print(items[0] as Node)
   })
-  const alias = node.alias ? concat(text(' '), printAlias(node.alias)) : empty
+  const alias = node.alias ? concat(text(' '), printAlias(node.alias, ctx)) : empty
   return concat(
     node.lateral ? text('LATERAL ') : empty,
     join(text(', '), functions),
@@ -813,13 +888,12 @@ export function printRangeFunction(node: ValueOf<'RangeFunction'>, ctx: PrintCon
 export function printRangeVar(node: ValueOf<'RangeVar'>, ctx: PrintContext): SqlDoc {
   const fallback = [node.catalogname, node.schemaname, node.relname]
     .filter((part): part is string => part !== undefined)
-    .map(quoteIdentifier)
-    .join('.')
-  const relation = text(ctx.source.qualified(node.location, fallback))
+  const relation = text(ctx.source.qualifiedParts(node.location, fallback).map(part => quotePart(part, ctx)).join('.'))
   if (!node.alias) return relation
   const alias = node.alias
+  const aliasName = ctx.source.relationAlias(node.location) ?? alias.aliasname ?? ''
   const columns = alias.colnames?.length
-    ? concat(text('('), join(text(', '), stringValues(alias.colnames).map(quoteIdentifier).map(text)), text(')'))
+    ? concat(text('('), join(text(', '), stringValues(alias.colnames).map(name => text(quotePart(name, ctx)))), text(')'))
     : empty
-  return concat(relation, text(' '), text(quoteIdentifier(alias.aliasname ?? '')), columns)
+  return concat(relation, text(' '), text(quotePart(aliasName, ctx)), columns)
 }

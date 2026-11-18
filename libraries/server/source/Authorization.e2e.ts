@@ -157,9 +157,9 @@ describe('Authorization RLS', () => {
         current: string,
         superuser: boolean,
       }[]>`
-        SELECT CURRENT_USER AS current, r.rolsuper AS superuser, r.rolbypassrls AS bypass
-        FROM pg_roles r
-        WHERE r.rolname = CURRENT_USER
+        SELECT CURRENT_USER AS "current", "r"."rolsuper" AS "superuser", "r"."rolbypassrls" AS "bypass"
+        FROM "pg_roles" "r"
+        WHERE "r"."rolname" = CURRENT_USER
       `
       expect(role?.current).toBe('basis_app')
       expect(role?.superuser).toBe(false)
@@ -193,12 +193,12 @@ describe('Authorization RLS', () => {
           [otherArticle, 'Other', other],
         ] as const) {
           await sql`
-            INSERT INTO "Entity" (id, name, entity)
+            INSERT INTO "Entity" ("id", "name", "entity")
             VALUES
               (${id}, ${title}, 'Article')
           `
           await sql`
-            INSERT INTO "Article" (id, title, "owner.id")
+            INSERT INTO "Article" ("id", "title", "owner.id")
             VALUES
               (${id}, ${title}, ${owner})
           `
@@ -208,12 +208,12 @@ describe('Authorization RLS', () => {
           [otherPost, 'Other post', other],
         ] as const) {
           await sql`
-            INSERT INTO "Entity" (id, name, entity)
+            INSERT INTO "Entity" ("id", "name", "entity")
             VALUES
               (${id}, ${title}, 'Post')
           `
           await sql`
-            INSERT INTO "Post" (id, title, "owner.id")
+            INSERT INTO "Post" ("id", "title", "owner.id")
             VALUES
               (${id}, ${title}, ${owner})
           `
@@ -262,20 +262,20 @@ describe('Authorization RLS', () => {
 
       const actorSetting = await asActor(user, () => server.db.tx(async sql => (
         sql<{ actor: string | null }[]>`
-          SELECT CURRENT_SETTING('actor.id', TRUE) AS actor
+          SELECT CURRENT_SETTING('actor.id', TRUE) AS "actor"
         `
       )))
       expect(actorSetting[0]?.actor).toBe(user)
       const anonymousSetting = await asActor(null, () => server.db.tx(async sql => (
         sql<{ actor: string | null }[]>`
-          SELECT CURRENT_SETTING('actor.id', TRUE) AS actor
+          SELECT CURRENT_SETTING('actor.id', TRUE) AS "actor"
         `
       )))
       expect(anonymousSetting[0]?.actor ?? '').toBe('')
 
       const changed = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
-        SET title = 'Leaked'
+        SET "title" = 'Leaked'
         WHERE "id" = ${article}
         RETURNING "id"
       `))
@@ -304,12 +304,12 @@ describe('Authorization RLS', () => {
       const allowed = randomUUID()
       await asActor(user, () => server.db.tx(async sql => {
         await sql`
-          INSERT INTO "Entity" (id, name, entity)
+          INSERT INTO "Entity" ("id", "name", "entity")
           VALUES
             (${allowed}, 'Allowed', 'Article')
         `
         await sql`
-          INSERT INTO "Article" (id, title, "owner.id")
+          INSERT INTO "Article" ("id", "title", "owner.id")
           VALUES
             (${allowed}, 'Allowed', ${user})
         `
@@ -317,12 +317,12 @@ describe('Authorization RLS', () => {
       await expect(asActor(user, () => server.db.tx(async sql => {
         const denied = randomUUID()
         await sql`
-          INSERT INTO "Entity" (id, name, entity)
+          INSERT INTO "Entity" ("id", "name", "entity")
           VALUES
             (${denied}, 'Denied', 'Article')
         `
         await sql`
-          INSERT INTO "Article" (id, title, "owner.id")
+          INSERT INTO "Article" ("id", "title", "owner.id")
           VALUES
             (${denied}, 'Denied', ${user})
         `
@@ -335,7 +335,7 @@ describe('Authorization RLS', () => {
       expect(await asActor(other, () => authorization.can('update', 'Article', { id: otherArticle }))).toBe(true)
       const updated = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
-        SET title = 'Updated'
+        SET "title" = 'Updated'
         WHERE "id" = ${otherArticle}
         RETURNING "id"
       `))
@@ -344,13 +344,13 @@ describe('Authorization RLS', () => {
       await asActor(admin.userId, () => authorization.assignRole(other, limited.id))
       await expect(asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
-        SET title = 'Changed'
+        SET "title" = 'Changed'
         WHERE "id" = ${otherArticle}
         RETURNING "id"
       `))).rejects.toThrow()
       const sameTitle = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
-        SET title = 'Updated'
+        SET "title" = 'Updated'
         WHERE "id" = ${otherArticle}
         RETURNING "id"
       `))
@@ -360,32 +360,32 @@ describe('Authorization RLS', () => {
       const applicationUserId = randomUUID()
       await asActor(admin.userId, () => server.db.tx(async sql => {
         await sql`
-          INSERT INTO "Entity" (id, name, entity)
+          INSERT INTO "Entity" ("id", "name", "entity")
           VALUES
             (${employeeId}, 'employee@example.com', 'Employee')
         `
         await sql`
-          INSERT INTO "Profile" (id, email)
+          INSERT INTO "Profile" ("id", "email")
           VALUES
             (${employeeId}, 'employee@example.com')
         `
         await sql`
-          INSERT INTO "Employee" (id)
+          INSERT INTO "Employee" ("id")
           VALUES
             (${employeeId})
         `
         await sql`
-          INSERT INTO "Entity" (id, name, entity)
+          INSERT INTO "Entity" ("id", "name", "entity")
           VALUES
             (${applicationUserId}, 'application@example.com', 'ApplicationUser')
         `
         await sql`
-          INSERT INTO "User" (id, email)
+          INSERT INTO "User" ("id", "email")
           VALUES
             (${applicationUserId}, 'application@example.com')
         `
         await sql`
-          INSERT INTO "ApplicationUser" (id)
+          INSERT INTO "ApplicationUser" ("id")
           VALUES
             (${applicationUserId})
         `
@@ -734,7 +734,7 @@ describe('Authorization RLS', () => {
       const update = (actor: string, id: string, title: string) => asActor(actor, () => (
         server.db.tx(async sql => sql<{ id: string }[]>`
           UPDATE "Workspace"
-          SET title = ${title}
+          SET "title" = ${title}
           WHERE "id" = ${id}
           RETURNING "id"
         `)
@@ -931,7 +931,7 @@ describe('Authorization RLS', () => {
       const update = (actor: string, id: string) => asActor(actor, () => server.db.tx(async sql => (
         sql<{ id: string }[]>`
           UPDATE "Note"
-          SET title = 'Updated'
+          SET "title" = 'Updated'
           WHERE "id" = ${id}
           RETURNING "id"
         `
@@ -943,12 +943,12 @@ describe('Authorization RLS', () => {
         server.db.tx(async sql => {
           const id = randomUUID()
           await sql`
-            INSERT INTO "Entity" (id, name, entity)
+            INSERT INTO "Entity" ("id", "name", "entity")
             VALUES
               (${id}, ${title}, 'Note')
           `
           await sql`
-            INSERT INTO "Note" (id, "owner.id", title)
+            INSERT INTO "Note" ("id", "owner.id", "title")
             VALUES
               (${id}, ${owner}, ${title})
           `
@@ -1217,7 +1217,7 @@ describe('Authorization RLS', () => {
         { fields: ['id'] },
       )).toEqual(expected.anonymousNotes)
       expect(await database.sql<{ note: string }[]>`
-        SELECT "note.id" AS note
+        SELECT "note.id" AS "note"
         FROM "ActorLink"
       `).toEqual(expected.links)
     })

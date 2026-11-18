@@ -65,7 +65,7 @@ export function formatSQL(sql: string): SqlFormatResult {
   }
 
   const source = new SourceText(safeSql)
-  const context = createPrinter(source, plFunctions)
+  const context = createPrinter(source, plFunctions, new Set(placeholders.map(placeholder => placeholder.safe)))
   let rendered: string
   try {
     const documents: SqlDoc[] = []

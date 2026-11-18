@@ -8,6 +8,15 @@ const PL_LOCATIONS = new Set([
   'retvarno', 'stmt_len', 'stmt_location', 't_varno', 'varno',
 ])
 
+/** Identifier-bearing SQL fields whose case is presentation, not identity. */
+const SQL_IDENTIFIER_FIELDS = new Set([
+  'aliasname', 'catalogname', 'colname', 'conname', 'ctename', 'defname', 'idxname', 'name',
+  'relname', 'schemaname', 'trigname',
+])
+
+/** Identifier-bearing PL/pgSQL fields. */
+const PL_IDENTIFIER_FIELDS = new Set(['condname', 'fieldname', 'label', 'name', 'refname'])
+
 const PL_TYPES: Record<string, string> = {
   bigint: 'bigint',
   bool: 'boolean',
@@ -55,6 +64,16 @@ export function verifySemantics(original: string, formatted: string): void {
   const formattedTree = formattedSql.stmts.map(statement => normalizeSqlNode(statement.stmt as Node))
   if (stable(originalTree) !== stable(formattedTree)) {
     throw new SemanticError('formatted SQL changed the parser structure')
+  }
+
+  const originalQuoted = quotedIdentifiers(original)
+  const formattedQuoted = quotedIdentifiers(formatted)
+  const available = new Map<string, number>()
+  for (const token of formattedQuoted) available.set(token, (available.get(token) ?? 0) + 1)
+  for (const token of originalQuoted) {
+    const count = available.get(token) ?? 0
+    if (count === 0) throw new SemanticError(`formatted SQL changed quoted identifier ${token}`)
+    available.set(token, count - 1)
   }
 
   const originalComments = comments(original)
@@ -122,6 +141,15 @@ function normalizeSqlNode(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeSqlNode)
   if (!value || typeof value !== 'object') return value
   const kind = kindOf(value)
+  if (kind === 'String') {
+    const body = bodyOf<Record<string, unknown>>(value)
+    return {
+      String: {
+        ...normalizeSqlObject(body, key => key === 'sval'),
+        sval: String(body.sval ?? '').toLowerCase(),
+      },
+    }
+  }
   if (kind === 'CreateFunctionStmt' || kind === 'DoStmt') {
     const body = bodyOf<Record<string, unknown>>(value)
     const field = body.options !== undefined ? 'options' : 'args'
@@ -147,7 +175,9 @@ function normalizeSqlObject(value: object, skip: (key: string) => boolean = () =
     if (skip(key)) continue
     if (key === 'location' || key === 'stmt_location' || key === 'stmt_len'
       || key.endsWith('_start') || key.endsWith('_end')) continue
-    result[key] = normalizeSqlNode(child)
+    result[key] = typeof child === 'string' && SQL_IDENTIFIER_FIELDS.has(key)
+      ? child.toLowerCase()
+      : normalizeSqlNode(child)
   }
   return result
 }
@@ -255,7 +285,9 @@ function normalizePlObject(
   for (const [key, child] of Object.entries(value)) {
     if (skip(key)) continue
     if (PL_LOCATIONS.has(key) || key.endsWith('_start') || key.endsWith('_end')) continue
-    result[key] = normalizePlTree(child, datums)
+    result[key] = typeof child === 'string' && PL_IDENTIFIER_FIELDS.has(key)
+      ? child.toLowerCase()
+      : normalizePlTree(child, datums)
   }
   return result
 }
@@ -324,6 +356,17 @@ function splitTopLevelAssignment(query: string): { target: string, value: string
     }
   }
   return null
+}
+
+/** Quoted identifier tokens whose spelling carries case-sensitive identity. */
+function quotedIdentifiers(sql: string): string[] {
+  return scanSync(sql).tokens
+    .filter(token => token.tokenName === 'IDENT' && token.text.startsWith('"'))
+    .map(token => token.text)
+    .filter(token => {
+      const content = token.slice(1, -1).replace(/""/gu, '"')
+      return !/^[a-z_][a-z0-9_$]*$/u.test(content)
+    })
 }
 
 /**

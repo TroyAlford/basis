@@ -25,14 +25,14 @@ describe('PL/pgSQL formatting', () => {
     expect(result.sql).toMatchIndented(`
       CREATE OR REPLACE FUNCTION set_status() RETURNS TRIGGER AS $$
       DECLARE
-        message TEXT;
+        "message" TEXT;
       BEGIN
-        IF new.status IS NULL THEN
-          new.status = 'pending';
-        ELSIF new.status = '' THEN
-          new.status := 'pending';
+        IF "new"."status" IS NULL THEN
+          "new"."status" = 'pending';
+        ELSIF "new"."status" = '' THEN
+          "new"."status" := 'pending';
         ELSE
-          new.status = lower(new.status);
+          "new"."status" = LOWER("new"."status");
         END IF;
 
         RETURN NEW;
@@ -68,12 +68,12 @@ describe('PL/pgSQL formatting', () => {
       BEGIN
         IF EXISTS (
           SELECT 1
-          FROM widgets
-          WHERE active = true
+          FROM "widgets"
+          WHERE "active" = true
         ) THEN
           -- disable
-          UPDATE widgets
-          SET active = false;
+          UPDATE "widgets"
+          SET "active" = false;
         END IF;
       END
       $$
@@ -90,8 +90,8 @@ describe('PL/pgSQL formatting', () => {
     expect(result.status).toBe('formatted')
     if (result.status !== 'formatted') return
     expect(result.sql).toContain('FOR i IN 1..10 LOOP')
-    expect(result.sql).toContain('CONTINUE WHEN i = 2;')
-    expect(result.sql).toContain('CASE x')
+    expect(result.sql).toContain('CONTINUE WHEN "i" = 2;')
+    expect(result.sql).toContain('CASE "x"')
     expect(result.sql).toContain('WHEN 1 THEN')
     expect(result.sql).toContain('END CASE;')
   })

@@ -1,5 +1,6 @@
 /* eslint-disable camelcase */
 import { scanSync } from 'libpg-query'
+import { quoteIdentifier, quoteSourceIdentifier } from './expressions'
 
 /** One source token returned by the PostgreSQL scanner. */
 export interface SourceToken {
@@ -106,6 +107,103 @@ export class SourceText {
     return parts.join('.')
   }
 
+  /** Return the exact dotted source components beginning at a location. */
+  qualifiedParts(position: number | undefined, fallback: readonly string[]): string[] {
+    const token = this.tokenAt(position)
+    if (token === undefined) return [...fallback]
+    let index = this.byStart.get(token.start) as number
+    const parts = [token.text]
+    while (true) {
+      const dot = this.tokens[index + 1]
+      const next = this.tokens[index + 2]
+      if (dot?.text !== '.' || next === undefined || !isNameToken(next)) break
+      parts.push(next.text)
+      index += 2
+    }
+    return parts
+  }
+
+  /** Return a quoted dotted name from exact source components. */
+  quotedQualified(position: number | undefined, fallback: readonly string[]): string {
+    return this.qualifiedParts(position, fallback).map(quoteSourceIdentifier).join('.')
+  }
+
+  /** Return the exact identifier token at a location. */
+  identifierAt(position: number | undefined, fallback: string): string {
+    return this.tokenAt(position)?.text ?? fallback
+  }
+
+  /** Quote the exact identifier at a location. */
+  quotedIdentifierAt(position: number | undefined, fallback: string): string {
+    return quoteSourceIdentifier(this.identifierAt(position, fallback))
+  }
+
+  /** Quote the nearest identifier matching a folded name at or after a position. */
+  quotedIdentifierNear(position: number, name: string): string {
+    const target = name.toLowerCase()
+    for (const token of this.tokens) {
+      if (token.start < position) continue
+      if (!isNameToken(token)) continue
+      if (unquote(token.text).toLowerCase() === target) return quoteSourceIdentifier(token.text)
+    }
+    return quoteIdentifier(name)
+  }
+
+  /** Quote the nearest identifier matching a folded name at or before a position. */
+  quotedIdentifierBefore(position: number, name: string): string {
+    const target = name.toLowerCase()
+    for (let index = this.tokens.length - 1; index >= 0; index -= 1) {
+      const token = this.tokens[index] as SourceToken
+      if (token.end > position) continue
+      if (!isNameToken(token)) continue
+      if (unquote(token.text).toLowerCase() === target) return quoteSourceIdentifier(token.text)
+    }
+    return quoteIdentifier(name)
+  }
+
+  /** Return the exact alias token following a range-variable name. */
+  relationAlias(position: number | undefined): string | undefined {
+    const token = this.tokenAt(position)
+    if (token === undefined) return undefined
+    let index = this.byStart.get(token.start) as number
+    while (true) {
+      const dot = this.tokens[index + 1]
+      const next = this.tokens[index + 2]
+      if (dot?.text !== '.' || next === undefined || !isNameToken(next)) break
+      index += 2
+    }
+    let alias = this.tokens[index + 1]
+    if (alias?.text.toLowerCase() === 'as') alias = this.tokens[index + 2]
+    return alias && isNameToken(alias) ? alias.text : undefined
+  }
+
+  /** Return the exact alias token after a target value position. */
+  aliasAfter(position: number): string | undefined {
+    let depth = 0
+    let candidate: string | undefined
+    for (let index = 0; index < this.tokens.length; index += 1) {
+      const token = this.tokens[index] as SourceToken
+      if (token.end <= position) continue
+      if (token.text === '(' || token.text === '[') {
+        depth += 1
+        continue
+      }
+      if (token.text === ')' || token.text === ']') {
+        depth = Math.max(0, depth - 1)
+        continue
+      }
+      if (depth !== 0) continue
+      if (token.text === ',') break
+      if (ALIAS_STOP_WORDS.has(token.text.toLowerCase())) break
+      if (token.text.toLowerCase() === 'as') {
+        const next = this.tokens[index + 1]
+        return next && isNameToken(next) ? next.text : undefined
+      }
+      if (isNameToken(token)) candidate = token.text
+    }
+    return candidate
+  }
+
   /**
    * The 1-based source line for a position.
    * @param position
@@ -193,6 +291,19 @@ export class SourceText {
   get commentsRemaining(): number {
     return this.comments.length - this.usedComments.size
   }
+}
+
+/** Keywords that end a target list element. */
+const ALIAS_STOP_WORDS = new Set([
+  'from', 'where', 'group', 'having', 'order', 'limit', 'offset', 'returning', 'union', 'intersect',
+  'except', 'window', 'fetch', 'for',
+])
+
+/** Remove double quotes from an identifier token. */
+function unquote(text: string): string {
+  return text.startsWith('"') && text.endsWith('"')
+    ? text.slice(1, -1).replace(/""/gu, '"')
+    : text
 }
 
 /**

@@ -171,12 +171,12 @@ async function seedFixture(
   const people = Array.from({ length: parentCount }, () => randomUUID())
   for (const [index, id] of people.entries()) {
     await database.sql`
-      INSERT INTO "Entity" (id, name, entity)
+      INSERT INTO "Entity" ("id", "name", "entity")
       VALUES
         (${id}, ${`person-${String(index).padStart(6, '0')}`}, 'Person')
     `
     await database.sql`
-      INSERT INTO "Person" (id, title)
+      INSERT INTO "Person" ("id", "title")
       VALUES
         (${id}, ${`Person ${index}`})
     `
@@ -190,12 +190,12 @@ async function seedFixture(
   ))
   for (const pet of pets) {
     await database.sql`
-      INSERT INTO "Entity" (id, name, entity)
+      INSERT INTO "Entity" ("id", "name", "entity")
       VALUES
         (${pet.id}, ${pet.title}, 'Pet')
     `
     await database.sql`
-      INSERT INTO "Pet" (id, title, "owner.id")
+      INSERT INTO "Pet" ("id", "title", "owner.id")
       VALUES
         (${pet.id}, ${pet.title}, ${pet.owner})
     `
@@ -399,7 +399,7 @@ describe('Query planning', () => {
       const petA2 = '00000000-0000-4000-8000-000000000022'
       const petB = '00000000-0000-4000-8000-000000000023'
       await database.sql`
-        INSERT INTO "Entity" (id, name, entity)
+        INSERT INTO "Entity" ("id", "name", "entity")
         VALUES
           (${alpha}, 'Alpha', 'Alpha'),
           (${beta}, 'Beta', 'Beta'),
@@ -410,29 +410,29 @@ describe('Query planning', () => {
           (${petB}, 'Pet B', 'Pet')
       `
       await database.sql`
-        INSERT INTO "Source" (id)
+        INSERT INTO "Source" ("id")
         VALUES
           (${alpha}),
           (${beta})
       `
       await database.sql`
-        INSERT INTO "Target" (id)
+        INSERT INTO "Target" ("id")
         VALUES
           (${targetA}),
           (${targetB})
       `
       await database.sql`
-        INSERT INTO "Alpha" (id, "favorite.id")
+        INSERT INTO "Alpha" ("id", "favorite.id")
         VALUES
           (${alpha}, ${targetA})
       `
       await database.sql`
-        INSERT INTO "Beta" (id, "favorite.id")
+        INSERT INTO "Beta" ("id", "favorite.id")
         VALUES
           (${beta}, ${targetB})
       `
       await database.sql`
-        INSERT INTO "Pet" (id, "owner.id")
+        INSERT INTO "Pet" ("id", "owner.id")
         VALUES
           (${petA1}, ${targetA}),
           (${petA2}, ${targetA}),

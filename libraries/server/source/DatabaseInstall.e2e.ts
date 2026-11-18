@@ -131,9 +131,9 @@ test('supports independent installs, durable restart, and same-install reconnect
         SELECT
           EXISTS (
             SELECT 1
-            FROM pg_extension
-            WHERE extname = 'pg_trgm'
-          ) AS present
+            FROM "pg_extension"
+            WHERE "extname" = 'pg_trgm'
+          ) AS "present"
       `).toEqual([{ present: false }])
       await installBasis(a.db.sql)
       await installSchema(a.db.sql, aEntities, { schema: 'public' })
@@ -141,28 +141,28 @@ test('supports independent installs, durable restart, and same-install reconnect
         SELECT
           EXISTS (
             SELECT 1
-            FROM pg_extension
-            WHERE extname = 'pg_trgm'
-          ) AS present
+            FROM "pg_extension"
+            WHERE "extname" = 'pg_trgm'
+          ) AS "present"
       `).toEqual([{ present: true }])
 
       await a.db.sql`
-        CREATE TABLE install_probe (
-          value TEXT
+        CREATE TABLE "install_probe" (
+          "value" TEXT
         )
       `
       await a.db.sql`
-        INSERT INTO install_probe
+        INSERT INTO "install_probe"
         VALUES
           ('A')
       `
       await b.db.sql`
-        CREATE TABLE install_probe (
-          value TEXT
+        CREATE TABLE "install_probe" (
+          "value" TEXT
         )
       `
       await b.db.sql`
-        INSERT INTO install_probe
+        INSERT INTO "install_probe"
         VALUES
           ('B')
       `
@@ -192,8 +192,8 @@ test('supports independent installs, durable restart, and same-install reconnect
     try {
       await bAgain.ready()
       expect(await bAgain.db.sql<{ value: string }[]>`
-        SELECT value
-        FROM install_probe
+        SELECT "value"
+        FROM "install_probe"
       `)
         .toEqual([{ value: 'B' }])
 
@@ -202,8 +202,8 @@ test('supports independent installs, durable restart, and same-install reconnect
       try {
         await aAgain.ready()
         expect(await aAgain.db.sql<{ value: string }[]>`
-          SELECT value
-          FROM install_probe
+          SELECT "value"
+          FROM "install_probe"
         `)
           .toEqual([{ value: 'A' }])
 
@@ -213,8 +213,8 @@ test('supports independent installs, durable restart, and same-install reconnect
           await aTwin.ready()
           expect(containers(installA)).toHaveLength(1)
           expect(await aTwin.db.sql<{ value: string }[]>`
-            SELECT value
-            FROM install_probe
+            SELECT "value"
+            FROM "install_probe"
           `)
             .toEqual([{ value: 'A' }])
         } finally {
@@ -226,8 +226,8 @@ test('supports independent installs, durable restart, and same-install reconnect
 
       // The other installation stayed available through A's restart.
       expect(await bAgain.db.sql<{ value: string }[]>`
-        SELECT value
-        FROM install_probe
+        SELECT "value"
+        FROM "install_probe"
       `)
         .toEqual([{ value: 'B' }])
     } finally {
