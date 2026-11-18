@@ -45,6 +45,8 @@ export interface OAuthOptions {
    * application answers on more than one host.
    */
   authorize: (state: string, credentials: IdentityCredentials, request?: Request) => string,
+  /** Optional shared domain for the one-shot state and return cookies. */
+  cookieDomain?: string,
   /**
    * Exchange an authorization code for an access token, or `null` on failure.
    * Called on callback with the client credentials and the callback request.
@@ -101,11 +103,13 @@ export class OAuth {
       ? safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request, this.#options.returnToDomains)
       : null
     const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials(), request) })
-    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, { maxAgeSeconds: this.#stateMaxAge() }))
+    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, this.#cookieOptions()))
     if (returnTo !== null) {
-      headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, encodeURIComponent(returnTo), {
-        maxAgeSeconds: this.#stateMaxAge(),
-      }))
+      headers.append('Set-Cookie', serializeCookie(
+        RETURN_TO_COOKIE,
+        encodeURIComponent(returnTo),
+        this.#cookieOptions(),
+      ))
     }
     return new Response(null, { headers, status: 302 })
   }
@@ -123,6 +127,11 @@ export class OAuth {
     const expected = readCookie(request.headers.get('cookie'), STATE_COOKIE)
 
     if (code === null || state === null || expected === null || !sameState(state, expected)) {
+      let reason = 'state_mismatch'
+      if (code === null) reason = 'missing_code'
+      else if (state === null) reason = 'missing_state'
+      else if (expected === null) reason = 'missing_state_cookie'
+      this.#options.logger?.info(`oauth invalid_state: ${reason}`)
       return this.#failure('invalid_state', 400)
     }
 
@@ -149,8 +158,8 @@ export class OAuth {
       this.#options.returnToDomains,
     ) ?? this.#options.returnTo ?? '/'
     const headers = new Headers({ Location: returnTo })
-    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
-    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', { maxAgeSeconds: 0 }))
+    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', this.#cookieOptions(0)))
+    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', this.#cookieOptions(0)))
     this.#options.session.set(request, headers, userId)
     return new Response(null, { headers, status: 302 })
   }
@@ -201,8 +210,8 @@ export class OAuth {
       this.#options.logger?.error(`oauth ${reason}: ${message}`)
     }
     const headers = new Headers({ 'Content-Type': 'application/json' })
-    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
-    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', { maxAgeSeconds: 0 }))
+    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', this.#cookieOptions(0)))
+    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', this.#cookieOptions(0)))
     return new Response(JSON.stringify({ error: reason }), { headers, status })
   }
 
@@ -212,6 +221,17 @@ export class OAuth {
    */
   #stateMaxAge(): number {
     return this.#options.stateMaxAgeSeconds ?? STATE_MAX_AGE_SECONDS
+  }
+
+  /**
+   * Cookie attributes for the one-shot state and return cookies.
+   * @param maxAgeSeconds - Lifetime in seconds.
+   * @returns Cookie options, including the configured shared domain.
+   */
+  #cookieOptions(maxAgeSeconds = this.#stateMaxAge()): { domain?: string, maxAgeSeconds: number } {
+    return this.#options.cookieDomain
+      ? { domain: this.#options.cookieDomain, maxAgeSeconds }
+      : { maxAgeSeconds }
   }
 }
 

@@ -104,6 +104,22 @@ describe('OAuth login', () => {
     }
   })
 
+  test('shares the one-shot cookies on the configured domain', () => {
+    const capture = captureSetCookie()
+    try {
+      const subject = flow({ cookieDomain: '.example.com' })
+      subject.login(requestFor(
+        `${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent('/done')}`,
+      ))
+      const cookies = capture.cookies.join('\n')
+      expect(cookies).toContain('basis_oauth_state=')
+      expect(cookies).toContain('Domain=.example.com')
+      expect(cookies).toContain('basis_oauth_return_to=')
+    } finally {
+      capture.restore()
+    }
+  })
+
   test('hands the resolved client credentials to the provider seams', () => {
     let seen: IdentityCredentials | null = null
     const subject = flow({
