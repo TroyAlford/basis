@@ -781,6 +781,111 @@ describe('Authorization RLS', () => {
     }
   }, 30_000)
 
+  test('enforces explicit collection membership through PostgreSQL RLS', async () => {
+    const explicitGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'memberships',
+              target: 'WorkspaceMembership',
+              type: 'Collection',
+              via: "WorkspaceMembership[workspace = @ $and role != 'Banned']",
+            },
+          ],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: { where: "memberships $contains (user = $me $and role = 'Owner')" },
+          },
+        },
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    const install = tempDirectory('basis-authorization-explicit-')
+    const server = await start(install, explicitGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      const charlie = await authorization.enrollIdentity('test', 'charlie', { email: 'charlie@example.com' })
+      if (!alice || !bob || !charlie) throw new Error('membership users were not enrolled')
+      const workspaceA = randomUUID()
+      const workspaceB = randomUUID()
+      await admin.sql.begin(async tx => {
+        for (const [id, title] of [[workspaceA, 'Workspace A'], [workspaceB, 'Workspace B']] as const) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${title}, 'Workspace')
+          `
+          await tx`
+            INSERT INTO "Workspace" ("id", "title")
+            VALUES (${id}, ${title})
+          `
+        }
+        await tx`
+          INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+          VALUES
+            (${workspaceA}, ${alice}, 'Owner'),
+            (${workspaceA}, ${bob}, 'Editor'),
+            (${workspaceB}, ${bob}, 'Owner')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const read = (actor: string | null) => asActor(actor, () => server.db.query('Workspace', {
+        fields: ['id', 'title'],
+        orderBy: 'title',
+      }))
+      expect(await read(alice)).toEqual([{ id: workspaceA, title: 'Workspace A' }])
+      expect(await read(bob)).toEqual([{ id: workspaceB, title: 'Workspace B' }])
+      expect(await read(charlie)).toEqual([])
+      expect(await read(null)).toEqual([])
+
+      const direct = await asActor(bob, () => server.db.tx(async sql => sql<{ id: string }[]>`
+        SELECT "id"
+        FROM "Workspace"
+        ORDER BY "id"
+      `))
+      expect(direct.map(row => row.id)).toEqual([workspaceB])
+
+      await admin.sql`
+        UPDATE "WorkspaceMembership"
+        SET "role" = 'Owner'
+        WHERE "workspace.id" = ${workspaceA} AND "user.id" = ${bob}
+      `
+      expect((await read(bob)).map(row => row.id).sort()).toEqual(
+        [workspaceA, workspaceB].sort(),
+      )
+
+      await admin.sql`
+        DELETE FROM "WorkspaceMembership"
+        WHERE "workspace.id" = ${workspaceB} AND "user.id" = ${bob}
+      `
+      expect((await read(bob)).map(row => row.id)).toEqual([workspaceA])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 30_000)
+
   test('applies membership grants declared on an abstract parent to concrete descendants', async () => {
     const abstractGraph = new Graph({
       entities: [

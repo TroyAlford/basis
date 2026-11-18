@@ -901,11 +901,7 @@ export class Graph {
       return undefined
     }
     const collection = resolved.collection
-    if (collection.kind === 'explicit' && collection.targetEndpoint === undefined) {
-      throw new Error(
-        'Explicit record Collections are not supported by the authorization compiler yet',
-      )
-    }
+    const record = collection.kind === 'explicit' && collection.targetEndpoint === undefined
     const target = this.#collectionTarget(collection)
     const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
     const relationshipAlias = `__policy_${suffix}_rel`
@@ -923,11 +919,20 @@ export class Graph {
       target: targetAlias,
     })
     const rootAliasValue = sql.rootAlias
-    if (rootAliasValue === undefined) {
-      throw new Error(`Graph: collection "${name}" has no entity root`)
+    const rowAlias = record ? sql.relationshipAlias : sql.targetAlias ?? rootAliasValue
+    if (rowAlias === undefined) {
+      throw new Error(`Graph: collection "${name}" has no row alias`)
     }
     const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
-    const resolver = this.#policyResolver(target, quoteIdentifier(targetAlias), quoteIdentifier(rootAliasName), true)
+    const resolver = this.#policyResolver(
+      target,
+      quoteIdentifier(rowAlias),
+      quoteIdentifier(record ? rowAlias : rootAliasValue as string),
+      true,
+    )
+    const recordIdentities = record
+      ? new Set(collection.relationship.between.map(endpoint => endpoint.field))
+      : new Set<string>()
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
     const resolve = (path: string): QueryFieldDefinition => {
@@ -955,10 +960,27 @@ export class Graph {
       }
       const result = resolver(normalized)
       expressions.set(result.field.name, result.expression)
-      if (result.field.name.endsWith('.id') || normalized === 'id' || normalized.endsWith('.id')) {
+      if (
+        recordIdentities.has(normalized)
+        || result.field.name.endsWith('.id')
+        || normalized === 'id'
+        || normalized.endsWith('.id')
+      ) {
         identities.add(result.field.name)
       }
       return result.field
+    }
+    let nestedCollection: (nested: string) => CollectionScope | undefined = () => undefined
+    if (!record) {
+      nestedCollection = (nested: string) => this.#collectionSqlScope(
+        target,
+        nested,
+        quoteIdentifier(sql.targetAlias ?? rowAlias),
+        quoteIdentifier(sql.targetAlias ?? rowAlias),
+        quoteIdentifier(rootAliasValue as string),
+        true,
+        depth + 1,
+      )
     }
     return {
       array: nested => {
@@ -978,15 +1000,7 @@ export class Graph {
           return undefined
         }
       },
-      collection: nested => this.#collectionSqlScope(
-        target,
-        nested,
-        quoteIdentifier(sql.targetAlias ?? rootAliasValue),
-        quoteIdentifier(sql.targetAlias ?? rootAliasValue),
-        quoteIdentifier(rootAliasValue),
-        true,
-        depth + 1,
-      ),
+      collection: nestedCollection,
       condition: sql.condition,
       definition: target,
       expression: field => {
