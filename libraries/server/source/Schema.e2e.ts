@@ -663,20 +663,18 @@ describe('DDL schema planning', () => {
       `
       const nullRightId = randomUUID()
       await insertEntity(nullRightId, 'Null Right Membership', 'Membership')
-      const nullRightResult = await database.sql`
+      await expect(database.sql`
         INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
         VALUES
           (${nullRightId}, ${otherUserId}, NULL)
-      `
-      expect(nullRightResult).toBeDefined()
+      `).resolves.toBeDefined()
       const nullLeftId = randomUUID()
       await insertEntity(nullLeftId, 'Null Left Membership', 'Membership')
-      const nullLeftResult = await database.sql`
+      await expect(database.sql`
         INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
         VALUES
           (${nullLeftId}, ${userId}, NULL)
-      `
-      expect(nullLeftResult).toBeDefined()
+      `).resolves.toBeDefined()
     }, { fresh: true })
   })
 
