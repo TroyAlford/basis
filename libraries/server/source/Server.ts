@@ -91,9 +91,11 @@ export class Server<AppContext extends object = Record<string, never>> {
   #contextCache = new WeakMap<Request, Promise<AppContext>>()
   #contextLoader: ((request: Request) => AppContext | Promise<AppContext>) | null = null
   #mainComponent: React.ComponentType<AppContext> | null = null
+  #mainComponentVersion = -1
+  #mainBuild: { promise: Promise<React.ComponentType<AppContext>>, version: number } | null = null
   #mainPath: string | null = null
   #mainVersion = 0
-  #loadedMainVersion = -1
+  #ssrScope = Math.random().toString(16).slice(2)
   #watcher: FSWatcher | null = null
   #favIcon: ResolvedFavIcon | null = null
   #favIconInput: FavIconInput | null = null
@@ -422,11 +424,46 @@ export class Server<AppContext extends object = Record<string, never>> {
    */
   async #loadMain(): Promise<React.ComponentType<AppContext> | null> {
     if (!this.#mainPath) return null
-    if (this.#mainComponent && this.#mainVersion === this.#loadedMainVersion) {
-      return this.#mainComponent
-    }
 
-    const outdir = path.join(this.#root, '.basis', 'ssr', String(this.#mainVersion))
+    /*
+     * A source change can land while a build is running. Never install that
+     * build as current; loop until the build version still matches the latest
+     * observed source version.
+     */
+    while (true) {
+      const version = this.#mainVersion
+      if (this.#mainComponent && this.#mainComponentVersion === version) {
+        return this.#mainComponent
+      }
+
+      let build = this.#mainBuild
+      if (!build || build.version !== version) {
+        const promise = this.#buildMain(version)
+        build = { promise, version }
+        this.#mainBuild = build
+        void promise.finally(() => {
+          if (this.#mainBuild === build) this.#mainBuild = null
+        }).catch(() => undefined)
+      }
+
+      const component = await build.promise
+      if (this.#mainVersion !== version) continue
+
+      this.#mainComponent = component
+      this.#mainComponentVersion = version
+      return component
+    }
+  }
+
+  /**
+   * Compile and import one SSR application module version.
+   * @param version - The source version snapshot to compile.
+   * @returns The exported application component.
+   */
+  async #buildMain(version: number): Promise<React.ComponentType<AppContext>> {
+    if (!this.#mainPath) throw new Error('Basis: main module is not configured')
+    const outdir = path.join(this.#root, '.basis', 'ssr', this.#ssrScope, String(version))
+    fs.rmSync(outdir, { force: true, recursive: true })
     const result = await Bun.build({
       entrypoints: [this.#mainPath],
       external: ['basis', 'basis/*'],
@@ -442,7 +479,7 @@ export class Server<AppContext extends object = Record<string, never>> {
       throw new Error(`Basis: server module build failed: ${details}`)
     }
 
-    const module = await import(`${pathToFileURL(path.join(outdir, 'entry.js')).href}?v=${this.#mainVersion}`) as {
+    const module = await import(`${pathToFileURL(path.join(outdir, 'entry.js')).href}?v=${version}`) as {
       Application?: React.ComponentType<AppContext>,
       default?: React.ComponentType<AppContext>,
     }
@@ -450,8 +487,6 @@ export class Server<AppContext extends object = Record<string, never>> {
     if (typeof component !== 'function') {
       throw new Error(`Basis: main module "${this.#mainPath}" must export Application or a default component`)
     }
-    this.#mainComponent = component
-    this.#loadedMainVersion = this.#mainVersion
     return component
   }
 
@@ -942,8 +977,9 @@ export class Server<AppContext extends object = Record<string, never>> {
     const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
+    const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()
     this.#ready = this.#trackReady(
-      Promise.all([buildReady, databaseReady, watcherReady]).then(() => undefined),
+      Promise.all([buildReady, databaseReady, watcherReady, ssrReady]).then(() => undefined),
     )
   }
 

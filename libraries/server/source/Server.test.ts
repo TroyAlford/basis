@@ -228,6 +228,66 @@ export const Application = () => React.createElement('main', null, value)
   })
 })
 
+test('coalesces concurrent SSR builds and never installs a stale version', async () => {
+  const dir = tempDirectory('basis-ssr-race')
+  const dependency = join(dir, 'value.ts')
+  const originalBuild = Bun.build
+  let delay = 0
+  const buildSpy = spyOn(Bun, 'build').mockImplementation(async (...args) => {
+    if (delay > 0) await Bun.sleep(delay)
+    return originalBuild(...args)
+  })
+
+  try {
+    symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'), 'dir')
+    await Bun.write(dependency, "export const value = 'initial'\n")
+    await Bun.write(
+      join(dir, 'Application.tsx'),
+      `import * as React from 'react'
+import { value } from './value'
+export const Application = () => React.createElement('main', null, value)
+`,
+    )
+
+    delay = 100
+    const server = new Server()
+      .root(dir)
+      .main('./Application.tsx')
+      .start({ hostname: '127.0.0.1', port: 0 })
+
+    try {
+      await server.ready()
+      await Bun.write(dependency, "export const value = 'second'\n")
+
+      const base = `http://127.0.0.1:${server.port}`
+      const requests = Array.from({ length: 6 }, () => Bun.fetch(base).then(response => response.text()))
+      await Bun.sleep(20)
+      await Bun.write(dependency, "export const value = 'third'\n")
+      requests.push(Bun.fetch(base).then(response => response.text()))
+
+      const responses = await Promise.all(requests)
+      for (const html of responses) {
+        expect(html).toContain('<main>')
+        expect(html).not.toContain('missing-module')
+      }
+
+      const deadline = Date.now() + 4_000
+      let latest = ''
+      while (Date.now() < deadline) {
+        latest = await Bun.fetch(base).then(response => response.text())
+        if (latest.includes('<main>third</main>')) break
+        await Bun.sleep(50)
+      }
+      expect(latest).toContain('<main>third</main>')
+    } finally {
+      await server.shutdown()
+    }
+  } finally {
+    buildSpy.mockRestore()
+    await rm(dir, { force: true, recursive: true })
+  }
+}, 30_000)
+
 describe('Server development HMR', () => {
   test('delivers a hot update over the HMR socket when a source file changes', async () => {
     const dir = tempDirectory('basis-hmr')
@@ -359,6 +419,22 @@ describe('Server readiness', () => {
       await expect(server.ready()).resolves.toBeUndefined()
     } finally {
       server.stop()
+    }
+  })
+
+  test('ready rejects when the SSR entrypoint exports no application component', async () => {
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./NoApplication.tsx')
+      .start({ hostname: '127.0.0.1', logger: new Logger({ silent: true }), port: 0 })
+
+    try {
+      await expect(server.ready()).rejects.toThrow('must export Application')
+      const health = await server.handle(new Request(`http://127.0.0.1:${server.port}/api/health`))
+      expect(health?.status).toBe(503)
+      expect(await health?.json()).toMatchObject({ status: 'error' })
+    } finally {
+      await server.shutdown()
     }
   })
 
