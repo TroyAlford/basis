@@ -5,7 +5,8 @@ import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefin
 import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
-import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import type { DescendantField } from './PathResolution'
+import { descendantFields, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
@@ -695,6 +696,8 @@ export class Graph {
       resolve: value => this.#policyEntity(value),
     })
     if ('kind' in resolved) {
+      const descendant = this.#policyDescendantFieldMeta(entity, name)
+      if (descendant !== undefined) return descendant
       if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
       if (resolved.kind === 'non-reference') {
         throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
@@ -784,6 +787,11 @@ export class Graph {
         resolve: value => this.#policyEntity(value),
       })
       if ('kind' in resolved) {
+        const descendant = this.#policyDescendantField(entity, path, baseAlias, parentId)
+        if (descendant !== undefined) {
+          cache.set(path, descendant)
+          return descendant
+        }
         if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
         if (resolved.kind === 'non-reference') {
           throw new Error(`Graph: reference field "${entity.name}.${path}" is not policy-safe`)
@@ -1556,30 +1564,142 @@ export class Graph {
         names.add('entity')
       }
     }
-    const extras = new Map<string, EffectiveFieldDefinition>()
-    const conflicts = new Set<string>()
-    for (const leaf of this.definitions.concreteDescendants(entity.name)) {
-      for (const field of leaf.effectiveFields) {
-        if (names.has(field.name)) continue
-        const existing = extras.get(field.name)
-        if (existing === undefined) {
-          extras.set(field.name, field)
-        } else if (
-          existing.owner !== field.owner
-          || existing.type !== field.type
-          || ('target' in existing ? existing.target : undefined) !==
-            ('target' in field ? field.target : undefined)
-          || ('format' in existing ? existing.format : undefined) !==
-            ('format' in field ? field.format : undefined)
-        ) {
-          conflicts.add(field.name)
-        }
-      }
-    }
-    for (const [name, field] of extras) {
-      if (!conflicts.has(name)) fields.push(field)
+    for (const [name, descendant] of this.#policyDescendantFields(entity)) {
+      if (names.has(name) || descendant.variants.length !== 1) continue
+      const variant = descendant.variants[0]
+      if (variant !== undefined) fields.push(variant.field)
     }
     return fields
+  }
+
+  /**
+   * Return the shared descendant-field index for one abstract entity.
+   * @param entity - Abstract entity.
+   * @returns Descendant fields keyed by logical name.
+   */
+  #policyDescendantFields(entity: EntityDefinition): ReadonlyMap<string, DescendantField> {
+    return descendantFields(this.definitions, entity)
+  }
+
+  /**
+   * Resolve one scalar descendant-only field's metadata.
+   * @param entity - Entity where the path starts.
+   * @param path - Dotted field path.
+   * @returns The terminal field, or undefined.
+   */
+  #policyDescendantFieldMeta(entity: EntityDefinition, path: string): QueryFieldDefinition | undefined {
+    const segments = path.split('.')
+    if (segments.length < 2) return undefined
+    let current = entity
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const segment = segments[index] as string
+      const field = current.effectiveFields.find(candidate => candidate.name === segment)
+      if (field === undefined) {
+        if (!current.abstract) return undefined
+        const descendant = this.#policyDescendantFields(current).get(segment)
+        if (descendant === undefined || segments.length !== index + 2) return undefined
+        return { name: path, type: descendant.type } as QueryFieldDefinition
+      }
+      if (field.type !== FieldType.Entity) return undefined
+      current = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target) as EntityDefinition
+    }
+    if (!current.abstract) return undefined
+    const terminal = segments[segments.length - 1] as string
+    const descendant = this.#policyDescendantFields(current).get(terminal)
+    if (descendant === undefined) return undefined
+    if (descendant.contracts.size > 1) {
+      throw new Error(`Graph: descendant field "${path}" has incompatible declarations`)
+    }
+    return { name: path, type: descendant.type } as QueryFieldDefinition
+  }
+
+  /**
+   * Resolve one scalar path through a descendant-only field variant.
+   * @param entity - Entity where the path starts.
+   * @param path - Dotted field path.
+   * @param baseAlias - Base alias, when present.
+   * @param parentId - Parent identity expression.
+   * @returns A resolved expression, or undefined when the path is not a direct descendant terminal.
+   */
+  #policyDescendantField(
+    entity: EntityDefinition,
+    path: string,
+    baseAlias: string | undefined,
+    parentId: string | undefined,
+  ): { readonly expression: string, readonly field: QueryFieldDefinition } | undefined {
+    const segments = path.split('.')
+    if (segments.length < 2) return undefined
+    let current = entity
+    let base = baseAlias
+    let identity = parentId
+    let prefix = ''
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const segment = segments[index] as string
+      prefix = prefix === '' ? segment : `${prefix}.${segment}`
+      const field = current.effectiveFields.find(candidate => candidate.name === segment)
+      if (field === undefined) {
+        if (!current.abstract) return undefined
+        const descendants = this.#policyDescendantFields(current)
+        const descendant = descendants.get(segment)
+        if (descendant === undefined) return undefined
+        // Only direct descendant scalar terminals are supported by this branch.
+        if (segments.length !== index + 2 || descendant.variants.length === 0) return undefined
+        const reference = identity ?? (base === undefined ? undefined : `${base}.${quoteIdentifier('id')}`)
+        if (reference === undefined) return undefined
+        const terminal = segments[index + 1] as string
+        if (terminal !== descendant.name) return undefined
+        const branches: string[] = []
+        for (const variant of descendant.variants) {
+          if (variant.field.type === FieldType.Entity) return undefined
+          const owner = quoteIdentifier(variant.owner)
+          const aliasName = `__policy_${branches.length}`
+          const value = `(SELECT ${quoteIdentifier(variant.field.name)} FROM ${owner} ${aliasName} ` +
+            `WHERE ${aliasName}.${quoteIdentifier('id')} = ${reference})`
+          const leafChecks = variant.leaves.map(leaf => (
+            `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${aliasName}_l ` +
+            `WHERE ${aliasName}_l.${quoteIdentifier('id')} = ${reference})`
+          ))
+          branches.push(`WHEN ${leafChecks.join(' OR ')} THEN ${value}`)
+        }
+        return {
+          expression: `(CASE ${branches.join(' ')} ELSE NULL END)`,
+          field: { name: path, type: descendant.type } as QueryFieldDefinition,
+        }
+      }
+      if (field.type !== FieldType.Entity) return undefined
+      const target = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target)
+      if (target === undefined) return undefined
+      const owner = base === undefined ? identity : `${base}.${quoteIdentifier(field.column)}`
+      base = undefined
+      identity = owner
+      current = target
+    }
+    if (!current.abstract) return undefined
+    const terminal = segments[segments.length - 1] as string
+    const descendant = this.#policyDescendantFields(current).get(terminal)
+    if (descendant === undefined || descendant.variants.length === 0) return undefined
+    if (descendant.contracts.size > 1) {
+      throw new Error(`Graph: descendant field "${path}" has incompatible declarations`)
+    }
+    const reference = identity
+    if (reference === undefined) return undefined
+    const branches: string[] = []
+    for (const variant of descendant.variants) {
+      if (variant.field.type === FieldType.Entity) return undefined
+      const owner = quoteIdentifier(variant.owner)
+      const aliasName = `__policy_${branches.length}`
+      const value = `(SELECT ${quoteIdentifier(variant.field.name)} FROM ${owner} ${aliasName} ` +
+        `WHERE ${aliasName}.${quoteIdentifier('id')} = ${reference})`
+      const leafChecks = variant.leaves.map(leaf => (
+        `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${aliasName}_l ` +
+        `WHERE ${aliasName}_l.${quoteIdentifier('id')} = ${reference})`
+      ))
+      branches.push(`WHEN ${leafChecks.join(' OR ')} THEN ${value}`)
+    }
+    return {
+      expression: `(CASE ${branches.join(' ')} ELSE NULL END)`,
+      field: { name: path, type: descendant.type } as QueryFieldDefinition,
+    }
   }
 
   #policyEntity(name: string): EntityDefinition | undefined {

@@ -17,13 +17,16 @@ const graph = new Graph({
     },
     {
       extends: 'Document',
-      fields: [],
+      fields: [{ field: 'code', type: 'String' }],
       name: 'PublicDocument',
       security: { [Action.Read]: Security.Public },
     },
     {
       extends: 'Document',
-      fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+      fields: [
+        { field: 'workspace', target: 'Workspace', type: 'Entity' },
+        { field: 'code', type: 'String' },
+      ],
       name: 'PrivateDocument',
       security: {
         [Action.Read]: [
@@ -44,6 +47,13 @@ const graph = new Graph({
           { where: "document.entity = 'PublicDocument'" },
           { where: 'document.workspace.members $contains (id = $me)' },
         ],
+      },
+    },
+    {
+      fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+      name: 'SiblingSection',
+      security: {
+        [Action.Read]: { where: "document.code = 'shared'" },
       },
     },
   ],
@@ -87,8 +97,9 @@ async function setup(database: Parameters<Parameters<typeof withDatabase>[2]>[0]
     INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
     VALUES (${ids.workspace}, ${ids.alice}, 'editor')
   `
-  await database.create('PublicDocument', { id: ids.publicDoc, name: 'Public' })
+  await database.create('PublicDocument', { code: 'shared', id: ids.publicDoc, name: 'Public' })
   await database.create('PrivateDocument', {
+    code: 'shared',
     id: ids.privateDoc,
     name: 'Private',
     workspace: ids.workspace,
@@ -96,6 +107,10 @@ async function setup(database: Parameters<Parameters<typeof withDatabase>[2]>[0]
   await database.create('Section', [
     { document: ids.publicDoc, id: ids.publicSection, name: 'Public section', title: 'Public section' },
     { document: ids.privateDoc, id: ids.privateSection, name: 'Private section', title: 'Private section' },
+  ])
+  await database.create('SiblingSection', [
+    { document: ids.publicDoc, id: '77777777-1111-4111-8111-777777777777', name: 'Sibling public' },
+    { document: ids.privateDoc, id: '77777777-2222-4222-8222-777777777777', name: 'Sibling private' },
   ])
 }
 
@@ -150,4 +165,39 @@ test('authorizes sections through the referenced abstract Document read policy',
       WHERE "id" = ${ids.privateSection}
     `).toEqual([])
   }, { graph, setup })
+})
+
+test('resolves compatible sibling descendant fields through the same path model', async () => {
+  await withDatabase('reference-visibility-siblings', ids.alice, async database => {
+    expect(await database.query('SiblingSection', {
+      fields: ['id', 'name'],
+      orderBy: 'id',
+    })).toEqual([
+      { id: '77777777-1111-4111-8111-777777777777', name: 'Sibling public' },
+      { id: '77777777-2222-4222-8222-777777777777', name: 'Sibling private' },
+    ])
+  }, { graph, setup })
+})
+
+test('rejects incompatible sibling descendant declarations in a policy path', () => {
+  expect(() => new Graph({
+    entities: [
+      { fields: [], name: 'Document' },
+      {
+        extends: 'Document',
+        fields: [{ field: 'code', type: 'String' }],
+        name: 'PublicDocument',
+      },
+      {
+        extends: 'Document',
+        fields: [{ field: 'code', type: 'Number' }],
+        name: 'PrivateDocument',
+      },
+      {
+        fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+        name: 'Section',
+        security: { [Action.Read]: { where: "document.code = 'shared'" } },
+      },
+    ],
+  })).toThrow(/incompatible declarations/)
 })

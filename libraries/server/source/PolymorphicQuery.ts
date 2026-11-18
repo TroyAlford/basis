@@ -2,7 +2,8 @@ import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
 import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
-import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import type { DescendantField } from './PathResolution'
+import { descendantFields, resolveCollectionPath, resolveFieldPath, universalDescendantFields } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
@@ -169,28 +170,6 @@ interface FilterJoinScope {
   consume(units?: number): void,
   /** Append one SQL join to the active relation. */
   join(sql: string): void,
-}
-
-/** One descendant-only field declaration group. */
-interface DescendantField {
-  /** Distinct canonical type/format/reference-target contracts. */
-  readonly contracts: ReadonlySet<string>,
-  /** Field name. */
-  readonly name: string,
-  /** Canonical field type shared by compatible declarations. */
-  readonly type: FieldType,
-  /** Owner/leaf variants that declare the field. */
-  readonly variants: readonly DescendantVariant[],
-}
-
-/** One owner/contract group for a descendant-only field. */
-interface DescendantVariant {
-  /** Effective field declaration. */
-  readonly field: EffectiveFieldDefinition,
-  /** Concrete leaves that expose this declaration. */
-  readonly leaves: readonly string[],
-  /** Physical owner table. */
-  readonly owner: string,
 }
 
 /** Effective-field metadata for one entity occurrence. */
@@ -2303,104 +2282,6 @@ function contextCollections(
     }
   }
   return result
-}
-
-/**
- * Build the descendant-only field index for one abstract entity.
- * @param entities - Canonical definitions.
- * @param definition - Entity being queried.
- * @returns Descendant fields keyed by logical name.
- */
-function descendantFields(
-  entities: EntityDefinitions,
-  definition: EntityDefinition,
-): ReadonlyMap<string, DescendantField> {
-  if (!definition.abstract) return new Map()
-  const baseNames = new Set(definition.effectiveFields.map(field => field.name))
-  const leaves = entities.concreteDescendants(definition.name)
-  return collectDescendantFields(leaves, baseNames)
-}
-
-/**
- * Build the selectable descendant union for the universal `Entity` root.
- * @param entities - Canonical definitions.
- * @param root - Canonical universal root definition.
- * @returns Leaf-owned fields keyed by logical name.
- */
-function universalDescendantFields(
-  entities: EntityDefinitions,
-  root: EntityDefinition,
-): ReadonlyMap<string, DescendantField> {
-  const leaves = entities.concreteDescendants('Entity')
-  return collectDescendantFields(leaves, new Set(root.effectiveFields.map(field => field.name)))
-}
-
-/**
- * Group leaf-owned fields into compatible descendant variants.
- * @param leaves - Concrete entities in canonical order.
- * @param baseNames - Field names already supplied by the base/root occurrence.
- * @returns Descendant fields keyed by logical name.
- */
-function collectDescendantFields(
-  leaves: readonly EntityDefinition[],
-  baseNames: ReadonlySet<string>,
-): ReadonlyMap<string, DescendantField> {
-  const groups = new Map<string, Map<string, {
-    readonly field: EffectiveFieldDefinition,
-    readonly leaves: Set<string>,
-  }>>()
-
-  for (const leaf of leaves) {
-    for (const field of leaf.effectiveFields) {
-      if (baseNames.has(field.name)) continue
-      let variants = groups.get(field.name)
-      if (!variants) {
-        variants = new Map()
-        groups.set(field.name, variants)
-      }
-      const key = `${field.owner}\u0000${fieldContract(field)}`
-      let variant = variants.get(key)
-      if (!variant) {
-        variant = { field, leaves: new Set() }
-        variants.set(key, variant)
-      }
-      variant.leaves.add(leaf.name)
-    }
-  }
-
-  const result = new Map<string, DescendantField>()
-  for (const [name, variants] of groups) {
-    const values = [...variants.values()]
-    const contracts = new Set(values.map(variant => fieldContract(variant.field)))
-    result.set(name, {
-      contracts,
-      name,
-      type: values[0]?.field.type ?? FieldType.String,
-      variants: values.map(variant => ({
-        field: variant.field,
-        leaves: [...variant.leaves],
-        owner: variant.field.owner,
-      })),
-    })
-  }
-  return result
-}
-
-/**
- * Build one canonical contract signature for descendant compatibility.
- * @param field - Field declaration.
- * @returns Type/format/reference-target signature.
- */
-function fieldContract(field: FieldDefinition): string {
-  if (field.type === FieldType.JSON) return 'JSON'
-  if (field.type === FieldType.Enum) return `Enum:${field.enum}`
-  if (field.type === FieldType.Array) {
-    return `Array:${field.items.type}:${field.items.format ?? ''}`
-  }
-  if (field.type === FieldType.Entity) return `Entity:${field.target}`
-  if (field.type === FieldType.Collection) return `Collection:${field.target}:${field.via}`
-  if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
-  return `${field.type}:${field.format ?? ''}`
 }
 
 /** One parsed collection ordering entry. */
