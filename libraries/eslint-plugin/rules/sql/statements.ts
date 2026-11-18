@@ -34,6 +34,21 @@ function list(docs: readonly SqlDoc[], separator: SqlDoc = concat(text(','), lin
  * @param options.into
  */
 export function printSelect(node: ValueOf<'SelectStmt'>, ctx: PrintContext, options: { into?: SqlDoc } = {}): SqlDoc {
+  const parentRelations = ctx.relations
+  try {
+    return printSelectDocument(node, ctx, options, parentRelations)
+  } finally {
+    ctx.relations = parentRelations
+  }
+}
+
+/** Print one SELECT with a lexical child alias scope. */
+function printSelectDocument(
+  node: ValueOf<'SelectStmt'>,
+  ctx: PrintContext,
+  options: { into?: SqlDoc },
+  parentRelations: ReadonlyMap<string, string>,
+): SqlDoc {
   if (node.intoClause) throw new UnsupportedNodeError('SelectStmt', 'INTO clause')
   if (node.lockingClause?.length) throw new UnsupportedNodeError('SelectStmt', 'locking clause')
   if (node.op !== undefined && node.op !== 'SETOP_NONE') {
@@ -57,8 +72,7 @@ export function printSelect(node: ValueOf<'SelectStmt'>, ctx: PrintContext, opti
   }
   if (!node.targetList?.length) throw new UnsupportedNodeError('SelectStmt', 'missing target list')
 
-  const previousRelations = ctx.relations
-  ctx.relations = collectFromAliases(node.fromClause, ctx, new Map(previousRelations))
+  ctx.relations = collectFromAliases(node.fromClause, ctx, new Map(parentRelations))
   let distinct = empty
   if (node.distinctClause?.length) {
     const onlyList = node.distinctClause.length === 1 && kindOf(node.distinctClause[0]) === 'List'

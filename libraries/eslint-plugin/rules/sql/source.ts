@@ -1,6 +1,6 @@
 /* eslint-disable camelcase */
 import { scanSync } from 'libpg-query'
-import { quoteIdentifier, quoteSourceIdentifier } from './expressions'
+import { quoteSourceIdentifier } from './expressions'
 
 /** One source token returned by the PostgreSQL scanner. */
 export interface SourceToken {
@@ -138,27 +138,37 @@ export class SourceText {
     return quoteSourceIdentifier(this.identifierAt(position, fallback))
   }
 
-  /** Quote the nearest identifier matching a folded name at or after a position. */
-  quotedIdentifierNear(position: number, name: string): string {
+  /** The nearest identifier matching a folded name at or after a position. */
+  identifierNear(position: number, name: string): string {
     const target = name.toLowerCase()
     for (const token of this.tokens) {
       if (token.start < position) continue
       if (!isNameToken(token)) continue
-      if (unquote(token.text).toLowerCase() === target) return quoteSourceIdentifier(token.text)
+      if (unquote(token.text).toLowerCase() === target) return token.text
     }
-    return quoteIdentifier(name)
+    return name
   }
 
-  /** Quote the nearest identifier matching a folded name at or before a position. */
-  quotedIdentifierBefore(position: number, name: string): string {
+  /** Quote the nearest identifier matching a folded name at or after a position. */
+  quotedIdentifierNear(position: number, name: string): string {
+    return quoteSourceIdentifier(this.identifierNear(position, name))
+  }
+
+  /** The nearest identifier matching a folded name at or before a position. */
+  identifierBefore(position: number, name: string): string {
     const target = name.toLowerCase()
     for (let index = this.tokens.length - 1; index >= 0; index -= 1) {
       const token = this.tokens[index] as SourceToken
       if (token.end > position) continue
       if (!isNameToken(token)) continue
-      if (unquote(token.text).toLowerCase() === target) return quoteSourceIdentifier(token.text)
+      if (unquote(token.text).toLowerCase() === target) return token.text
     }
-    return quoteIdentifier(name)
+    return name
+  }
+
+  /** Quote the nearest identifier matching a folded name at or before a position. */
+  quotedIdentifierBefore(position: number, name: string): string {
+    return quoteSourceIdentifier(this.identifierBefore(position, name))
   }
 
   /** Return the exact alias token following a range-variable name. */
@@ -175,6 +185,22 @@ export class SourceText {
     let alias = this.tokens[index + 1]
     if (alias?.text.toLowerCase() === 'as') alias = this.tokens[index + 2]
     return alias && isNameToken(alias) ? alias.text : undefined
+  }
+
+  /** Return the token after an explicit top-level AS, if one exists. */
+  explicitAliasAfter(position: number): string | undefined {
+    let depth = 0
+    for (let index = 0; index < this.tokens.length; index += 1) {
+      const token = this.tokens[index] as SourceToken
+      if (token.end <= position) continue
+      if (token.text === '(' || token.text === '[') depth += 1
+      else if (token.text === ')' || token.text === ']') depth = Math.max(0, depth - 1)
+      else if (depth === 0 && token.text.toLowerCase() === 'as') {
+        const next = this.tokens[index + 1]
+        return next && isNameToken(next) ? next.text : undefined
+      }
+    }
+    return undefined
   }
 
   /** Return the exact alias token after a target value position. */

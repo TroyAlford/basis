@@ -5,7 +5,7 @@ import { parseSync } from 'libpg-query'
 import type { SqlDoc } from './doc'
 import { concat, group, hardline, indent, join, line, text } from './doc'
 import type { ValueOf } from './expressions'
-import { empty, functionName, printResTarget, printTypeName, quoteIdentifier } from './expressions'
+import { empty, functionName, printResTarget, printTypeName, quoteIdentifier, quotePart } from './expressions'
 import type { PrintContext } from './printer'
 import { SourceText } from './source'
 import { printSelect } from './statements'
@@ -216,7 +216,9 @@ function printFunctionParameter(node: ValueOf<'FunctionParameter'>, ctx: PrintCo
       : node.mode === 'FUNC_PARAM_VARIADIC' ? 'VARIADIC '
         : node.mode === 'FUNC_PARAM_TABLE' ? 'TABLE '
           : ''
-  const name = node.name === undefined ? empty : concat(text(`${quoteIdentifier(node.name)} `))
+  const name = node.name === undefined
+    ? empty
+    : concat(text(`${quotePart(ctx.source.identifierAt(node.location, node.name), ctx)} `))
   const defaultValue = node.defexpr ? concat(text(' DEFAULT '), ctx.print(node.defexpr as Node)) : empty
   return concat(text(mode), name, printTypeName(node.argType as ValueOf<'TypeName'>, ctx), defaultValue)
 }

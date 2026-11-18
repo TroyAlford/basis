@@ -160,4 +160,18 @@ describe('SQL canonical formatting', () => {
       )
     `)
   })
+
+  test('keeps nested SELECT alias scopes lexical', () => {
+    expect(formatted(`
+      select (select x.id from nested_table x), X.id from outer_table X
+    `)).toMatchIndented(`
+      SELECT
+        (
+          SELECT "x"."id"
+          FROM "nested_table" "x"
+        ),
+        "X"."id"
+      FROM "outer_table" "X"
+    `)
+  })
 })

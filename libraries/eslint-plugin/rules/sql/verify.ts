@@ -1,7 +1,8 @@
 /* eslint-disable camelcase */
 import type { Node } from 'libpg-query'
 import { parsePlPgSQLSync, parseSync, scanSync } from 'libpg-query'
-import { bodyOf, kindOf, SemanticError } from './types'
+import { SourceText } from './source'
+import { bodyOf, kindOf, SemanticError, stringValue } from './types'
 
 const PL_LOCATIONS = new Set([
   'dno', 'found_varno', 'lineno', 'location', 'new_varno', 'old_varno', 'out_param_varno',
@@ -66,15 +67,7 @@ export function verifySemantics(original: string, formatted: string): void {
     throw new SemanticError('formatted SQL changed the parser structure')
   }
 
-  const originalQuoted = quotedIdentifiers(original)
-  const formattedQuoted = quotedIdentifiers(formatted)
-  const available = new Map<string, number>()
-  for (const token of formattedQuoted) available.set(token, (available.get(token) ?? 0) + 1)
-  for (const token of originalQuoted) {
-    const count = available.get(token) ?? 0
-    if (count === 0) throw new SemanticError(`formatted SQL changed quoted identifier ${token}`)
-    available.set(token, count - 1)
-  }
+  verifyIdentifierPositions(original, formatted)
 
   const originalComments = comments(original)
   const formattedComments = comments(formatted)
@@ -102,6 +95,7 @@ export function verifySqlSemantics(original: string, formatted: string): void {
   if (stable(originalTree) !== stable(formattedTree)) {
     throw new SemanticError('SQL meaning changed')
   }
+  verifyIdentifierPositions(original, formatted)
 }
 
 /**
@@ -358,15 +352,298 @@ function splitTopLevelAssignment(query: string): { target: string, value: string
   return null
 }
 
-/** Quoted identifier tokens whose spelling carries case-sensitive identity. */
-function quotedIdentifiers(sql: string): string[] {
-  return scanSync(sql).tokens
-    .filter(token => token.tokenName === 'IDENT' && token.text.startsWith('"'))
-    .map(token => token.text)
-    .filter(token => {
-      const content = token.slice(1, -1).replace(/""/gu, '"')
-      return !/^[a-z_][a-z0-9_$]*$/u.test(content)
-    })
+/** Verify identifier spelling at each identity-bearing AST position. */
+function verifyIdentifierPositions(original: string, formatted: string): void {
+  const originalStatements = parseSync(original).stmts.map(statement => statement.stmt as Node)
+  const formattedStatements = parseSync(formatted).stmts.map(statement => statement.stmt as Node)
+  compareIdentifiers(
+    originalStatements,
+    formattedStatements,
+    new SourceText(original),
+    new SourceText(formatted),
+  )
+}
+
+/** Compare identifier-bearing nodes in parallel AST order. */
+function compareIdentifiers(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+): void {
+  if (Array.isArray(original) || Array.isArray(formatted)) {
+    if (!Array.isArray(original) || !Array.isArray(formatted) || original.length !== formatted.length) {
+      throw new SemanticError('formatted SQL changed identifier structure')
+    }
+    original.forEach((value, index) => compareIdentifiers(value, formatted[index], originalSource, formattedSource))
+    return
+  }
+  if (!original || typeof original !== 'object' || !formatted || typeof formatted !== 'object') return
+  const originalKind = kindOf(original)
+  const formattedKind = kindOf(formatted)
+  if (originalKind !== formattedKind) throw new SemanticError('formatted SQL changed identifier structure')
+  if (originalKind === 'String') return
+  if (originalKind === null) {
+    const originalValue = original as Record<string, unknown>
+    const formattedValue = formatted as Record<string, unknown>
+    for (const key of Object.keys(originalValue)) {
+      compareIdentifiers(originalValue[key], formattedValue[key], originalSource, formattedSource)
+    }
+    return
+  }
+  switch (originalKind) {
+    case 'ColumnRef':
+      compareQualified(original, formatted, originalSource, formattedSource, 'ColumnRef')
+      return
+    case 'RangeVar':
+      compareQualified(original, formatted, originalSource, formattedSource, 'RangeVar')
+      compareAlias(original, formatted, originalSource, formattedSource)
+      return
+    case 'ResTarget':
+      compareResTarget(original, formatted, originalSource, formattedSource)
+      break
+    case 'ColumnDef':
+      compareIdentifierAt(original, formatted, originalSource, formattedSource, 'colname')
+      break
+    case 'Constraint':
+      compareConstraint(original, formatted, originalSource, formattedSource)
+      break
+    case 'CommonTableExpr':
+      compareCte(original, formatted, originalSource, formattedSource)
+      break
+    case 'FunctionParameter':
+      compareIdentifierAt(original, formatted, originalSource, formattedSource, 'name')
+      break
+    default:
+      break
+  }
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  for (const key of Object.keys(originalValue)) {
+    if (key === 'location' || key.endsWith('_start') || key.endsWith('_end')) continue
+    compareIdentifiers(originalValue[key], formattedValue[key], originalSource, formattedSource)
+  }
+}
+
+/** Compare a qualified name's exact source components. */
+function compareQualified(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+  label: string,
+): void {
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  let fallback: string[]
+  if (label === 'ColumnRef') {
+    fallback = ((originalValue.fields as Node[] | undefined) ?? [])
+      .filter(field => kindOf(field) === 'String')
+      .map(field => stringValue(field))
+  } else {
+    fallback = [originalValue.catalogname, originalValue.schemaname, originalValue.relname]
+      .filter((part): part is string => typeof part === 'string')
+  }
+  const originalParts = originalSource.qualifiedParts(
+    typeof originalValue.location === 'number' ? originalValue.location : undefined,
+    fallback,
+  )
+  const formattedParts = formattedSource.qualifiedParts(
+    typeof formattedValue.location === 'number' ? formattedValue.location : undefined,
+    fallback,
+  )
+  compareParts(originalParts, formattedParts, label)
+}
+
+/** Compare a RangeVar alias's exact source spelling. */
+function compareAlias(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+): void {
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  if (!originalValue.alias && !formattedValue.alias) return
+  const originalAlias = originalSource.relationAlias(
+    typeof originalValue.location === 'number' ? originalValue.location : undefined,
+  )
+  const formattedAlias = formattedSource.relationAlias(
+    typeof formattedValue.location === 'number' ? formattedValue.location : undefined,
+  )
+  compareParts([originalAlias ?? ''], [formattedAlias ?? ''], 'alias')
+}
+
+/** Compare a ResTarget identifier at its source position. */
+function compareResTarget(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+): void {
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  if (originalValue.name === undefined || formattedValue.name === undefined) return
+  compareParts(
+    [targetIdentifier(original, originalValue, originalSource)],
+    [targetIdentifier(formatted, formattedValue, formattedSource)],
+    'ResTarget',
+  )
+}
+
+/** Resolve the source spelling of a ResTarget name. */
+function targetIdentifier(node: unknown, value: Record<string, unknown>, source: SourceText): string {
+  const location = typeof value.location === 'number' ? value.location : undefined
+  const name = String(value.name ?? '')
+  if (!value.val || typeof value.val !== 'object') return source.identifierAt(location, name)
+  return source.explicitAliasAfter(location ?? 0) ??
+    source.identifierAt(location, name)
+}
+
+/** Compare an identifier-bearing field at a node location. */
+function compareIdentifierAt(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+  field: string,
+): void {
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  const name = originalValue[field]
+  if (typeof name !== 'string') return
+  compareParts(
+    [originalSource.identifierAt(
+      typeof originalValue.location === 'number' ? originalValue.location : undefined,
+      name,
+    )],
+    [formattedSource.identifierAt(
+      typeof formattedValue.location === 'number' ? formattedValue.location : undefined,
+      name,
+    )],
+    field,
+  )
+}
+
+/** Compare constraint names and key columns at their source positions. */
+function compareConstraint(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+): void {
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  const originalPosition = typeof originalValue.location === 'number' ? originalValue.location : 0
+  const formattedPosition = typeof formattedValue.location === 'number' ? formattedValue.location : 0
+  if (typeof originalValue.conname === 'string') {
+    compareParts(
+      [originalSource.identifierNear(originalPosition, originalValue.conname)],
+      [formattedSource.identifierNear(formattedPosition, String(formattedValue.conname ?? originalValue.conname))],
+      'constraint name',
+    )
+  }
+  compareNames(
+    originalValue.keys,
+    formattedValue.keys,
+    originalPosition,
+    formattedPosition,
+    originalSource,
+    formattedSource,
+    'constraint keys',
+  )
+  compareNames(
+    originalValue.fk_attrs,
+    formattedValue.fk_attrs,
+    originalPosition,
+    formattedPosition,
+    originalSource,
+    formattedSource,
+    'foreign-key columns',
+  )
+  const originalPk = nodeLocation(originalValue.pktable)
+  const formattedPk = nodeLocation(formattedValue.pktable)
+  compareNames(
+    originalValue.pk_attrs,
+    formattedValue.pk_attrs,
+    originalPk ?? originalPosition,
+    formattedPk ?? formattedPosition,
+    originalSource,
+    formattedSource,
+    'referenced columns',
+  )
+}
+
+/** Compare a list of identifier nodes by folded source position. */
+function compareNames(
+  original: unknown,
+  formatted: unknown,
+  originalPosition: number,
+  formattedPosition: number,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+  label: string,
+): void {
+  if (!Array.isArray(original) || !Array.isArray(formatted)) return
+  original.forEach((item, index) => {
+    const name = stringValue(item)
+    const formattedName = stringValue(formatted[index])
+    compareParts(
+      [originalSource.identifierNear(originalPosition, name)],
+      [formattedSource.identifierNear(formattedPosition, formattedName)],
+      label,
+    )
+  })
+}
+
+/** Compare a CTE name's exact source spelling. */
+function compareCte(
+  original: unknown,
+  formatted: unknown,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+): void {
+  const originalValue = bodyOf<Record<string, unknown>>(original)
+  const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+  if (typeof originalValue.ctename !== 'string') return
+  const originalQuery = originalValue.ctequery as Node
+  const formattedQuery = formattedValue.ctequery as Node
+  compareParts(
+    [originalSource.identifierBefore(originalSource.span(originalQuery)?.start ?? 0, originalValue.ctename)],
+    [formattedSource.identifierBefore(
+      formattedSource.span(formattedQuery)?.start ?? 0,
+      String(formattedValue.ctename ?? originalValue.ctename),
+    )],
+    'CTE name',
+  )
+}
+
+/** Read a node's source location without assuming it is a tagged node. */
+function nodeLocation(value: unknown): number | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const location = (value as { location?: unknown }).location
+  return typeof location === 'number' ? location : undefined
+}
+
+/** Compare canonical identifier spellings. */
+function compareParts(original: readonly string[], formatted: readonly string[], label: string): void {
+  if (original.length !== formatted.length) {
+    throw new SemanticError(`formatted SQL changed ${label}`)
+  }
+  original.forEach((part, index) => {
+    const expected = unquote(part)
+    const actual = unquote(formatted[index] as string)
+    if (expected !== actual) {
+      throw new SemanticError(`formatted SQL changed ${label}: ${expected} -> ${actual}`)
+    }
+  })
+}
+
+/** Remove surrounding double quotes from an identifier token. */
+function unquote(text: string): string {
+  return text.startsWith('"') && text.endsWith('"')
+    ? text.slice(1, -1).replace(/""/gu, '"')
+    : text
 }
 
 /**

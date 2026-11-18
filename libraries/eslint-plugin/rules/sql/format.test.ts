@@ -1,7 +1,7 @@
 /* eslint-disable @stylistic/max-len -- SQL fixtures and protocol field names need long lines. */
 import { describe, expect, test } from 'bun:test'
 import { formatSQL } from './format'
-import { sqlSemanticTree, verifySqlSemantics } from './verify'
+import { sqlSemanticTree, verifySemantics, verifySqlSemantics } from './verify'
 
 const FIXTURES = [
   'select id, name, created_at from widgets where active = true and owner_id = $1 order by name',
@@ -99,5 +99,19 @@ describe('failure safety', () => {
 
   test('semantic verification detects a predicate change', () => {
     expect(() => verifySqlSemantics('select * from t where a = 1', 'select * from t where a = 2')).toThrow()
+  })
+
+  test('semantic verification rejects swapping quoted identifier roles', () => {
+    expect(() => verifySemantics(
+      'SELECT "Foo" AS "foo" FROM "t"',
+      'SELECT "foo" AS "Foo" FROM "t"',
+    )).toThrow()
+  })
+
+  test('semantic verification permits unquoted camelCase canonicalization', () => {
+    expect(() => verifySemantics(
+      'select userId from t',
+      'SELECT "userId" FROM "t"',
+    )).not.toThrow()
   })
 })
