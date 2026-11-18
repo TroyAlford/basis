@@ -113,6 +113,54 @@ describe('OAuth login', () => {
     subject.login()
     expect(seen).toEqual({ public: 'client-id', secret: 'client-secret' })
   })
+
+  test('stores a validated return target and gives the request to authorize', () => {
+    let seen: Request | undefined
+    const subject = flow({
+      authorize: (state, _credentials, request) => {
+        seen = request
+        return `https://provider.test/authorize?state=${state}`
+      },
+    })
+
+    const capture = captureSetCookie()
+    try {
+      const returnTo = encodeURIComponent('/some/random/path?tab=one')
+      const request = requestFor(`${ORIGIN}/api/oauth/login?returnTo=${returnTo}`)
+      subject.login(request)
+
+      const returnToCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+      expect(decodeURIComponent(cookieValue(returnToCookie))).toBe('/some/random/path?tab=one')
+      expect(seen).toBe(request)
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('stores an absolute target on a sibling application host', () => {
+    const capture = captureSetCookie()
+    try {
+      const returnTo = 'https://campaign.example.com/some/random/path?tab=one'
+      flow().login(requestFor(`${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(returnTo)}`))
+
+      const returnCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+      expect(decodeURIComponent(cookieValue(returnCookie))).toBe(returnTo)
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('does not store an external or protocol-relative return target', () => {
+    for (const target of ['https://evil.test/steal', '//evil.test/steal', '/\\evil.test/steal']) {
+      const capture = captureSetCookie()
+      try {
+        flow().login(requestFor(`${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(target)}`))
+        expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+      } finally {
+        capture.restore()
+      }
+    }
+  })
 })
 
 describe('OAuth callback', () => {
@@ -136,6 +184,69 @@ describe('OAuth callback', () => {
       const identityCookie = capture.cookies.find(cookie => cookie.startsWith('auth.test=')) ?? ''
       expect(identityCookie).not.toBe('')
       expect(subject.session(requestFor(ORIGIN, identityCookie.split(';')[0]))).toBe('user-42')
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('returns to the stored target and clears it', async () => {
+    const capture = captureSetCookie()
+    try {
+      const subject = flow()
+      const loginRequest = requestFor(
+        `${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent('/some/random/path?tab=one')}`,
+      )
+      subject.login(loginRequest)
+      const stateCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_state=')) ?? ''
+      const returnToCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+
+      const response = await subject.callback(requestFor(
+        `${ORIGIN}/api/oauth/callback?code=abc&state=${cookieValue(stateCookie)}`,
+        `${stateCookie.split(';')[0]}; ${returnToCookie.split(';')[0]}`,
+      ))
+
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe('/some/random/path?tab=one')
+      expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to=;'))).toBe(true)
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('returns to an absolute target on a sibling application host', async () => {
+    const capture = captureSetCookie()
+    try {
+      const returnTo = 'https://campaign.example.com/some/random/path?tab=one'
+      const subject = flow()
+      subject.login(requestFor(
+        `${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(returnTo)}`,
+      ))
+      const stateCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_state=')) ?? ''
+      const returnToCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+
+      const response = await subject.callback(requestFor(
+        `${ORIGIN}/api/oauth/callback?code=abc&state=${cookieValue(stateCookie)}`,
+        `${stateCookie.split(';')[0]}; ${returnToCookie.split(';')[0]}`,
+      ))
+
+      expect(response.headers.get('location')).toBe(returnTo)
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('falls back to the configured destination for an unsafe stored target', async () => {
+    const capture = captureSetCookie()
+    try {
+      const subject = flow({ returnTo: '/configured' })
+      const stateCookie = login(subject).find(cookie => cookie.startsWith('basis_oauth_state=')) ?? ''
+
+      const response = await subject.callback(requestFor(
+        `${ORIGIN}/api/oauth/callback?code=abc&state=${cookieValue(stateCookie)}`,
+        `${stateCookie.split(';')[0]}; basis_oauth_return_to=https%3A%2F%2Fevil.test`,
+      ))
+
+      expect(response.headers.get('location')).toBe('/configured')
     } finally {
       capture.restore()
     }
@@ -206,12 +317,34 @@ describe('OAuth logout', () => {
       capture.restore()
     }
   })
+
+  test('returns to a validated local target and rejects an external one', () => {
+    const subject = flow()
+
+    const local = subject.logout(requestFor(
+      `${ORIGIN}/api/oauth/logout?returnTo=${encodeURIComponent('/some/random/path')}`,
+    ))
+    const sibling = subject.logout(requestFor(
+      `${ORIGIN}/api/oauth/logout?returnTo=${encodeURIComponent('https://campaign.example.com/done')}`,
+    ))
+    const external = subject.logout(requestFor(
+      `${ORIGIN}/api/oauth/logout?returnTo=${encodeURIComponent('https://evil.test/steal')}`,
+    ))
+
+    expect(local.headers.get('location')).toBe('/some/random/path')
+    expect(sibling.headers.get('location')).toBe('https://campaign.example.com/done')
+    expect(external.headers.get('location')).toBe('/')
+  })
 })
 
 describe('Server.oauth', () => {
   test('mounts the login, callback, and logout routes', async () => {
+    let seenHost: string | null = null
     const server = new Server().oauth({
-      authorize: state => `https://provider.test/authorize?state=${state}`,
+      authorize: (state, _credentials, request) => {
+        seenHost = request ? new URL(request.url).host : null
+        return `https://provider.test/authorize?state=${state}`
+      },
       exchange: async () => 'access-token',
       identity: async () => 'user-42',
       session: new Identity(CREDENTIALS),
@@ -220,5 +353,6 @@ describe('Server.oauth', () => {
     const loginResponse = await server.handle(requestFor(`${ORIGIN}/api/oauth/login`))
     expect(loginResponse?.status).toBe(302)
     expect(loginResponse?.headers.get('location')).toContain('provider.test')
+    expect(seenHost).toBe('app.example.com')
   })
 })

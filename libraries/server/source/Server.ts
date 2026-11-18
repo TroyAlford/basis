@@ -862,7 +862,7 @@ export class Server<
       },
     })
     this.identity(options.session)
-    this.api([HttpVerb.Get], 'oauth/login', () => flow.login())
+    this.api([HttpVerb.Get], 'oauth/login', (_params, { request }) => flow.login(request))
     this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
     this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
     return this

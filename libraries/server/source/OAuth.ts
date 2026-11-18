@@ -20,6 +20,9 @@ import type { ILogger } from '../../utilities'
 /** Cookie holding the CSRF state for one authorization round trip. */
 const STATE_COOKIE = 'basis_oauth_state'
 
+/** Cookie holding the validated post-login destination. */
+const RETURN_TO_COOKIE = 'basis_oauth_return_to'
+
 /** How long an authorization round trip has to finish. */
 const STATE_MAX_AGE_SECONDS = 600
 
@@ -38,14 +41,15 @@ export interface OAuthOptions {
   /**
    * Build the provider authorize URL for a state value, using the client
    * credentials. Called on login; the caller closes over its provider's
-   * endpoint, redirect URI, and scopes.
+   * endpoint and scopes, and uses the request for the redirect URI when the
+   * application answers on more than one host.
    */
-  authorize: (state: string, credentials: IdentityCredentials) => string,
+  authorize: (state: string, credentials: IdentityCredentials, request?: Request) => string,
   /**
    * Exchange an authorization code for an access token, or `null` on failure.
-   * Called on callback with the client credentials.
+   * Called on callback with the client credentials and the callback request.
    */
-  exchange: (code: string, credentials: IdentityCredentials) => Promise<string | null>,
+  exchange: (code: string, credentials: IdentityCredentials, request?: Request) => Promise<string | null>,
   /**
    * Resolve the provider subject and optional profile from an access token, or
    * `null` on failure. Called on callback.
@@ -53,7 +57,7 @@ export interface OAuthOptions {
   identity: (accessToken: string) => Promise<string | OAuthIdentity | null>,
   /** Optional logger for flow failures. */
   logger?: ILogger,
-  /** Where to send the browser after a successful callback. Defaults to `/`. */
+  /** Fallback destination when a request has no valid `returnTo`. Defaults to `/`. */
   returnTo?: string,
   /** The identity cookie capability used to sign the session in and out. */
   session: Identity,
@@ -80,15 +84,22 @@ export class OAuth {
 
   /**
    * Begin a sign-in: set the CSRF state cookie and redirect to the provider.
+   * @param request - The login request, when routed through a server.
    * @returns A redirect to the provider authorize URL.
    */
-  login(): Response {
+  login(request?: Request): Response {
     const state = Array.from(
       crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2, '0'),
     ).join('')
-    const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials()) })
+    const returnTo = request ? safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request) : null
+    const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials(), request) })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, { maxAgeSeconds: this.#stateMaxAge() }))
+    if (returnTo !== null) {
+      headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, encodeURIComponent(returnTo), {
+        maxAgeSeconds: this.#stateMaxAge(),
+      }))
+    }
     return new Response(null, { headers, status: 302 })
   }
 
@@ -110,7 +121,7 @@ export class OAuth {
 
     let accessToken: string | null
     try {
-      accessToken = await this.#options.exchange(code, this.#credentials())
+      accessToken = await this.#options.exchange(code, this.#credentials(), request)
     } catch (error) {
       return this.#failure('exchange_failed', 401, error)
     }
@@ -125,8 +136,13 @@ export class OAuth {
     const userId = typeof identity === 'string' ? identity : identity?.subject ?? null
     if (userId === null) return this.#failure('identity_failed', 401)
 
-    const headers = new Headers({ Location: this.#options.returnTo ?? '/' })
+    const returnTo = safeReturnTo(
+      decodeReturnTo(readCookie(request.headers.get('cookie'), RETURN_TO_COOKIE)),
+      request,
+    ) ?? this.#options.returnTo ?? '/'
+    const headers = new Headers({ Location: returnTo })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
+    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', { maxAgeSeconds: 0 }))
     this.#options.session.set(request, headers, userId)
     return new Response(null, { headers, status: 302 })
   }
@@ -137,7 +153,10 @@ export class OAuth {
    * @returns A redirect back to the application.
    */
   logout(request: Request): Response {
-    const headers = new Headers({ Location: this.#options.returnTo ?? '/' })
+    const returnTo = safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request) ??
+      this.#options.returnTo ??
+      '/'
+    const headers = new Headers({ Location: returnTo })
     this.#options.session.set(request, headers, null)
     return new Response(null, { headers, status: 302 })
   }
@@ -173,6 +192,7 @@ export class OAuth {
     }
     const headers = new Headers({ 'Content-Type': 'application/json' })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
+    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', { maxAgeSeconds: 0 }))
     return new Response(JSON.stringify({ error: reason }), { headers, status })
   }
 
@@ -183,6 +203,84 @@ export class OAuth {
   #stateMaxAge(): number {
     return this.#options.stateMaxAgeSeconds ?? STATE_MAX_AGE_SECONDS
   }
+}
+
+/**
+ * Decode a stored return target, rejecting malformed values.
+ * @param value - Encoded cookie value, or `null`.
+ * @returns The decoded target, or `null`.
+ */
+function decodeReturnTo(value: string | null): string | null {
+  if (value === null) return null
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Accept a relative path on the current origin, or an absolute URL on the same
+ * application (the current host, its parent domain, or a sibling subdomain).
+ * @param value - Candidate return target.
+ * @param request - The login, callback, or logout request.
+ * @returns A safe path or absolute URL, or `null` when the candidate is unsafe.
+ */
+function safeReturnTo(value: string | null, request: Request): string | null {
+  if (value === null || value === '' || value.includes('\\')) return null
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code <= 0x20 || code === 0x7f) return null
+  }
+
+  const base = new URL(request.url)
+  let target: URL
+  try {
+    target = new URL(value, base)
+  } catch {
+    return null
+  }
+
+  if (target.username !== '' || target.password !== '') return null
+  if (value.startsWith('/')) {
+    return target.origin === base.origin
+      ? `${target.pathname}${target.search}${target.hash}`
+      : null
+  }
+
+  if (!isSameApplication(target, base)) return null
+  return target.href
+}
+
+/**
+ * Whether two URLs belong to the same application: the same origin, or the
+ * same parent domain with the same protocol and port.
+ * @param target - Candidate URL.
+ * @param base - Request URL.
+ * @returns True when the target is in the same application.
+ */
+function isSameApplication(target: URL, base: URL): boolean {
+  if (target.origin === base.origin) return true
+  if (target.protocol !== base.protocol || target.port !== base.port) return false
+  return sharesApplicationHost(target.hostname, base.hostname)
+}
+
+/**
+ * Whether a hostname is the base host, its parent domain, or one of its
+ * siblings. Localhost is treated as its own shared namespace.
+ * @param candidate - Target hostname.
+ * @param base - Request hostname.
+ * @returns True when both hosts belong to one application.
+ */
+function sharesApplicationHost(candidate: string, base: string): boolean {
+  if (candidate === base) return true
+  if (candidate.endsWith('.localhost') && base.endsWith('.localhost')) return true
+
+  const labels = base.split('.')
+  if (labels.length <= 2) return false
+  const parent = labels.slice(1).join('.')
+  if (!parent.includes('.')) return false
+  return candidate === parent || candidate.endsWith(`.${parent}`)
 }
 
 /**
