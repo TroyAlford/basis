@@ -41,7 +41,8 @@ const graph = new Graph({
       security: {
         [Action.Read]: [
           { role: 'admin' },
-          { where: { field: 'document', operator: '$readable' } },
+          { where: "document.entity = 'PublicDocument'" },
+          { where: 'document.workspace.members $contains (id = $me)' },
         ],
       },
     },
@@ -99,9 +100,6 @@ async function setup(database: Parameters<Parameters<typeof withDatabase>[2]>[0]
 }
 
 test('authorizes sections through the referenced abstract Document read policy', async () => {
-  const sectionPolicy = graph.physicalSchema('basis_app', true).policies
-    .find(policy => policy.name === 'basis_Section_read')
-  expect(sectionPolicy?.definition).toContain('EXISTS')
   await withDatabase('reference-visibility-anonymous', null, async database => {
     expect(await database.query('Section', {
       fields: ['id', 'title'],

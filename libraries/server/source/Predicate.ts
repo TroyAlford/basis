@@ -34,14 +34,6 @@ export interface CollectionFilter {
     | Operator.Comparison.Empty,
 }
 
-/** A reference-visibility predicate: the referenced row must be readable. */
-export interface ReadableFilter {
-  /** Direct reference field whose target readability is required. */
-  readonly field: string,
-  /** Stable reference-readability operator identity. */
-  readonly operator: '$readable',
-}
-
 /** Entity-shaped context used to normalize a collection's inner predicates. */
 export interface CollectionFilterScope {
   /** Nested native-array navigations available to members. */
@@ -85,22 +77,6 @@ export interface FieldOperand {
 
 /** A canonical serializable where filter. */
 export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
-
-/**
- * Whether an operand is a canonical field reference.
- * @param value - Candidate operand.
- * @returns `true` for a field-reference operand.
- */
-/**
- * Whether a predicate asks for the referenced row's readability.
- * @param value - Candidate predicate.
- * @returns `true` when it is a reference-readability predicate.
- */
-export function isReadableFilter(value: unknown): value is ReadableFilter {
-  return isPlainRecord(value)
-    && value.operator === '$readable'
-    && typeof value.field === 'string'
-}
 
 /**
  * Whether an operand is a canonical field reference.

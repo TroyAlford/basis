@@ -8,7 +8,7 @@ import { Operator } from './Operator'
 import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
-import { ACTOR_FIELD_NAME, isReadableFilter, Predicate } from './Predicate'
+import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 import type { CollectionScope, QueryScope } from './SQL'
@@ -619,13 +619,6 @@ export class Graph {
     if (input === null || input === undefined) return null
     const entity = this.#policyEntity(target)
     if (!entity) throw new Error(`Graph: unknown security target "${target}"`)
-    if (isReadableFilter(input)) {
-      const field = entity.effectiveFields.find(candidate => candidate.name === input.field)
-      if (!field || field.type !== FieldType.Entity || field.owner !== target) {
-        throw new Error(`Graph: reference readability requires a direct entity field on "${target}"`)
-      }
-      return { field: input.field, operator: '$readable' } as unknown as Filter
-    }
     const collection = (name: string): CollectionFilterScope | undefined => (
       this.#collectionFilterScope(entity, name)
     )
@@ -868,14 +861,23 @@ export class Graph {
     if (rootAlias !== undefined && field.owner === 'Entity') {
       return `${rootAlias}.${quoteIdentifier(column)}`
     }
-    if (!allowSubqueries) {
-      throw new Error(`Graph: inherited policy field "${entity.name}.${field.name}" requires a helper`)
-    }
     const identity = rootAlias !== undefined
       ? `${rootAlias}.${quoteIdentifier('id')}`
       : baseAlias !== undefined
         ? `${baseAlias}.${quoteIdentifier('id')}`
         : parentId
+    if (field.owner === 'Entity' && field.name === 'entity' && entity.abstract && identity !== undefined) {
+      const leaves = this.definitions.concreteDescendants(entity.name)
+      const branches = leaves.map(leaf => (
+        `WHEN EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf.name)} __policy_entity ` +
+        `WHERE __policy_entity.${quoteIdentifier('id')} = ${identity}) ` +
+        `THEN ${literal(leaf.name)}`
+      ))
+      return `(CASE ${branches.join(' ')} ELSE NULL END)`
+    }
+    if (!allowSubqueries) {
+      throw new Error(`Graph: inherited policy field "${entity.name}.${field.name}" requires a helper`)
+    }
     if (!identity) {
       throw new Error(`Graph: inherited policy field "${entity.name}.${field.name}" has no row identity`)
     }
@@ -1324,7 +1326,6 @@ export class Graph {
   }
 
   #requiresHelper(grant: GraphGrant, table: string): boolean {
-    if (isReadableFilter(grant.predicate)) return false
     if (grant.target !== table || !grant.predicate) return grant.target !== table
     const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
     if (!entity) return true
@@ -1343,37 +1344,6 @@ export class Graph {
     return `policy_${hash}`
   }
 
-  /**
-   * Compile a reference-readability check from the referenced concrete entity
-   * read policies. The correlated subqueries run in the request role, so
-   * target RLS remains active; no SECURITY DEFINER wrapper is introduced.
-   * @param leaf - Entity owning the reference field.
-   * @param fieldName - Direct entity reference field.
-   * @param alias - SQL alias of the referencing row.
-   * @returns The Boolean reference-readability expression.
-   */
-  #readableReferenceExpression(leaf: string, fieldName: string, alias: string): string {
-    const entity = this.#policyEntity(leaf)
-    if (!entity) throw new Error(`Graph: unknown readability owner "${leaf}"`)
-    const field = entity.effectiveFields.find(candidate => candidate.name === fieldName)
-    if (!field || field.type !== FieldType.Entity) {
-      throw new Error(`Graph: reference readability requires a direct entity field on "${leaf}"`)
-    }
-    const reference = `${alias}.${quoteIdentifier(field.column)}`
-    const conditions: string[] = []
-    const leaves = this.definitions.concreteDescendants(field.target)
-    for (const [index, descendant] of leaves.entries()) {
-      const targetAlias = `__readable_${index}`
-      const expression = this.#leafExpression(descendant.name, Action.Read, targetAlias, false)
-      if (!expression) continue
-      conditions.push(
-        `EXISTS (SELECT 1 FROM ${quoteIdentifier(descendant.name)} ${targetAlias} ` +
-        `WHERE ${targetAlias}.${quoteIdentifier('id')} = ${reference} AND (${expression}))`,
-      )
-    }
-    return conditions.length === 0 ? 'FALSE' : `(${conditions.join(' OR ')})`
-  }
-
   #compileDirectPredicate(
     grant: GraphGrant,
     alias: string,
@@ -1381,10 +1351,6 @@ export class Graph {
     allowSubqueries: boolean,
     entityOverride?: EntityDefinition,
   ): string {
-    const predicate: unknown = grant.predicate
-    if (isReadableFilter(predicate)) {
-      return this.#readableReferenceExpression(table, predicate.field, alias)
-    }
     const entity = entityOverride ??
       (grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target))
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
@@ -1574,14 +1540,59 @@ export class Graph {
     return []
   }
 
+  /**
+   * Build the policy view of an abstract entity, including compatible
+   * descendant-only fields and the universal Entity discriminator.
+   * @param entity - Abstract entity definition.
+   * @returns Effective fields safe for policy path resolution.
+   */
+  #abstractPolicyFields(entity: EntityDefinition): readonly EffectiveFieldDefinition[] {
+    const fields = [...entity.effectiveFields]
+    const names = new Set(fields.map(field => field.name))
+    if (!names.has('entity')) {
+      const discriminator = identityDefinition().effectiveFields.find(field => field.name === 'entity')
+      if (discriminator !== undefined) {
+        fields.push(discriminator)
+        names.add('entity')
+      }
+    }
+    const extras = new Map<string, EffectiveFieldDefinition>()
+    const conflicts = new Set<string>()
+    for (const leaf of this.definitions.concreteDescendants(entity.name)) {
+      for (const field of leaf.effectiveFields) {
+        if (names.has(field.name)) continue
+        const existing = extras.get(field.name)
+        if (existing === undefined) {
+          extras.set(field.name, field)
+        } else if (
+          existing.owner !== field.owner
+          || existing.type !== field.type
+          || ('target' in existing ? existing.target : undefined) !==
+            ('target' in field ? field.target : undefined)
+          || ('format' in existing ? existing.format : undefined) !==
+            ('format' in field ? field.format : undefined)
+        ) {
+          conflicts.add(field.name)
+        }
+      }
+    }
+    for (const [name, field] of extras) {
+      if (!conflicts.has(name)) fields.push(field)
+    }
+    return fields
+  }
+
   #policyEntity(name: string): EntityDefinition | undefined {
     if (name === 'Entity') return identityDefinition()
     const entity = this.definitions.entity(name)
     if (entity) {
+      const effectiveFields = entity.abstract
+        ? this.#abstractPolicyFields(entity)
+        : entity.effectiveFields
       return {
         ...entity,
-        effectiveFields: entity.effectiveFields,
-        fields: entity.effectiveFields,
+        effectiveFields,
+        fields: effectiveFields,
       }
     }
     const relationship = this.definitions.relationship(name)

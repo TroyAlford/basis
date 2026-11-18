@@ -146,20 +146,6 @@ Graph predicates are normalized when the graph loads and compiled into PostgreSQ
 
 The Graph mutation verbs (`db.create`, `db.edit`, `db.delete`, `db.upsert`) run on the same restricted application pool with the request's `actor.id`. The agreed two-gate rule applies: every create, update, and delete additionally requires `read` on the affected or resulting row, while PostgreSQL's action-specific policies determine whether the write itself is allowed. `edit` and `delete` select through the canonical filter compiler, then PostgreSQL re-checks every write and returns only the rows the actor may actually mutate. Counts therefore exclude unauthorized matches without disclosing that they exist. A create denied by the read or create policy fails as an authorization error; uniqueness, reference, check, and inheritance violations fail as constraint errors. Mixed `db.tx` callbacks keep the same actor across native SQL and mutation verbs.
 
-## Reference readability
-
-A policy may require that a direct entity reference points at a row the actor can read. The declarative rule is the same predicate shape used by security elsewhere:
-
-```ts
-security: {
-  [Action.Read]: {
-    where: { field: 'card', operator: '$readable' },
-  },
-}
-```
-
-The field must be a direct entity reference owned by the secured entity. Basis compiles a correlated `EXISTS` over the reference target's concrete entity descendants and applies each descendant's existing `read` rules. The subquery runs in the request role, so PostgreSQL RLS remains active; the check is not wrapped in a `SECURITY DEFINER` policy helper. Public targets therefore remain public, while private descendants use their normal membership predicates. `$readable` is a reference-visibility rule, not a general permission evaluator.
-
 ## Relationship membership predicates
 
 Graph roles are global role memberships. A resource-specific membership is ordinary Graph relationship data, not another global role. Declare the relationship and grant access through its collection navigation:
