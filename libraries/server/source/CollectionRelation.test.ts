@@ -23,6 +23,12 @@ const definitions = EntityDefinitions.load(JSON.stringify({
           via: 'DeckCardPrinting[deck = @]',
         },
         {
+          field: 'largeEntries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @ $and quantity > 3]',
+        },
+        {
           field: 'cards',
           target: 'Card',
           type: 'Collection',
@@ -85,10 +91,11 @@ describe('CollectionRelation', () => {
       'cardsByDeck',
       'memberRecords',
       'entries',
+      'largeEntries',
       'cards',
       'printings',
     ]))
-    expect(names).toHaveLength(5)
+    expect(names).toHaveLength(6)
   })
 
   test('resolves a relationship-record collection to composite identity', () => {
@@ -107,6 +114,7 @@ describe('CollectionRelation', () => {
       relationship: expect.objectContaining({ name: 'DeckCardPrinting' }),
     })
     expect(entries.target).toEqual({
+      definition: expect.objectContaining({ name: 'DeckCardPrinting' }),
       kind: 'record',
       relationship: expect.objectContaining({ name: 'DeckCardPrinting' }),
     })
@@ -183,26 +191,74 @@ describe('CollectionRelation', () => {
   })
 
   test('lowers a relationship-derived relation through the shared SQL adapter', () => {
-    const sql = collectionSqlRelation(relation('memberRecords'), '"deck"."id"', {
+    const sql = collectionSqlRelation(definitions, relation('memberRecords'), '"deck"."id"', {
       relationship: 'edge',
       root: 'root',
       target: 'card',
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
+      identity: ['"root"."id"'],
+      ownerId: '"edge"."deck.id"',
       relation: '"DeckMember" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
       relationshipAlias: 'edge',
+      resultType: 'entity',
       rootAlias: 'root',
       targetAlias: 'card',
     })
   })
 
-  test('keeps explicit collections out of SQL lowering until projection lands', () => {
-    expect(() => collectionSqlRelation(relation('cards'), '"deck"."id"', {
+  test('lowers an entity-projected collection with authored predicates', () => {
+    const sql = collectionSqlRelation(definitions, relation('cards'), '"deck"."id"', {
       relationship: 'edge',
       root: 'root',
       target: 'card',
-    })).toThrow('Explicit Collections')
+    })
+    expect(sql).toEqual({
+      condition: '"edge"."deck.id" = "deck"."id" AND ' +
+        '(COALESCE("edge"."quantity" > 3, FALSE))',
+      identity: ['"root"."id"'],
+      ownerId: '"edge"."deck.id"',
+      relation: '"DeckCardPrinting" "edge" JOIN "Card" "card" ' +
+        'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
+      relationshipAlias: 'edge',
+      resultType: 'entity',
+      rootAlias: 'root',
+      targetAlias: 'card',
+    })
+  })
+
+  test('lowers a record collection with composite identity and authored predicates', () => {
+    const sql = collectionSqlRelation(definitions, relation('largeEntries'), '"deck"."id"', {
+      relationship: 'edge',
+      root: 'root',
+      target: 'target',
+    })
+    expect(sql).toEqual({
+      condition: '"edge"."deck.id" = "deck"."id" AND ' +
+        '(COALESCE("edge"."quantity" > 3, FALSE))',
+      identity: ['"edge"."deck.id"', '"edge"."card.id"', '"edge"."printing.id"'],
+      ownerId: '"edge"."deck.id"',
+      relation: '"DeckCardPrinting" "edge"',
+      relationshipAlias: 'edge',
+      resultType: 'record',
+    })
+  })
+
+  test('lowers a record collection without an entity root', () => {
+    const sql = collectionSqlRelation(definitions, relation('entries'), '"deck"."id"', {
+      relationship: 'edge',
+      root: 'root',
+      target: 'target',
+    })
+    expect(sql).toEqual({
+      condition: '"edge"."deck.id" = "deck"."id"',
+      identity: ['"edge"."deck.id"', '"edge"."card.id"', '"edge"."printing.id"'],
+      ownerId: '"edge"."deck.id"',
+      relation: '"DeckCardPrinting" "edge"',
+      relationshipAlias: 'edge',
+      resultType: 'record',
+    })
   })
 })

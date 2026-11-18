@@ -901,6 +901,9 @@ export class Graph {
       return undefined
     }
     const collection = resolved.collection
+    if (collection.kind === 'explicit') {
+      throw new Error('Explicit Collections are not supported by the authorization compiler yet')
+    }
     const target = this.#collectionTarget(collection)
     const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
     const relationshipAlias = `__policy_${suffix}_rel`
@@ -912,11 +915,15 @@ export class Graph {
       ? `${parentAlias}.${quoteIdentifier('id')}`
       : row(prefix).expression
     const relation = resolveCollectionRelation(collection, value => this.#policyEntity(value))
-    const sql = collectionSqlRelation(relation, parentId, {
+    const sql = collectionSqlRelation(this.definitions, relation, parentId, {
       relationship: relationshipAlias,
       root: rootAliasName,
       target: targetAlias,
     })
+    const rootAliasValue = sql.rootAlias
+    if (rootAliasValue === undefined) {
+      throw new Error(`Graph: collection "${name}" has no entity root`)
+    }
     const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
     const resolver = this.#policyResolver(target, quoteIdentifier(targetAlias), quoteIdentifier(rootAliasName), true)
     const expressions = new Map<string, string>()
@@ -972,9 +979,9 @@ export class Graph {
       collection: nested => this.#collectionSqlScope(
         target,
         nested,
-        quoteIdentifier(sql.targetAlias ?? sql.rootAlias),
-        quoteIdentifier(sql.targetAlias ?? sql.rootAlias),
-        quoteIdentifier(sql.rootAlias),
+        quoteIdentifier(sql.targetAlias ?? rootAliasValue),
+        quoteIdentifier(sql.targetAlias ?? rootAliasValue),
+        quoteIdentifier(rootAliasValue),
         true,
         depth + 1,
       ),

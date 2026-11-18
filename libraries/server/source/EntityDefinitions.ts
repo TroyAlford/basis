@@ -1206,7 +1206,7 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
     })),
     enums: [...enums.values()],
     relationships: relationships.map(relationship => {
-      const owner = relationshipEntity(relationship)
+      const owner = relationshipView(relationship)
       return {
         ...relationship,
         constraints: normalizeConstraintList(owner, byResolved),
@@ -1222,7 +1222,7 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
  * @param relationship - Named relationship definition.
  * @returns Endpoint and relationship-owned fields as one entity view.
  */
-function relationshipEntity(relationship: RelationshipDefinition): EntityDefinition {
+export function relationshipView(relationship: RelationshipDefinition): EntityDefinition {
   const fields: EffectiveFieldDefinition[] = [
     ...relationship.between.map(endpoint => ({
       column: `${endpoint.field}.id`,
@@ -1807,7 +1807,7 @@ function normalizeViaPredicate(
   source: string,
   requireOwner: boolean,
 ): { filter?: Filter, ownerEndpoint?: RelationshipEndpointDefinition } {
-  const view = relationshipEntity(relationship)
+  const view = relationshipView(relationship)
   const resolve = (name: string): QueryFieldDefinition => {
     if (name === '@' || name === '@.id') {
       return { name, type: FieldType.ID }

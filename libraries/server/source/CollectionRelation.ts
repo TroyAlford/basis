@@ -1,5 +1,5 @@
 import type { DerivedCollectionDefinition, EntityDefinition, EntityReferenceFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
-import { identityDefinition } from './EntityDefinitions'
+import { identityDefinition, relationshipView } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 
 /** Physical adapter that retrieves a collection's source rows. */
@@ -54,6 +54,8 @@ export type CollectionTargetView =
   }
   | {
     /** Relationship record view. */
+    readonly definition: EntityDefinition,
+    /** Result is a relationship record. */
     readonly kind: 'record',
     /** Named relationship providing the record shape. */
     readonly relationship: RelationshipDefinition,
@@ -149,9 +151,13 @@ export function resolveCollectionRelation(
       : undefined
   )
   const recordColumns = collection.relationship.between.map(endpoint => `${endpoint.field}.id`)
+  const recordView = relationshipView(collection.relationship)
   const identity: CollectionResultIdentity = targetEndpoint === undefined
     ? { columns: recordColumns, kind: 'record' }
     : { column: 'id', kind: 'entity' }
+  const target: CollectionTargetView = targetEndpoint === undefined
+    ? { definition: recordView, kind: 'record', relationship: collection.relationship }
+    : { definition: entityView(targetEndpoint.target, resolveEntity), kind: 'entity' }
   return {
     collection,
     identity,
@@ -168,9 +174,7 @@ export function resolveCollectionRelation(
       ...(remote === undefined ? {} : { remote }),
       relationship: collection.relationship,
     },
-    target: targetEndpoint === undefined
-      ? { kind: 'record', relationship: collection.relationship }
-      : { definition: entityView(targetEndpoint.target, resolveEntity), kind: 'entity' },
+    target,
   }
 }
 
