@@ -437,4 +437,20 @@ describe('Explicit collections', () => {
       })).toThrow('Unknown collection record field')
     })
   })
+
+  test('composes authored and query values in one member query', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const rows = await queryEntity<{
+        readonly id: string,
+        readonly largeEntries: Envelope<RecordItem>,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'largeEntries[quantity > 2]'],
+        where: { id: deckA },
+      })
+      expect(rows[0]?.largeEntries.$matched).toBe(1)
+      expect(rows[0]?.largeEntries.$total).toBe(1)
+      expect(rows[0]?.largeEntries.items.map(item => item.quantity)).toEqual([5])
+    })
+  })
 })
