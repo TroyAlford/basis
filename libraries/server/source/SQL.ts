@@ -380,10 +380,10 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
-      const authored = collection.predicate === undefined
-        ? ''
-        : ` AND (${bindFragment(collection.predicate, bind)})`
       if (collectionFilter.operator === Operator.Comparison.Empty) {
+        const authored = collection.predicate === undefined
+          ? ''
+          : ` AND (${bindFragment(collection.predicate, bind)})`
         collection.consume?.(collection.work ?? 1)
         return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
           `${collection.condition}${authored})`

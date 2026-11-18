@@ -453,4 +453,16 @@ describe('Explicit collections', () => {
       expect(rows[0]?.largeEntries.items.map(item => item.quantity)).toEqual([5])
     })
   })
+
+  test('binds an authored via predicate once for $contains', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const rows = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'largeEntries $contains (quantity < 10)',
+      })
+      expect(rows.map(row => row.id)).toEqual([deckA, deckB])
+    })
+  })
 })

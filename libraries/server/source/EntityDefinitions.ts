@@ -2168,8 +2168,8 @@ function deriveNavigations(
       } else {
         viaFilter = resolvedSource.viaFilter
       }
-      viaLimit = first.limit ?? resolvedSource.viaLimit
-      viaOffset = first.offset ?? resolvedSource.viaOffset
+      viaLimit = first.limit !== undefined ? first.limit : resolvedSource.viaLimit
+      viaOffset = first.offset !== undefined ? first.offset : resolvedSource.viaOffset
       viaOrderBy = first.orderBy ?? resolvedSource.viaOrderBy
       validateOwnerEndpoint(owner, field, resolvedSource.ownerEndpoint, resolvedSource.relationship)
       relationship = resolvedSource.relationship

@@ -466,6 +466,48 @@ describe('EntityDefinitions', () => {
     })).toThrow('target')
   })
 
+  test('preserves an explicit unlimited override on an inherited collection via path', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$limit:5}',
+            },
+            {
+              field: 'cards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'entries{$limit:null}.card',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    const deck = entities.entity('Deck')
+    expect(deck?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'entries', viaLimit: 5 }),
+    )
+    expect(deck?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'cards', viaLimit: null }),
+    )
+  })
+
   test('rejects invalid relationship endpoints, names, fields and alias collisions', () => {
     const base = {
       entities: [

@@ -268,4 +268,17 @@ describe('CollectionRelation', () => {
       fields: ['id', 'cards.deckCardPrinting.quantity'],
     })).toThrow('cannot project relationship-owned field')
   })
+
+  test('binds authored via predicates only where they are emitted', () => {
+    const compiled = compileEntityQuery(definitions, 'Deck', {
+      fields: ['id'],
+      where: 'largeEntries $contains (quantity < 10)',
+    })
+    const placeholders = new Set(
+      [...compiled.sql.matchAll(/\$(\d+)/gu)].map(match => Number(match[1])),
+    )
+    expect(placeholders.size).toBe(compiled.values.length)
+    expect(compiled.values.filter(value => value === 3)).toHaveLength(1)
+    expect(compiled.values.filter(value => value === 10)).toHaveLength(1)
+  })
 })
