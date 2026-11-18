@@ -271,16 +271,16 @@ describe('Query parity gate', () => {
       }),
     )
     expect(source('User', 'pets.$total > 0')).toMatchObject({
-      sql: expect.stringContaining('EXISTS (SELECT 1 FROM "Pet"'),
+      sql: expect.stringContaining('EXISTS (SELECT 1 FROM ('),
     })
     expect(source('User', 'pets.$total = 0')).toMatchObject({
-      sql: expect.stringContaining('NOT EXISTS (SELECT 1 FROM "Pet"'),
+      sql: expect.stringContaining('NOT EXISTS (SELECT 1 FROM ('),
     })
     expect(source('Note', 'scores.$total = 0').sql).toContain('COALESCE(cardinality')
     expect(source('Note', 'scores.$total = 0', { fields: ['id', 'scores.$total'] }).sql)
       .toContain('AS "scores.$total"')
     expect(source('User', 'pets.$total >= 1', { orderBy: 'pets.$total' }).sql)
-      .toContain('ORDER BY COALESCE(')
+      .toContain('ORDER BY (SELECT count')
     expect(() => source('Note', 'title.$total > 0')).toThrow('requires a collection or native array field')
     expect(() => source('Pet', 'owner.$total > 0')).toThrow('requires a collection or native array field')
     expect(() => source('Note', 'tags.$total.foo > 0')).toThrow('traverses non-reference field')
@@ -298,7 +298,7 @@ describe('Query parity gate', () => {
       value: 2,
     })
     expect(normalize(sourceQuery)).toEqual(normalize(structuredQuery))
-    expect(sourceQuery.sql).toContain('__matched')
+    expect(sourceQuery.sql).toContain('count(*)::int')
     expect(sourceQuery.values).toEqual([1, 2, 25, 0])
     expect(normalize(source('User', 'pets[age > 1].$total >= 2'))).toEqual(
       normalize(structured('User', {

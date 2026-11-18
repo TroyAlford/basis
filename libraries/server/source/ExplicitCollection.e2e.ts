@@ -320,4 +320,21 @@ describe('Explicit collections', () => {
       expect(ignoredFilter.map(row => row.id)).toEqual([deckB])
     })
   })
+
+  test('agrees between record and Entity collection membership predicates', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const records = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'entries $contains (quantity > 4)',
+      })
+      const entities = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'cards $contains (deckCardPrinting.quantity > 4)',
+      })
+      expect(entities).toEqual(records)
+    })
+  })
 })

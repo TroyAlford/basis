@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
+import { compileEntityQuery } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 
@@ -216,11 +217,10 @@ describe('CollectionRelation', () => {
       target: 'card',
     })
     expect(sql).toEqual({
-      condition: '"edge"."deck.id" = "deck"."id" AND ' +
-        '(COALESCE("edge"."quantity" > 3, FALSE))',
+      condition: '"edge"."deck.id" = "deck"."id"',
       identity: ['"root"."id"'],
       ownerId: '"edge"."deck.id"',
-      predicate: 'COALESCE("edge"."quantity" > 3, FALSE)',
+      predicate: { sql: 'COALESCE("edge"."quantity" > $1, FALSE)', values: [3] },
       relation: '"DeckCardPrinting" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
       relationshipAlias: 'edge',
@@ -237,11 +237,10 @@ describe('CollectionRelation', () => {
       target: 'target',
     })
     expect(sql).toEqual({
-      condition: '"edge"."deck.id" = "deck"."id" AND ' +
-        '(COALESCE("edge"."quantity" > 3, FALSE))',
+      condition: '"edge"."deck.id" = "deck"."id"',
       identity: ['"edge"."deck.id"', '"edge"."card.id"', '"edge"."printing.id"'],
       ownerId: '"edge"."deck.id"',
-      predicate: 'COALESCE("edge"."quantity" > 3, FALSE)',
+      predicate: { sql: 'COALESCE("edge"."quantity" > $1, FALSE)', values: [3] },
       relation: '"DeckCardPrinting" "edge"',
       relationshipAlias: 'edge',
       resultType: 'record',
@@ -262,5 +261,11 @@ describe('CollectionRelation', () => {
       relationshipAlias: 'edge',
       resultType: 'record',
     })
+  })
+
+  test('rejects ambiguous relationship-owned projection on an Entity collection', () => {
+    expect(() => compileEntityQuery(definitions, 'Deck', {
+      fields: ['id', 'cards.deckCardPrinting.quantity'],
+    })).toThrow('cannot project relationship-owned field')
   })
 })

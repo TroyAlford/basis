@@ -3,7 +3,7 @@ import type { EntityDefinitions, QueryFieldDefinition } from './EntityDefinition
 import { FieldType, relationshipView } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
-import type { QueryScope } from './SQL'
+import type { QueryScope, SQLPredicate } from './SQL'
 import { SQL } from './SQL'
 
 /** Aliases used to compile one collection relation. */
@@ -21,17 +21,16 @@ export interface CollectionSqlRelation {
   /**
    * Correlated condition selecting source rows for the owning identity.
    *
-   * Includes the authored source predicate when the collection declares one.
-   * Authored predicates are schema-time constants, so their values are
-   * lowered as literals until the shared SQL binder owns composition.
+   * Authored source predicates are returned separately so callers compose
+   * their SQL and bound values into the surrounding statement.
    */
   readonly condition: string,
   /** Fully qualified columns forming the result identity. */
   readonly identity: readonly string[],
   /** Fully qualified column carrying the owning identity. */
   readonly ownerId: string,
-  /** Authored source predicate SQL, when the collection declares one. */
-  readonly predicate?: string,
+  /** Authored source predicate, when the collection declares one. */
+  readonly predicate?: SQLPredicate,
   /** SQL relation containing source rows and any required root/target joins. */
   readonly relation: string,
   /** Relationship-table alias, when relationship-backed. */
@@ -63,9 +62,6 @@ export function collectionSqlRelation(
   aliases: CollectionSqlAliases,
 ): CollectionSqlRelation {
   const predicate = sourcePredicate(definitions, resolved, aliases)
-  const predicateSuffix = predicate === undefined || predicate === ''
-    ? ''
-    : ` AND (${predicate})`
   const predicateEntry = predicate === undefined ? {} : { predicate }
 
   if (resolved.resultType === 'record') {
@@ -76,7 +72,7 @@ export function collectionSqlRelation(
     const relationshipAlias = aliases.relationship
     const ownerId = `${quote(relationshipAlias)}.${quote(resolved.owner.column)}`
     return {
-      condition: `${ownerId} = ${parentId}${predicateSuffix}`,
+      condition: `${ownerId} = ${parentId}`,
       identity: resolved.identity.columns.map(column => `${quote(relationshipAlias)}.${quote(column)}`),
       ownerId,
       relation: `${quote(relationship.name)} ${quote(relationshipAlias)}`,
@@ -95,7 +91,7 @@ export function collectionSqlRelation(
     if (targetName === 'Entity') {
       const ownerId = `${quote(aliases.root)}.${quote('id')}`
       return {
-        condition: `${ownerId} = ${parentId}${predicateSuffix}`,
+        condition: `${ownerId} = ${parentId}`,
         identity: [ownerId],
         ownerId,
         relation: `${quote('Entity')} ${quote(aliases.root)}`,
@@ -110,7 +106,7 @@ export function collectionSqlRelation(
     const rootId = `${quote(aliases.root)}.${quote('id')}`
     const ownerId = `${quote(aliases.target)}.${quote(resolved.owner.column)}`
     return {
-      condition: `${ownerId} = ${parentId}${predicateSuffix}`,
+      condition: `${ownerId} = ${parentId}`,
       identity: [rootId],
       ownerId,
       relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
@@ -128,7 +124,7 @@ export function collectionSqlRelation(
   }
   const remoteColumn = quote(`${remote.field}.id`)
   const ownerId = `${quote(aliases.relationship)}.${quote(resolved.owner.column)}`
-  const condition = `${ownerId} = ${parentId}${predicateSuffix}`
+  const condition = `${ownerId} = ${parentId}`
   const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
   const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
   const rootId = `${quote(aliases.root)}.${quote('id')}`
@@ -166,13 +162,13 @@ export function collectionSqlRelation(
  * @param definitions - Validated entity definitions.
  * @param resolved - Canonical collection relation.
  * @param aliases - Aliases reserved by the caller.
- * @returns The predicate SQL, or undefined when the relation has none.
+ * @returns The predicate SQL and values, or undefined when the relation has none.
  */
 function sourcePredicate(
   definitions: EntityDefinitions,
   resolved: ResolvedCollectionRelation,
   aliases: CollectionSqlAliases,
-): string | undefined {
+): SQLPredicate | undefined {
   const filters = resolved.predicates.filters
   if (filters.length === 0) return undefined
   if (resolved.source.kind !== 'relationship') {
@@ -200,7 +196,7 @@ function sourcePredicate(
     ? filters[0] as Filter
     : { filters, operator: Operator.Logical.And }
   const where = SQL.where(definitions, relationship.name, filter, scope)
-  return inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)
+  return { sql: where.sql.replace(/^WHERE\s+/u, ''), values: where.values }
 }
 
 /**
@@ -220,36 +216,6 @@ function sourceField(
   const field = fields.get(name)
   if (!field) throw new Error(`Unknown collection source field "${name}"`)
   return field
-}
-
-/**
- * Inline schema-time parameter values into one predicate.
- * @param sql - SQL with positional placeholders.
- * @param values - Bound values.
- * @returns SQL with literals.
- */
-function inline(sql: string, values: readonly unknown[]): string {
-  return sql.replace(/\$(\d+)/gu, (_match, index: string) => literal(values[Number(index) - 1]))
-}
-
-/**
- * Quote one SQL literal.
- * @param value - Literal value.
- * @returns SQL literal text.
- */
-function literal(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
-  if (typeof value === 'number') return String(value)
-  if (typeof value === 'bigint') return String(value)
-  if (value instanceof Date) return `'${value.toISOString()}'::timestamptz`
-  if (Array.isArray(value)) {
-    return `'${JSON.stringify(value).replaceAll("'", "''")}'`
-  }
-  if (typeof value === 'object') {
-    return `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`
-  }
-  return `'${String(value).replaceAll("'", "''")}'`
 }
 
 /**

@@ -68,20 +68,37 @@ export interface CollectionScope {
   readonly field: (name: string) => QueryFieldDefinition,
   /** Classify terminal reference identities inside the collection. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
+  /** Authored source predicate applied to the collection relation. */
+  readonly predicate?: SqlFragment,
   /** SQL relation containing the related items. */
   readonly relation: string,
   /** Expanded relation join work emitted by this scope. */
   readonly work?: number,
 }
 
+/** One parameterized SQL fragment. */
+export interface SqlFragment {
+  /** SQL text with positional `$1`, `$2`, … placeholders. */
+  readonly sql: string,
+  /** Values bound to the placeholders, in order. */
+  readonly values: readonly unknown[],
+}
+
+/** Render a count form through the caller's value binder. */
+export type CountRenderer = (bind: (value: BoundScalar) => string) => string
+
 /** Count expression forms used to canonicalize collection counts. */
 export interface CountScope {
   /** Zero-count predicate. */
-  readonly empty: string,
+  readonly empty: string | CountRenderer,
   /** Non-zero existence predicate. */
-  readonly exists: string,
+  readonly exists: string | CountRenderer,
   /** Numeric count expression. */
   readonly expression: string,
+  /** Composable count query, when the expression needs bound values. */
+  readonly fragment?: SqlFragment,
+  /** Bind the numeric count expression into the caller's value list. */
+  readonly render?: CountRenderer,
 }
 
 /** Scoped native-array relation used to evaluate one member predicate. */
@@ -363,9 +380,13 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
+      const authored = collection.predicate === undefined
+        ? ''
+        : ` AND (${bindFragment(collection.predicate, bind)})`
       if (collectionFilter.operator === Operator.Comparison.Empty) {
         collection.consume?.(collection.work ?? 1)
-        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition})`
+        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+          `${collection.condition}${authored})`
       }
       if (collectionFilter.operator !== Operator.Comparison.Contains) {
         throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
@@ -376,8 +397,11 @@ function whereClause(
       const requirements = collectionFilter.filters.map(requirement => {
         const inner = compile(requirement, collection)
         collection.consume?.(collection.work ?? 1)
+        const predicate = collection.predicate === undefined
+          ? ''
+          : ` AND (${bindFragment(collection.predicate, bind)})`
         return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition} AND (${inner}))`
+          `${collection.condition}${predicate} AND (${inner}))`
       })
       return requirements.join(' AND ')
     }
@@ -390,10 +414,10 @@ function whereClause(
         : (active.filterField ?? active.field)(comparisonFilter.field)
       const count = active.filterCount?.(comparisonFilter.field)
       if (count && comparisonFilter.operator === Operator.Comparison.Equal && comparisonFilter.value === 0) {
-        return count.empty
+        return typeof count.empty === 'function' ? count.empty(bind) : count.empty
       }
       if (count && comparisonFilter.operator === Operator.Comparison.GreaterThan && comparisonFilter.value === 0) {
-        return count.exists
+        return typeof count.exists === 'function' ? count.exists(bind) : count.exists
       }
       if (
         active.filterKind?.(comparisonFilter.field) === 'identity'
@@ -562,11 +586,64 @@ function paginate(
 }
 
 /**
+ * Rebind one fragment's values through a caller-owned binder.
+ * @param fragment - Parameterized fragment.
+ * @param bind - Caller owner of the value list.
+ * @returns SQL text with rebased placeholders.
+ */
+function bindFragment(
+  fragment: SqlFragment,
+  bind: (value: BoundScalar) => string,
+): string {
+  return fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => (
+    bind(fragment.values[Number(index) - 1] as BoundScalar)
+  ))
+}
+
+/**
+ * Compose SQL fragments into one parameterized statement.
+ * @param fragments - Text or parameterized fragments in output order.
+ * @param options - Separator and first placeholder index.
+ * @param options.separator - Text inserted between fragments.
+ * @param options.startIndex - First placeholder number.
+ * @returns The composed SQL and its ordered values.
+ */
+function compose(
+  fragments: readonly (SqlFragment | string | undefined)[],
+  options: { readonly separator?: string, readonly startIndex?: number } = {},
+): SqlFragment {
+  const separator = options.separator ?? ' '
+  const startIndex = options.startIndex ?? 1
+  const values: BoundScalar[] = []
+  const parts: string[] = []
+  for (const fragment of fragments) {
+    if (fragment === undefined) continue
+    if (typeof fragment === 'string') {
+      if (fragment !== '') parts.push(fragment)
+      continue
+    }
+    if (fragment.sql === '') continue
+    parts.push(fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => {
+      values.push(fragment.values[Number(index) - 1] as BoundScalar)
+      return `$${startIndex + values.length - 1}`
+    }))
+  }
+  return { sql: parts.join(separator), values }
+}
+
+/**
  * Internal construction of model-aware SQL. Bun owns execution; this owner
  * builds only projection, predicate, ordering, and pagination syntax from
  * validated entity metadata.
  */
-export const SQL = { orderBy: orderByClause, paginate, select, where: whereClause }
+export const SQL = {
+  bindFragment,
+  compose,
+  orderBy: orderByClause,
+  paginate,
+  select,
+  where: whereClause,
+}
 
 /**
  * Require a predicate-capable field from an entity.

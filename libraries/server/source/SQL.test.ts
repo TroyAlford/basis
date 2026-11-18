@@ -582,8 +582,8 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('t."payload" AS "payload"')
     expect(compiled.sql).toContain('"visits"')
     expect(compiled.sql).toContain('"visits__matched"')
-    expect(compiled.sql).toContain('LIMIT 2 OFFSET 1')
-    expect(compiled.values).toEqual([25, 0])
+    expect(compiled.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
+    expect(compiled.values).toEqual([2, 1, 25, 0])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
@@ -611,7 +611,7 @@ describe('SQL.where', () => {
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
     expect(members.sql).toMatch(/"cj\d+"\."user\.id"/)
     expect(members.sql).toContain('"members"')
-    expect(members.values).toEqual([25, 0])
+    expect(members.values).toEqual([2, 1, 25, 0])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id', 'articles{$limit:1}'],
@@ -636,13 +636,14 @@ describe('SQL.where', () => {
     const defaults = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members', 'members.name'],
     })
-    expect(defaults.sql).toContain('LIMIT 3')
+    expect(defaults.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
+    expect(defaults.values).toContain(3)
     expect(defaults.sql).toContain('__matched')
 
     const capped = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:50}', 'members.name'],
     })
-    expect(capped.sql).toContain('LIMIT 50')
+    expect(capped.values).toContain(50)
 
     const filtered = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[name != 'Ada']{$limit:null}", 'members.name'],
@@ -678,9 +679,9 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[role = 'GM']", 'members.name', 'members.role'],
     })
-    expect(compiled.sql).toMatch(/"cj\d+"\."role" FROM "Membership"/u)
+    expect(compiled.sql).toMatch(/"cj\d+"\."role"\s+FROM\s+"Membership"/u)
     expect(compiled.sql).toContain('"Membership"')
-    expect(compiled.sql).toContain('json_build_object(\'role\'')
+    expect(compiled.sql).toContain("json_build_object( 'role'")
     expect(compiled.values).toContain('GM')
   })
 
@@ -718,8 +719,8 @@ describe('SQL.where', () => {
       fields: ['id', 'members{$limit:2,$orderBy:-name}'],
     })
     expect(compiled.sql).toContain('json_agg(')
-    expect(compiled.sql).toMatch(/ORDER BY "__item"\."name" DESC, "__item"\."id" ASC/u)
-    expect(compiled.sql).toMatch(/ORDER BY \w+\."name" DESC, \w+\."id" ASC/u)
+    expect(compiled.sql).toMatch(/ORDER BY\s+"__item"\."name" DESC,\s+"__item"\."id" ASC/u)
+    expect(compiled.sql).toMatch(/ORDER BY\s+"__distinct"\."name" DESC,\s+"__distinct"\."id" ASC/u)
   })
 
   test('accepts root orderBy shorthand', () => {

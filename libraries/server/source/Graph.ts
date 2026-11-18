@@ -996,6 +996,7 @@ export class Graph {
       },
       field: resolve,
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
+      predicate: sql.predicate,
       relation: sql.relation,
     }
   }
