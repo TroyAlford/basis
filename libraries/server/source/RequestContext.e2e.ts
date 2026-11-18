@@ -60,8 +60,10 @@ async function linkDependencies(install: string): Promise<void> {
   const source = join(repoRoot, 'node_modules')
   await mkdir(modules, { recursive: true })
   for (const entry of await readdir(source)) {
-    await symlink(entry === 'basis' ? repoRoot : join(source, entry), join(modules, entry), 'dir')
+    if (entry === 'basis') continue
+    await symlink(join(source, entry), join(modules, entry), 'dir')
   }
+  await symlink(repoRoot, join(modules, 'basis'), 'dir')
 }
 
 /**
