@@ -93,6 +93,8 @@ export interface HydrationEntryOptions {
 /**
  * Write the generated browser entry that hydrates the server-rendered root.
  * @param options - The output directory and application module.
+ * @param options.directory - Directory the generated entry is written to.
+ * @param options.mainPath - Absolute path to the application module.
  * @returns The absolute path to the generated entry.
  */
 export function writeHydrationEntry({ directory, mainPath }: HydrationEntryOptions): string {

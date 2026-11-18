@@ -34,7 +34,7 @@ new Server()
     setTimeout(() => channel.send('pong', {}), 2_500)
   })
   .start({
-        hostname: Bun.env.HOST ?? '127.0.0.1',
+    hostname: Bun.env.HOST ?? '127.0.0.1',
     idleTimeout: Bun.env.IDLE_TIMEOUT === undefined ? undefined : Number(Bun.env.IDLE_TIMEOUT),
     port: Number(Bun.env.PORT ?? 0),
     version: Bun.env.VERSION ?? 'development',

@@ -1,6 +1,7 @@
 import { createConfig } from './consumer/eslint'
 
 export default [
+  { ignores: ['**/.basis/**'] },
   ...createConfig(),
   /*
    * Internal SQL formatter and lint helpers are documented by their signatures;

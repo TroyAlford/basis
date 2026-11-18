@@ -2992,7 +2992,6 @@ describe('Server database lifecycle', () => {
       import { Server } from 'basis/server'
 
       const server = new Server().database().start({
-        development: true,
         hostname: '127.0.0.1',
         logger: new Logger({ silent: true }),
         port: 0,

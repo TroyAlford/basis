@@ -1,13 +1,13 @@
 import type { Server as BunServer, ServerWebSocket } from 'bun'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
-import { pathToFileURL } from 'node:url'
 import type { Identity } from '../../oauth'
-import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
-import { HeadProvider } from '../../react/components/Head/Head'
 import type { HeadCollector } from '../../react/components/Head/Head'
+import { HeadProvider } from '../../react/components/Head/Head'
+import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
@@ -365,17 +365,22 @@ export class Server<AppContext extends object = Record<string, never>> {
     const context = request ? await this.#resolveContext(request) : {} as AppContext
     const component = await this.#loadMain()
     const head: HeadCollector = {}
-    const application = component
-      ? renderToString(React.createElement(
-        HeadProvider,
-        { collector: head },
-        React.createElement(component, context),
-      ))
-      : ''
+    const rendered = component
+      ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
+      : null
+    const application = rendered ? renderToString(rendered) : ''
     const title = escapeHtml(head.title || this.#title)
     const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
-    const runtimeScript = `<script id="basis-runtime" type="application/json">${serializeBasisRuntime(runtime)}</script>`
-    const bootstrapScript = `<script id="basis-bootstrap" type="application/json">${serializeBootstrap(context)}</script>`
+    const runtimeScript = [
+      '<script id="basis-runtime" type="application/json">',
+      serializeBasisRuntime(runtime),
+      '</script>',
+    ].join('')
+    const bootstrapScript = [
+      '<script id="basis-bootstrap" type="application/json">',
+      serializeBootstrap(context),
+      '</script>',
+    ].join('')
 
     if (!this.#server) {
       const fallback = renderToString(React.createElement(IndexHTML, {
@@ -459,7 +464,7 @@ export class Server<AppContext extends object = Record<string, never>> {
    * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
    * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
-     * @param options.hostname - The interface to bind.
+   * @param options.hostname - The interface to bind.
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.

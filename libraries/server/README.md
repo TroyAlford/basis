@@ -1,6 +1,6 @@
 # @basis/server
 
-A Bun application server for Basis React applications. One `Server` supports live development with Bun HMR and a deterministic managed-production runtime.
+A Bun application server for Basis React applications. One `Server` always runs live from source through Bun HMR.
 
 The authoritative API and lifecycle reference is the documentation site: [Server](../../docs/server/index.mdx), [Database & Transactions](../../docs/server/database.mdx), and [Authorization & Row-Level Security](../../docs/server/authorization.mdx). This README is a front door.
 
@@ -12,21 +12,21 @@ import { Server } from 'basis/server'
 new Server()
   .root(import.meta.dir)
   .assets('./assets')
+  .context(async request => loadApplicationContext(request))
   .main('./Application.tsx')
   .title('My Application')
   .start({
-    development: Bun.env.NODE_ENV !== 'production',
     hostname: Bun.env.HOST ?? '127.0.0.1',
     port: Number(Bun.env.PORT ?? 80),
     version: Bun.env.VERSION ?? 'development',
   })
 ```
 
-`root` resolves relative entrypoints and assets, `assets` serves a fixed directory, `main` registers the browser entrypoint, and `title` sets the SPA document title. `start` options are `development`, `hostname`, `idleTimeout`, `logger`, `port`, and `version`.
+`root` resolves relative entrypoints and assets, `assets` serves a fixed directory, `context` loads request-scoped application data, `main` registers the application component (which Basis renders on the server and hydrates in the browser), and `title` sets the fallback document title. `start` options are `hostname`, `idleTimeout`, `logger`, `port`, and `version`.
 
 ## Lifecycle
 
-Development delegates to Bun's dev server for compilation, watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the SPA and assets, and shuts down gracefully on `SIGINT`/`SIGTERM`.
+The server delegates to Bun's dev server for compilation, watching, HMR, and React Fast Refresh. The same source path serves the SPA and shuts down gracefully on `SIGINT`/`SIGTERM`.
 
 `/api/health` reports readiness: `503 starting` until the initial build and any configured database pool are ready, `503 error` on failure, and `200` only when ready. `server.ready()` exposes the same promise.
 

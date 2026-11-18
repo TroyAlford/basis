@@ -40,7 +40,6 @@ const active = new Set<ServerHarness>()
 
 /**
  * Starts the managed-application fixture through the Basis application fixture.
- * @param mode The server mode to run the fixture in.
  * @param extraEnv Additional environment for the child.
  * @param entry The fixture entrypoint module to start.
  * @returns A harness exposing the bound port and an idempotent stop.
@@ -118,6 +117,7 @@ describe('Server', () => {
     expect(html).toContain('id="basis-bootstrap"')
     expect(html).toContain('id="root"')
     expect(html).toContain('Basis managed server')
+    expect(html).toContain('<title>Basis fixture</title>')
 
     // Unmatched paths fall back to the same HMR-enabled SPA shell.
     const deep = await Bun.fetch(`${base}/decks/123`)
@@ -176,7 +176,10 @@ describe('Server development HMR', () => {
       await Bun.write(valueFile, "export const value = 'one'\n")
       await Bun.write(
         join(dir, 'entry.ts'),
-        "import { value } from './value'\n;(globalThis as { __value?: string }).__value = value\nexport const Application = () => null\n",
+        `import { value } from './value'
+;(globalThis as { __value?: string }).__value = value
+export const Application = () => null
+`,
       )
 
       const server = await startServer({ ENTRY: join(dir, 'entry.ts') })

@@ -9,6 +9,8 @@ import type { Database } from '../source/Database'
  * as server lifecycle output.
  */
 export interface RouteContext<AppContext extends object = Record<string, unknown>> {
+  /** The application context loaded for this request. */
+  readonly context: AppContext,
   /** The request-scoped database capability, using native Bun transactions. */
   readonly db?: Database,
   /** The verified canonical User id, or null for an anonymous request. */
@@ -17,6 +19,4 @@ export interface RouteContext<AppContext extends object = Record<string, unknown
   readonly logger: ILogger,
   /** The incoming request. */
   readonly request: Request,
-  /** The application context loaded for this request. */
-  readonly context: AppContext,
 }

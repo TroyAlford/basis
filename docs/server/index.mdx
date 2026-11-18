@@ -4,27 +4,27 @@ title: Server
 
 # Server
 
-`basis/server` provides the Bun application server used by Basis apps. One `Server` runs either a development server with Bun HMR or a deterministic production server that builds once and serves the SPA and assets.
+`basis/server` provides the Bun application server used by Basis apps. One `Server` always runs live from source through Bun HMR and renders the application on the server before hydrating it in the browser.
 
 ```ts
 import { Server } from 'basis/server'
 
 const server = new Server()
   .root(import.meta.dir)
+  .context(async request => loadApplicationContext(request))
   .main('./Application.tsx')
   .start({
-    development: Bun.env.NODE_ENV !== 'production',
     hostname: Bun.env.HOST ?? '127.0.0.1',
     port: Number(Bun.env.PORT ?? 80),
     version: Bun.env.VERSION ?? 'development',
   })
 ```
 
-`root` resolves relative entrypoints and assets, `main` registers the browser entrypoint, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for the build watcher and owned capabilities such as the database pool.
+`root` resolves relative entrypoints and assets, `context` loads request-scoped application data, `main` registers the application component, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for owned capabilities such as the database pool. `main` modules must export `Application` or a default React component; Basis renders it on the server, injects the request context as bootstrap data, and hydrates it in the browser.
 
 ## Lifecycle
 
-Development delegates to Bun's dev server, which owns the module graph, file watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the bundle and assets, and handles `SIGINT`/`SIGTERM` through graceful shutdown.
+Bun's dev server owns the module graph, file watching, HMR, and React Fast Refresh. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
 `/api/health` is the readiness API. It stays `503 starting` until the initial build and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 
@@ -40,7 +40,28 @@ new Server()
   })
 ```
 
-API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, and the server logger.
+API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, the server logger, and the typed application context under `context.context`.
+
+## Request context
+
+`context(loader)` defines the application data a request carries. The loader runs once per request; its result is passed to API handlers and to the automatically server-rendered `main` component.
+
+```ts
+type AppContext = {
+  campaign: Campaign
+  preferences: Preferences
+  user: User | null
+}
+
+new Server<AppContext>()
+  .context(async request => loadApplicationContext(request))
+  .main('./Application.tsx')
+  .api([HttpVerb.Get], 'campaign', (_params, { context }) => {
+    return Response.json(context.campaign)
+  })
+```
+
+The loader receives the request and should return a JSON-serializable value. Keep server-only capabilities such as `db`, `identity`, and the logger on the standard `RouteContext`; the application context is the shape embedded into the SSR bootstrap and hydrated in the browser.
 
 ## Static files
 
