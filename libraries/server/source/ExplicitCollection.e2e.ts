@@ -121,22 +121,15 @@ async function seed(database: LifecycleDatabase): Promise<void> {
   `
   await database.sql`
     INSERT INTO "Deck" ("id", "title")
-    VALUES
-      (${deckA}, 'Deck A'),
-      (${deckB}, 'Deck B'),
-      (${deckC}, 'Deck C')
+    VALUES (${deckA}, 'Deck A'), (${deckB}, 'Deck B'), (${deckC}, 'Deck C')
   `
   await database.sql`
     INSERT INTO "Card" ("id", "title")
-    VALUES
-      (${cardOne}, 'Card One'),
-      (${cardTwo}, 'Card Two')
+    VALUES (${cardOne}, 'Card One'), (${cardTwo}, 'Card Two')
   `
   await database.sql`
     INSERT INTO "Printing" ("id", "title")
-    VALUES
-      (${printingOne}, 'Printing One'),
-      (${printingTwo}, 'Printing Two')
+    VALUES (${printingOne}, 'Printing One'), (${printingTwo}, 'Printing Two')
   `
   await database.sql`
     INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity", "foil", "note")
@@ -565,7 +558,7 @@ describe('Explicit collections', () => {
       expect(combined?.quotedEntries?.items.map(item => item.note)).toEqual(["O'Brien"])
 
       const count = await database.sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS "count"
+        SELECT COUNT(*)::INT AS "count"
         FROM "Deck"
       `
       expect(count[0]?.count).toBe(3)
