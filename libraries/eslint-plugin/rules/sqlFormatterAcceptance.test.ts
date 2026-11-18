@@ -1,3 +1,4 @@
+import { captureRuntimeSql } from 'basis/testing'
 import { beforeAll, describe, expect, test } from 'bun:test'
 import { Linter } from 'eslint'
 import { loadModule, parsePlPgSQLSync } from 'libpg-query'
@@ -20,10 +21,15 @@ function lint(code: string) {
 }
 
 let report: CorpusReport
+let runtime: Awaited<ReturnType<typeof captureRuntimeSql>>
 
 beforeAll(async () => {
   await loadModule()
-  report = await scanProductionCorpus()
+  runtime = await captureRuntimeSql()
+  report = await scanProductionCorpus(
+    runtime.sql.map((sql, index) => ({ file: 'runtime-producer', source: 'runtime', sql: `${sql} -- ${index}` })),
+    runtime.sites,
+  )
 })
 
 describe('SQL formatter acceptance contract', () => {
@@ -35,10 +41,12 @@ describe('SQL formatter acceptance contract', () => {
     expect(report.invalidFormatted).toEqual([])
   })
 
-  test('2. every dynamic production SQL call site has fixture coverage', () => {
+  test('2. every dynamic production SQL call site has executed producer coverage', () => {
+    expect(runtime.sites).toHaveLength(5)
+    expect(runtime.sql.length).toBeGreaterThanOrEqual(5)
     expect(report.unresolved).toEqual([])
     expect(report.runtimeSites).toHaveLength(5)
-    expect(report.runtimeFixtures).toBeGreaterThan(0)
+    expect(report.runtimeFixtures).toBeGreaterThanOrEqual(runtime.sql.length)
   })
 
   test('3. every SQL statement preserves normalized parse-tree equivalence', () => {

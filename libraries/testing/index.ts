@@ -19,6 +19,8 @@ export { toMatchIndented } from './matchers/toMatchIndented'
 export { comparePng } from './snapshots'
 export type { ScreenshotComparison, ScreenshotOptions } from './snapshots'
 
+export { captureRuntimeSql } from './sqlRuntimeCorpus'
+export type { RuntimeSqlCorpus } from './sqlRuntimeCorpus'
 export { withDatabase } from './withDatabase'
 export type { WithDatabaseContext, WithDatabaseOptions } from './withDatabase'
 export type { DatabaseContext } from '../server/testing/DatabaseFixture'

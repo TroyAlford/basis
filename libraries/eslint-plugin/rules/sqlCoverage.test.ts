@@ -1,10 +1,15 @@
+import { captureRuntimeSql } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { scanProductionCorpus } from './sqlCorpus'
 import { SQL_SCHEMA_NODE_TYPES, sqlCoverage } from './sqlCoverage'
 
 describe('SQL AST coverage ledger', () => {
   test('derives coverage from the executable production corpus', async () => {
-    const report = await scanProductionCorpus()
+    const runtime = await captureRuntimeSql()
+    const report = await scanProductionCorpus(
+      runtime.sql.map((sql, index) => ({ file: 'runtime-producer', source: 'runtime', sql: `${sql} -- ${index}` })),
+      runtime.sites,
+    )
     expect(report.unsupported).toEqual([])
     expect(report.parseFailures).toEqual([])
     expect(report.invalidFormatted).toEqual([])

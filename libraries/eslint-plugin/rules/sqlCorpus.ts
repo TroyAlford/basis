@@ -13,28 +13,6 @@ const ROOTS = ['libraries', 'consumer', 'testing', 'scripts']
 const EXCLUDED = /(?:^|[/.])(?:node_modules|dist|\.cache|generated)(?:[/.]|$)/
 const TEST_FILE = /\.(?:test|e2e|screenshot|lifecycle|hmr)\.(?:ts|tsx)$/u
 
-/** Representative runtime SQL for call sites assembled from query-builder values. */
-const RUNTIME_SQL_FIXTURES: Readonly<Record<string, readonly string[]>> = {
-  'compiled.sql': [
-    'SELECT "id", "name" FROM "Entity" WHERE "id" = $1',
-    'INSERT INTO "Entity" ("id", "name") VALUES ($1, $2) RETURNING "id"',
-  ],
-  'operation.sql': [
-    'ALTER TABLE "Entity" ADD CONSTRAINT "Entity_pkey" PRIMARY KEY ("id")',
-    'ALTER TABLE "Entity" ADD COLUMN "created.at" TIMESTAMPTZ',
-    'ALTER TABLE "Entity" DROP COLUMN "obsolete"',
-    'ALTER TABLE "Entity" ALTER COLUMN "name" TYPE TEXT',
-  ],
-  'prepared.query.sql': [
-    'SELECT "id" FROM "Entity" WHERE "id" = $1',
-    'UPDATE "Entity" SET "name" = $1 WHERE "id" = $2',
-  ],
-  'statement.sql': [
-    'INSERT INTO "Entity" ("id") VALUES ($1)',
-    'DELETE FROM "Entity" WHERE "id" = $1',
-  ],
-}
-
 /** One discovered corpus SQL string. */
 export interface CorpusCandidate {
   file: string,
@@ -229,10 +207,12 @@ function collectNodes(
 /**
  * Discover and verify the production SQL corpus.
  * @param extra - Additional candidates used by coverage regression tests.
+ * @param runtimeSites - Call-site identities covered by executed runtime producers.
  * @returns Executable corpus report.
  */
 export async function scanProductionCorpus(
   extra: readonly CorpusCandidate[] = [],
+  runtimeSites: readonly string[] = [],
 ): Promise<CorpusReport> {
   await loadModule()
   const report: CorpusReport = {
@@ -252,19 +232,12 @@ export async function scanProductionCorpus(
     variants: new Map(),
   }
   const candidates: CorpusCandidate[] = []
-  const generatedFixtures = [
-    'ALTER TABLE "Entity" ADD CONSTRAINT "Entity_pkey" PRIMARY KEY ("id")',
-    'ALTER TABLE "Entity" ADD COLUMN "created.at" TIMESTAMPTZ',
-    'ALTER TABLE "Entity" DROP COLUMN "obsolete"',
-    'ALTER TABLE "Entity" ALTER COLUMN "name" TYPE TEXT',
-    'INSERT INTO "Entity" ("id") VALUES (__basis_p0__)',
-  ]
   const add = (file: string, sql: string, source: string): void => {
     if (!sql.trim()) return
     candidates.push({ file, source, sql })
   }
-  for (const sql of generatedFixtures) add('generated-fixture', sql, 'fixture')
   for (const candidate of extra) add(candidate.file, candidate.sql, candidate.source)
+  report.runtimeFixtures = extra.filter(candidate => candidate.source === 'runtime').length
   for (const file of ROOTS.flatMap(sourceFiles)) {
     report.sources += 1
     if (file.endsWith('.sql')) {
@@ -282,15 +255,10 @@ export async function scanProductionCorpus(
         const sql = argument ? staticSql(argument) : null
         if (sql !== null) {
           add(file, sql, 'call')
+        } else if (runtimeSites.includes(argument?.getText() ?? '')) {
+          report.runtimeSites.push(argument?.getText() ?? '')
         } else {
-          const fixtures = RUNTIME_SQL_FIXTURES[argument?.getText() ?? '']
-          if (fixtures) {
-            for (const fixture of fixtures) add(file, fixture, 'fixture')
-            report.runtimeFixtures += fixtures.length
-            report.runtimeSites.push(argument?.getText() ?? '')
-          } else {
-            report.unresolved.push({ file, sql: node.getText().slice(0, 240) })
-          }
+          report.unresolved.push({ file, sql: node.getText().slice(0, 240) })
         }
       }
       ts.forEachChild(node, visit)
