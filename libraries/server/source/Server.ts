@@ -389,7 +389,10 @@ export class Server<AppContext extends object = Record<string, never>> {
         scripts: [],
         title,
       }))
-      return new Response(fallback.replace('<div id="root"></div>', `<div id="root">${application}</div>`), {
+      const html = fallback
+        .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
+        .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
+      return new Response(html, {
         headers: { 'Content-Type': 'text/html' },
       })
     }
