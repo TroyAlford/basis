@@ -1066,21 +1066,21 @@ export class Graph {
         WHERE ((${read.join(' OR ')}) AND (${create.join(' OR ')}))
       )
     `
-    return {
+    const generated = securityDefinerFunction({
       body: body.trim(),
+      qualified,
+      searchPath: this.#searchPath(),
+      signature: 'root_id text, proposed jsonb',
+    })
+    return {
+      body: generated.body,
       lifecycle: false,
       name,
       required: [name],
       searchPath: this.#searchPath(),
       securityDefiner: true,
       signature: 'root_id text, proposed jsonb',
-      sql: `
-        CREATE OR REPLACE FUNCTION ${qualified}(root_id text, proposed jsonb)
-        RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-          ${body}
-        $$;
-      `,
+      sql: generated.sql,
     }
   }
 
@@ -1391,27 +1391,29 @@ export class Graph {
       seen.add(name)
       const qualified = this.#qualified(name)
       const predicate = this.#compileDirectPredicate(grant, '__row', grant.target, true)
-      const sql = `
-        CREATE OR REPLACE FUNCTION ${qualified}(root_id text)
-        RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-          SELECT EXISTS (
-            SELECT 1
-            FROM ${quoteIdentifier(grant.target)} AS "__row"
-            WHERE "__row".${quoteIdentifier('id')} = root_id
-              AND ${predicate}
-          )
-        $$;
-      `
+      const body = `
+        SELECT EXISTS (
+          SELECT 1
+          FROM ${quoteIdentifier(grant.target)} AS "__row"
+          WHERE "__row".${quoteIdentifier('id')} = root_id
+            AND ${predicate}
+        )
+      `.trim()
+      const generated = securityDefinerFunction({
+        body,
+        qualified,
+        searchPath: this.#searchPath(),
+        signature: 'root_id text',
+      })
       functions.push({
-        body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+        body: generated.body,
         lifecycle: false,
         name,
         required: [name],
         searchPath: this.#searchPath(),
         securityDefiner: true,
         signature: 'root_id text',
-        sql,
+        sql: generated.sql,
       })
     }
     return functions
@@ -1446,33 +1448,35 @@ export class Graph {
       const predicate = this.#compileDirectPredicate(grant, '__row', constraint.owner, true)
       const name = constraint.validator.replace(/^basis\./u, '')
       const qualified = this.#qualified(name)
-      const sql = `
-        CREATE OR REPLACE FUNCTION ${qualified}(root_id text)
-        RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-          SELECT EXISTS (
-            SELECT 1
-            FROM ${quoteIdentifier(constraint.owner)} AS "__row"
-            JOIN "Entity" AS "__written"
-              ON "__written".${quoteIdentifier('id')} = "__row".${quoteIdentifier('id')}
-            WHERE "__row".${quoteIdentifier('id')} = root_id
-              AND (
-                "__written".xmin = pg_current_xact_id()::xid
-                OR pg_xact_status("__written".xmin::text::xid8) = 'in progress'
-              )
-              AND ${predicate}
-          )
-        $$;
-      `
+      const body = `
+        SELECT EXISTS (
+          SELECT 1
+          FROM ${quoteIdentifier(constraint.owner)} AS "__row"
+          JOIN "Entity" AS "__written"
+            ON "__written".${quoteIdentifier('id')} = "__row".${quoteIdentifier('id')}
+          WHERE "__row".${quoteIdentifier('id')} = root_id
+            AND (
+              "__written".xmin = pg_current_xact_id()::xid
+              OR pg_xact_status("__written".xmin::text::xid8) = 'in progress'
+            )
+            AND ${predicate}
+        )
+      `.trim()
+      const generated = securityDefinerFunction({
+        body,
+        qualified,
+        searchPath: this.#searchPath(),
+        signature: 'root_id text',
+      })
       functions.push({
-        body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+        body: generated.body,
         lifecycle: false,
         name,
         required: [name],
         searchPath: this.#searchPath(),
         securityDefiner: true,
         signature: 'root_id text',
-        sql,
+        sql: generated.sql,
       })
     }
     return functions
@@ -1922,6 +1926,49 @@ function roleCondition(role: string, schema: string): string {
  */
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`
+}
+
+/**
+ * Build one SECURITY DEFINER SQL function with a body-safe dollar delimiter.
+ * @param options - Function name, signature, search path and body.
+ * @param options.body - Complete SQL function body.
+ * @param options.qualified - Schema-qualified function name.
+ * @param options.searchPath - Function search path.
+ * @param options.signature - Function argument signature.
+ * @returns The function body and DDL.
+ */
+function securityDefinerFunction(options: {
+  readonly body: string,
+  readonly qualified: string,
+  readonly searchPath: string,
+  readonly signature: string,
+}): { readonly body: string, readonly sql: string } {
+  const delimiter = dollarDelimiter(options.body)
+  return {
+    body: options.body,
+    sql: `
+      CREATE OR REPLACE FUNCTION ${options.qualified}(${options.signature})
+      RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${options.searchPath} AS ${delimiter}
+        ${options.body}
+      ${delimiter};
+    `,
+  }
+}
+
+/**
+ * Choose a dollar-quote delimiter absent from one function body.
+ * @param body - Complete SQL function body.
+ * @returns A delimiter that does not occur in the body.
+ */
+function dollarDelimiter(body: string): string {
+  let index = 0
+  let delimiter = '$basis$'
+  while (body.includes(delimiter)) {
+    delimiter = `$basis_${index}$`
+    index += 1
+  }
+  return delimiter
 }
 
 /**

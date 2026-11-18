@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { Constraint } from './EntityDefinitions'
 import { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID, Security } from './Graph'
 import { Operator } from './Operator'
 
@@ -931,6 +932,35 @@ describe('Graph', () => {
     expect(() => make({ invalid: Security.Public })).toThrow('unknown action "invalid"')
     expect(() => make({ read: {} })).toThrow('must declare grant, role, or a non-empty where')
     expect(() => make({ read: { where: null } })).toThrow('must declare grant, role, or a non-empty where')
+  })
+
+  test('uses a body-safe dollar delimiter for generated helpers', () => {
+    const payload = 'Safe $$ \' OR TRUE; DROP TABLE "Workspace"; --'
+    const quoted = payload.replaceAll("'", "\\'")
+    const delimiterGraph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'Title excludes the reserved payload.',
+          name: 'reservedTitle',
+          type: Constraint.Validation,
+          where: `title != '${quoted}'`,
+        }],
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'Workspace',
+        security: {
+          [Action.Create]: { where: `title = '${quoted}'` },
+          [Action.Read]: { where: `title = '${quoted}'` },
+        },
+      }],
+    })
+    const functions = delimiterGraph.physicalSchema('basis_app', true).functions
+    const generated = functions.filter(fn => fn.securityDefiner)
+    expect(generated.length).toBeGreaterThanOrEqual(2)
+    for (const fn of generated) {
+      expect(fn.sql).not.toMatch(/\bAS \$\$/u)
+      expect(fn.sql).toMatch(/AS \$basis(?:_\d+)?\$/u)
+      expect(fn.body).toContain('$$')
+    }
   })
 
 })

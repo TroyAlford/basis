@@ -586,6 +586,26 @@ function paginate(
 }
 
 /**
+ * Require complete placeholder/value correspondence in one fragment.
+ * @param fragment - Parameterized fragment.
+ */
+function validateFragment(fragment: SqlFragment): void {
+  const referenced = new Set<number>()
+  for (const match of fragment.sql.matchAll(/\$(\d+)\b/gu)) {
+    const position = Number(match[1])
+    if (position < 1 || position > fragment.values.length) {
+      throw new Error(`SQL fragment placeholder $${position} has no matching value`)
+    }
+    referenced.add(position)
+  }
+  for (let position = 1; position <= fragment.values.length; position += 1) {
+    if (!referenced.has(position)) {
+      throw new Error(`SQL fragment value $${position} has no placeholder`)
+    }
+  }
+}
+
+/**
  * Rebind one fragment's values through a caller-owned binder.
  * @param fragment - Parameterized fragment.
  * @param bind - Caller owner of the value list.
@@ -595,13 +615,10 @@ function bindFragment(
   fragment: SqlFragment,
   bind: (value: BoundScalar) => string,
 ): string {
-  return fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => {
-    const position = Number(index)
-    if (position < 1 || position > fragment.values.length) {
-      throw new Error(`SQL fragment placeholder $${index} has no matching value`)
-    }
-    return bind(fragment.values[position - 1] as BoundScalar)
-  })
+  validateFragment(fragment)
+  return fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => (
+    bind(fragment.values[Number(index) - 1] as BoundScalar)
+  ))
 }
 
 /**
@@ -626,13 +643,10 @@ function compose(
       if (fragment !== '') parts.push(fragment)
       continue
     }
+    validateFragment(fragment)
     if (fragment.sql === '') continue
     parts.push(fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => {
-      const position = Number(index)
-      if (position < 1 || position > fragment.values.length) {
-        throw new Error(`SQL fragment placeholder $${index} has no matching value`)
-      }
-      values.push(fragment.values[position - 1] as BoundScalar)
+      values.push(fragment.values[Number(index) - 1] as BoundScalar)
       return `$${startIndex + values.length - 1}`
     }))
   }

@@ -8,6 +8,7 @@ import { fixtureRows, removeService, withDatabase } from '../testing/DatabaseFix
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
+import { Constraint } from './EntityDefinitions'
 import { Action, ADMIN_ROLE_ID, Security } from './Graph'
 import { Graph } from './Graph'
 import { installBasis } from './Schema'
@@ -1020,7 +1021,7 @@ describe('Authorization RLS', () => {
   }, 30_000)
 
   test('escapes adversarial authored values in generated RLS policies', async () => {
-    const payload = 'Banned\'; DROP TABLE "Workspace"; --'
+    const payload = 'Banned$$\'; DROP TABLE "Workspace"; --'
     const adversarialGraph = new Graph({
       entities: [
         {
@@ -1051,7 +1052,9 @@ describe('Authorization RLS', () => {
     })
     const helper = adversarialGraph.physicalSchema('basis_app', true).functions
       .find(fn => fn.name.startsWith('policy_'))
-    expect(helper?.sql).toContain('Banned\'\'; DROP TABLE "Workspace"; --')
+    expect(helper?.sql).toContain('Banned$$\'\'; DROP TABLE "Workspace"; --')
+    expect(helper?.sql).not.toMatch(/\bAS \$\$/u)
+    expect(helper?.sql).toMatch(/AS \$basis(?:_\d+)?\$/u)
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
 
     const install = tempDirectory('basis-authorization-adversarial-')
@@ -1102,6 +1105,91 @@ describe('Authorization RLS', () => {
         SELECT count(*)::int AS "count" FROM "Workspace"
       `
       expect(count[0]?.count).toBe(1)
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 30_000)
+
+  test('installs create and validation helpers with dollar-quote payloads', async () => {
+    const payload = 'Safe $$ \' OR TRUE; DROP TABLE "Workspace"; --'
+    const quoted = payload.replaceAll("'", "\\'")
+    const delimiterGraph = new Graph({
+      entities: [
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Workspace',
+          security: {
+            [Action.Create]: { where: `title = '${quoted}'` },
+            [Action.Read]: { where: `title = '${quoted}'` },
+          },
+        },
+        {
+          constraints: [{
+            description: 'Rejects the reserved payload.',
+            name: 'reservedTitle',
+            type: Constraint.Validation,
+            where: `title != '${quoted}'`,
+          }],
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Validated',
+        },
+      ],
+    })
+    const helpers = delimiterGraph.physicalSchema('basis_app', true).functions
+      .filter(fn => fn.securityDefiner)
+    expect(helpers.length).toBeGreaterThanOrEqual(2)
+    for (const helper of helpers) {
+      expect(helper.sql).not.toMatch(/\bAS \$\$/u)
+      expect(helper.sql).toMatch(/AS \$basis(?:_\d+)?\$/u)
+    }
+    const createHelper = helpers.find(fn => fn.name.startsWith('policy_create_'))
+    const validation = delimiterGraph.definitions.constraints
+      .find(constraint => constraint.name === 'reservedTitle')
+    if (!createHelper || validation === undefined || !('validator' in validation)
+      || validation.validator === undefined) {
+      throw new Error('missing generated helper')
+    }
+    const validationName = validation.validator.replace(/^basis\./u, '')
+
+    const install = tempDirectory('basis-authorization-delimiter-')
+    const server = await start(install, delimiterGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const allowed = await admin.sql.unsafe(
+        `SELECT public."${createHelper.name}"($1, jsonb_build_object('title', $2::text)) AS "allowed"`,
+        [randomUUID(), payload],
+      ) as { allowed: boolean }[]
+      expect(allowed[0]?.allowed).toBe(true)
+      const denied = await admin.sql.unsafe(
+        `SELECT public."${createHelper.name}"($1, jsonb_build_object('title', $2::text)) AS "allowed"`,
+        [randomUUID(), 'other'],
+      ) as { allowed: boolean }[]
+      expect(denied[0]?.allowed).toBe(false)
+
+      await admin.sql.begin(async tx => {
+        for (const [title, expected] of [['safe', true], [payload, false]] as const) {
+          const id = randomUUID()
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${title}, 'Validated')
+          `
+          await tx`
+            INSERT INTO "Validated" ("id", "title")
+            VALUES (${id}, ${title})
+          `
+          const result = await tx.unsafe(
+            `SELECT public."${validationName}"($1) AS "valid"`,
+            [id],
+          ) as { valid: boolean }[]
+          expect(result[0]?.valid).toBe(expected)
+        }
+      })
+      const count = await admin.sql<{ count: number }[]>`
+        SELECT count(*)::int AS "count" FROM "Validated"
+      `
+      expect(count[0]?.count).toBe(2)
     } finally {
       await admin.close()
       await server.shutdown()

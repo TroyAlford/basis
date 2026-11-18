@@ -299,5 +299,45 @@ describe('SQL fragment binding contract', () => {
       sql: '"title" = $1',
       values: [],
     }])).toThrow()
+
+    expect(() => SQL.compose([{
+      sql: '"title" = $10',
+      values: ['only-one-value'],
+    }])).toThrow()
+  })
+
+  test('rejects surplus bound values', () => {
+    expect(() => SQL.compose([{
+      sql: '"title" = $1',
+      values: ['one', 'two'],
+    }])).toThrow()
+
+    expect(() => SQL.bindFragment(
+      { sql: '"title" = $1', values: ['one', 'two'] },
+      () => '$1',
+    )).toThrow()
+  })
+
+  test('preserves repeated references to one value', () => {
+    const fragment = { sql: '"a" = $1 OR "b" = $1', values: ['same'] }
+    const composed = SQL.compose([fragment])
+    expect(composed.sql).toBe('"a" = $1 OR "b" = $2')
+    expect(composed.values).toEqual(['same', 'same'])
+
+    const bound: unknown[] = []
+    const sql = SQL.bindFragment(fragment, value => {
+      bound.push(value)
+      return `$${bound.length}`
+    })
+    expect(sql).toBe('"a" = $1 OR "b" = $2')
+    expect(bound).toEqual(['same', 'same'])
+  })
+
+  test('supports multi-digit placeholders with complete values', () => {
+    const values = Array.from({ length: 10 }, (_, index) => index)
+    const sql = values.map((_, index) => `"field${index}" = $${index + 1}`).join(' AND ')
+    const composed = SQL.compose([{ sql, values }])
+    expect(composed.sql).toBe(sql)
+    expect(composed.values).toEqual(values)
   })
 })
