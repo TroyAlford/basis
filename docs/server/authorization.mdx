@@ -252,7 +252,11 @@ The equivalent structured predicate is:
 }
 ```
 
-Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections and named-relationship collections both work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
+Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections, relationship-derived collections, and Entity-owned Collections all work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
+
+### Entity-owned Collections
+
+An explicit Collection declared with `type: 'Collection'` is authorized through the same membership predicates. An Entity-projected Collection compares the target Entity identity. A record-projected Collection compares the relationship row's composite endpoint columns, so it never invents a surrogate record id. Relationship-owned predicates use the lower-cased relationship-name prefix and belong in the same `$contains` requirement as the identity or role, so PostgreSQL evaluates them against the same source edge. The authored `via` filter is applied before the policy's member predicate. Changing a relationship property such as a role or quantity changes access immediately; no policy rebuild is required.
 
 Collection predicates are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
 

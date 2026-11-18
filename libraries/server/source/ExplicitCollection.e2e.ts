@@ -20,7 +20,10 @@ const definitions = EntityDefinitions.load(JSON.stringify({
           field: 'largeEntries',
           target: 'DeckCardPrinting',
           type: 'Collection',
-          via: 'DeckCardPrinting[deck = @ $and quantity > 4]',
+          via: `DeckCardPrinting[
+            deck = @
+            $and quantity > 4
+          ]`,
         },
         {
           field: 'cards',
@@ -39,6 +42,24 @@ const definitions = EntityDefinitions.load(JSON.stringify({
           target: 'Card',
           type: 'Collection',
           via: 'DeckCardPrinting[deck = @]{$limit:1,$offset:1,$orderBy:-title}.card',
+        },
+        {
+          field: 'quotedEntries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @ $and note = \'O\\\'Brien\']',
+        },
+        {
+          field: 'payloadEntries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @ $and note = \'\\\'; DROP TABLE "Deck"; --\']',
+        },
+        {
+          field: 'dollarEntries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @ $and note = \'$1\']',
         },
       ],
       name: 'Deck',
@@ -67,6 +88,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
     fields: [
       { field: 'quantity', type: 'Number' },
       { field: 'foil', type: 'Boolean' },
+      { field: 'note', nullable: true, type: 'String' },
     ],
     name: 'DeckCardPrinting',
   }],
@@ -117,12 +139,12 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${printingTwo}, 'Printing Two')
   `
   await database.sql`
-    INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity", "foil")
+    INSERT INTO "DeckCardPrinting" ("deck.id", "card.id", "printing.id", "quantity", "foil", "note")
     VALUES
-      (${deckA}, ${cardOne}, ${printingOne}, 2, FALSE),
-      (${deckA}, ${cardOne}, ${printingTwo}, 5, TRUE),
-      (${deckA}, ${cardTwo}, ${printingOne}, 1, FALSE),
-      (${deckB}, ${cardTwo}, ${printingTwo}, 9, FALSE)
+      (${deckA}, ${cardOne}, ${printingOne}, 2, FALSE, ${"O'Brien"}),
+      (${deckA}, ${cardOne}, ${printingTwo}, 5, TRUE, ${'\'; DROP TABLE "Deck"; --'}),
+      (${deckA}, ${cardTwo}, ${printingOne}, 1, FALSE, ${'$1'}),
+      (${deckB}, ${cardTwo}, ${printingTwo}, 9, FALSE, ${'$999'})
   `
 }
 
@@ -131,6 +153,7 @@ interface RecordItem {
   readonly card: string,
   readonly deck: string,
   readonly foil: boolean,
+  readonly note: string | null,
   readonly printing: string,
   readonly quantity: number,
 }
@@ -163,9 +186,30 @@ describe('Explicit collections', () => {
       expect(entries?.$total).toBe(3)
       expect(entries?.$matched).toBe(3)
       expect(entries?.items).toEqual([
-        { card: cardOne, deck: deckA, foil: false, printing: printingOne, quantity: 2 },
-        { card: cardOne, deck: deckA, foil: true, printing: printingTwo, quantity: 5 },
-        { card: cardTwo, deck: deckA, foil: false, printing: printingOne, quantity: 1 },
+        {
+          card: cardOne,
+          deck: deckA,
+          foil: false,
+          note: "O'Brien",
+          printing: printingOne,
+          quantity: 2,
+        },
+        {
+          card: cardOne,
+          deck: deckA,
+          foil: true,
+          note: '\'; DROP TABLE "Deck"; --',
+          printing: printingTwo,
+          quantity: 5,
+        },
+        {
+          card: cardTwo,
+          deck: deckA,
+          foil: false,
+          note: '$1',
+          printing: printingOne,
+          quantity: 1,
+        },
       ])
     })
   })
@@ -181,7 +225,14 @@ describe('Explicit collections', () => {
       const entries = rows[0]?.largeEntries
       expect(entries?.$total).toBe(1)
       expect(entries?.items).toEqual([
-        { card: cardOne, deck: deckA, foil: true, printing: printingTwo, quantity: 5 },
+        {
+          card: cardOne,
+          deck: deckA,
+          foil: true,
+          note: '\'; DROP TABLE "Deck"; --',
+          printing: printingTwo,
+          quantity: 5,
+        },
       ])
     })
   })
@@ -463,6 +514,144 @@ describe('Explicit collections', () => {
         where: 'largeEntries $contains (quantity < 10)',
       })
       expect(rows.map(row => row.id)).toEqual([deckA, deckB])
+    })
+  })
+
+  test('keeps adversarial values bound through authored and query predicates', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const query = async (fields: readonly string[]) => {
+        const rows = await queryEntity<{
+          readonly dollarEntries?: Envelope<{ readonly note: string }>,
+          readonly entries?: Envelope<{ readonly note: string }>,
+          readonly id: string,
+          readonly payloadEntries?: Envelope<{ readonly note: string }>,
+          readonly quotedEntries?: Envelope<{ readonly note: string }>,
+        }>(database.sql, definitions, 'Deck', {
+          fields: [...fields],
+          where: { id: deckA },
+        })
+        return rows[0]
+      }
+
+      const quoted = await query(['id', 'quotedEntries.note'])
+      expect(quoted?.quotedEntries?.items.map(item => item.note)).toEqual(["O'Brien"])
+
+      const payloadText = '\'; DROP TABLE "Deck"; --'
+      const payload = await query(['id', 'payloadEntries.note'])
+      expect(payload?.payloadEntries?.items.map(item => item.note)).toEqual([payloadText])
+
+      const dollar = await query(['id', 'dollarEntries.note'])
+      expect(dollar?.dollarEntries?.items.map(item => item.note)).toEqual(['$1'])
+
+      const queryQuoted = await query(['id', 'entries[note = \'O\\\'Brien\']', 'entries.note'])
+      expect(queryQuoted?.entries?.items.map(item => item.note)).toEqual(["O'Brien"])
+
+      const queryPayload = await query([
+        'id',
+        'entries[note = \'\\\'; DROP TABLE "Deck"; --\']',
+        'entries.note',
+      ])
+      expect(queryPayload?.entries?.items.map(item => item.note)).toEqual([payloadText])
+
+      const queryDollar = await query(['id', "entries[note = '$1']", 'entries.note'])
+      expect(queryDollar?.entries?.items.map(item => item.note)).toEqual(['$1'])
+
+      const combined = await query([
+        'id',
+        'quotedEntries[quantity > 0]',
+        'quotedEntries.note',
+      ])
+      expect(combined?.quotedEntries?.items.map(item => item.note)).toEqual(["O'Brien"])
+
+      const count = await database.sql<{ count: number }[]>`
+        SELECT COUNT(*)::int AS "count"
+        FROM "Deck"
+      `
+      expect(count[0]?.count).toBe(3)
+    })
+  })
+
+  test('keeps one authored meaning across projection and collection operators', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const envelope = await queryEntity<{
+        readonly id: string,
+        readonly largeEntries: Envelope<RecordItem>,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'largeEntries'],
+        where: { id: deckA },
+      })
+      expect(envelope[0]?.largeEntries.$total).toBe(1)
+      expect(envelope[0]?.largeEntries.$matched).toBe(1)
+      expect(envelope[0]?.largeEntries.items.map(item => item.quantity)).toEqual([5])
+
+      const total = await queryEntity<{ readonly 'id': string, readonly 'largeEntries.$total': number }>(
+        database.sql,
+        definitions,
+        'Deck',
+        { fields: ['id', 'largeEntries.$total'], where: { id: deckA } },
+      )
+      expect(total[0]?.['largeEntries.$total']).toBe(1)
+
+      const matched = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'largeEntries[quantity > 4].$matched = 1',
+      })
+      expect(matched.map(row => row.id)).toEqual([deckA, deckB])
+
+      const notEmpty = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'largeEntries $empty',
+      })
+      expect(notEmpty.map(row => row.id)).toEqual([deckC])
+
+      const contains = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'largeEntries $contains (quantity > 4)',
+      })
+      expect(contains.map(row => row.id)).toEqual([deckA, deckB])
+
+      const cards = await queryEntity<{
+        readonly cards: Envelope<{ readonly title: string }>,
+        readonly id: string,
+      }>(database.sql, definitions, 'Deck', {
+        fields: [
+          'id',
+          "cards[title = 'Card One' $and deckCardPrinting.quantity > 4]",
+          'cards.title',
+        ],
+        where: { id: deckA },
+      })
+      expect(cards[0]?.cards.$total).toBe(2)
+      expect(cards[0]?.cards.$matched).toBe(1)
+      expect(cards[0]?.cards.items.map(item => item.title)).toEqual(['Card One'])
+    })
+  })
+
+  test('runs multiline collection predicates against PostgreSQL', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const single = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'largeEntries $contains (quantity > 2 $and quantity < 10)',
+      })
+      const multiline = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: `
+          largeEntries $contains (
+            quantity > 2
+            $and quantity < 10
+          )
+        `,
+      })
+      expect(multiline).toEqual(single)
+      expect(multiline.map(row => row.id)).toEqual([deckA, deckB])
     })
   })
 })

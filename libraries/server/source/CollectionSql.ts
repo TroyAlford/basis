@@ -25,10 +25,6 @@ export interface CollectionSqlRelation {
    * their SQL and bound values into the surrounding statement.
    */
   readonly condition: string,
-  /** Fully qualified columns forming the result identity. */
-  readonly identity: readonly string[],
-  /** Fully qualified column carrying the owning identity. */
-  readonly ownerId: string,
   /** Authored source predicate, when the collection declares one. */
   readonly predicate?: SQLPredicate,
   /** SQL relation containing source rows and any required root/target joins. */
@@ -73,8 +69,6 @@ export function collectionSqlRelation(
     const ownerId = `${quote(relationshipAlias)}.${quote(resolved.owner.column)}`
     return {
       condition: `${ownerId} = ${parentId}`,
-      identity: resolved.identity.columns.map(column => `${quote(relationshipAlias)}.${quote(column)}`),
-      ownerId,
       relation: `${quote(relationship.name)} ${quote(relationshipAlias)}`,
       relationshipAlias,
       resultType: 'record',
@@ -92,8 +86,6 @@ export function collectionSqlRelation(
       const ownerId = `${quote(aliases.root)}.${quote('id')}`
       return {
         condition: `${ownerId} = ${parentId}`,
-        identity: [ownerId],
-        ownerId,
         relation: `${quote('Entity')} ${quote(aliases.root)}`,
         resultType: 'entity',
         rootAlias: aliases.root,
@@ -107,8 +99,6 @@ export function collectionSqlRelation(
     const ownerId = `${quote(aliases.target)}.${quote(resolved.owner.column)}`
     return {
       condition: `${ownerId} = ${parentId}`,
-      identity: [rootId],
-      ownerId,
       relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
       resultType: 'entity',
       rootAlias: aliases.root,
@@ -132,8 +122,6 @@ export function collectionSqlRelation(
   if (targetName === 'Entity') {
     return {
       condition,
-      identity: [rootId],
-      ownerId,
       relation: `${relationshipSource} JOIN ${rootSource} ON ${rootId} = ${remoteId}`,
       relationshipAlias: aliases.relationship,
       resultType: 'entity',
@@ -146,8 +134,6 @@ export function collectionSqlRelation(
   const targetJoin = `${relationshipSource} JOIN ${targetSource} ON ${targetId} = ${remoteId}`
   return {
     condition,
-    identity: [rootId],
-    ownerId,
     relation: `${targetJoin} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
     relationshipAlias: aliases.relationship,
     resultType: 'entity',

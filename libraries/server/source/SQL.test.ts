@@ -720,7 +720,7 @@ describe('SQL.where', () => {
     })
     expect(compiled.sql).toContain('json_agg(')
     expect(compiled.sql).toMatch(/ORDER BY\s+"__item"\."name" DESC,\s+"__item"\."id" ASC/u)
-    expect(compiled.sql).toMatch(/ORDER BY\s+"__distinct"\."name" DESC,\s+"__distinct"\."id" ASC/u)
+    expect(compiled.sql).toMatch(/ORDER BY\s+"__member"\."name" DESC,\s+"__member"\."id" ASC/u)
   })
 
   test('accepts root orderBy shorthand', () => {

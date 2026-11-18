@@ -125,7 +125,7 @@ describe('CollectionRelation', () => {
   test('resolves a projected entity collection with its authored predicates', () => {
     const cards = relation('cards')
     expect(cards.resultType).toBe('entity')
-    expect(cards.identity).toEqual({ column: 'id', kind: 'entity' })
+    expect(cards.identity).toEqual({ kind: 'entity' })
     expect(cards.owner).toEqual({
       column: 'deck.id',
       endpoint: expect.objectContaining({ field: 'deck', target: 'Deck' }),
@@ -168,10 +168,9 @@ describe('CollectionRelation', () => {
     expect(inverse.source).toEqual({
       kind: 'inverse',
       reference: expect.objectContaining({ name: 'deck' }),
-      table: 'Card',
     })
     expect(inverse.owner).toEqual({ column: 'deck.id' })
-    expect(inverse.identity).toEqual({ column: 'id', kind: 'entity' })
+    expect(inverse.identity).toEqual({ kind: 'entity' })
     expect(inverse.target).toEqual({
       definition: expect.objectContaining({ name: 'Card' }),
       kind: 'entity',
@@ -187,7 +186,7 @@ describe('CollectionRelation', () => {
       column: 'deck.id',
       endpoint: expect.objectContaining({ field: 'deck', target: 'Deck' }),
     })
-    expect(derived.identity).toEqual({ column: 'id', kind: 'entity' })
+    expect(derived.identity).toEqual({ kind: 'entity' })
     expect(derived.predicates.filters).toEqual([])
   })
 
@@ -199,8 +198,6 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
-      identity: ['"root"."id"'],
-      ownerId: '"edge"."deck.id"',
       relation: '"DeckMember" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
       relationshipAlias: 'edge',
@@ -218,8 +215,6 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
-      identity: ['"root"."id"'],
-      ownerId: '"edge"."deck.id"',
       predicate: { sql: 'COALESCE("edge"."quantity" > $1, FALSE)', values: [3] },
       relation: '"DeckCardPrinting" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
@@ -238,8 +233,6 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
-      identity: ['"edge"."deck.id"', '"edge"."card.id"', '"edge"."printing.id"'],
-      ownerId: '"edge"."deck.id"',
       predicate: { sql: 'COALESCE("edge"."quantity" > $1, FALSE)', values: [3] },
       relation: '"DeckCardPrinting" "edge"',
       relationshipAlias: 'edge',
@@ -255,8 +248,6 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
-      identity: ['"edge"."deck.id"', '"edge"."card.id"', '"edge"."printing.id"'],
-      ownerId: '"edge"."deck.id"',
       relation: '"DeckCardPrinting" "edge"',
       relationshipAlias: 'edge',
       resultType: 'record',
@@ -280,5 +271,15 @@ describe('CollectionRelation', () => {
     expect(placeholders.size).toBe(compiled.values.length)
     expect(compiled.values.filter(value => value === 3)).toHaveLength(1)
     expect(compiled.values.filter(value => value === 10)).toHaveLength(1)
+  })
+
+  test('rejects adversarial ordering identifiers', () => {
+    expect(() => compileEntityQuery(definitions, 'Deck', {
+      fields: ['id', 'entries{$orderBy:quantity; DROP TABLE "Deck"; --}'],
+    })).toThrow()
+    expect(() => compileEntityQuery(definitions, 'Deck', {
+      fields: ['id'],
+      orderBy: 'id; DROP TABLE "Deck"; --',
+    })).toThrow()
   })
 })

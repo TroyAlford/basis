@@ -595,9 +595,13 @@ function bindFragment(
   fragment: SqlFragment,
   bind: (value: BoundScalar) => string,
 ): string {
-  return fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => (
-    bind(fragment.values[Number(index) - 1] as BoundScalar)
-  ))
+  return fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => {
+    const position = Number(index)
+    if (position < 1 || position > fragment.values.length) {
+      throw new Error(`SQL fragment placeholder $${index} has no matching value`)
+    }
+    return bind(fragment.values[position - 1] as BoundScalar)
+  })
 }
 
 /**
@@ -624,7 +628,11 @@ function compose(
     }
     if (fragment.sql === '') continue
     parts.push(fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => {
-      values.push(fragment.values[Number(index) - 1] as BoundScalar)
+      const position = Number(index)
+      if (position < 1 || position > fragment.values.length) {
+        throw new Error(`SQL fragment placeholder $${index} has no matching value`)
+      }
+      values.push(fragment.values[position - 1] as BoundScalar)
       return `$${startIndex + values.length - 1}`
     }))
   }

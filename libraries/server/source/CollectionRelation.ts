@@ -9,8 +9,6 @@ export type CollectionSourceAdapter =
     readonly kind: 'inverse',
     /** Forward reference stored on the related row. */
     readonly reference: EntityReferenceFieldDefinition,
-    /** Physical table holding the related rows. */
-    readonly table: string,
   }
   | {
     /** Discriminator for named-relationship sources. */
@@ -32,8 +30,6 @@ export interface CollectionOwnerCorrelation {
 /** Identity shared by one collection's results. */
 export type CollectionResultIdentity =
   | {
-    /** Column exposing the entity identity. */
-    readonly column: 'id',
     /** Result is a distinct entity identity. */
     readonly kind: 'entity',
   }
@@ -113,14 +109,13 @@ export function resolveCollectionRelation(
   if (collection.kind === 'inverse') {
     return {
       collection,
-      identity: { column: 'id', kind: 'entity' },
+      identity: { kind: 'entity' },
       owner: { column: collection.reference.column },
       predicates: { filters: [] },
       resultType: 'entity',
       source: {
         kind: 'inverse',
         reference: collection.reference,
-        table: collection.target,
       },
       target: { definition: entityView(collection.target, resolveEntity), kind: 'entity' },
     }
@@ -131,7 +126,7 @@ export function resolveCollectionRelation(
     const remote = collection.relationship.between[collection.endpoint === 0 ? 1 : 0]
     return {
       collection,
-      identity: { column: 'id', kind: 'entity' },
+      identity: { kind: 'entity' },
       owner: { column: `${owner.field}.id`, endpoint: owner },
       predicates: { filters: [] },
       resultType: 'entity',
@@ -154,7 +149,7 @@ export function resolveCollectionRelation(
   const recordView = relationshipView(collection.relationship)
   const identity: CollectionResultIdentity = targetEndpoint === undefined
     ? { columns: recordColumns, kind: 'record' }
-    : { column: 'id', kind: 'entity' }
+    : { kind: 'entity' }
   const target: CollectionTargetView = targetEndpoint === undefined
     ? { definition: recordView, kind: 'record', relationship: collection.relationship }
     : { definition: entityView(targetEndpoint.target, resolveEntity), kind: 'entity' }

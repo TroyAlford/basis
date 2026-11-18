@@ -225,12 +225,6 @@ interface CollectionRelationPlan {
   readonly collection: DerivedCollectionDefinition,
   /** Correlated condition against the owning occurrence, including authored predicates. */
   readonly condition: string,
-  /** Fully qualified result identity columns. */
-  readonly identity: readonly string[],
-  /** Unqualified physical columns forming a record's composite identity. */
-  readonly identityColumns: readonly string[],
-  /** Fully qualified column carrying the owning identity. */
-  readonly ownerId: string,
   /** Alias of the owning occurrence. */
   readonly parentAlias: string,
   /** Authored source predicate, when the collection declares one. */
@@ -267,6 +261,8 @@ interface CollectionMemberAdapter {
   readonly compile: (filter?: string) => CollectionMemberQuery,
   /** Output aliases forming the result identity. */
   readonly identity: readonly string[],
+  /** Whether member rows are already unique by identity. */
+  readonly identityUnique: boolean,
   /** Output aliases available for ordering. */
   readonly orderable: ReadonlySet<string>,
 }
@@ -722,9 +718,6 @@ class QueryProjection {
     const plan: CollectionRelationPlan = {
       collection,
       condition: sql.condition,
-      identity: sql.identity,
-      identityColumns: resolved.identity.kind === 'record' ? resolved.identity.columns : ['id'],
-      ownerId: sql.ownerId,
       parentAlias,
       relation: sql.relation,
       resultType: sql.resultType,
@@ -755,17 +748,6 @@ class QueryProjection {
     const predicate = plan.predicate === undefined
       ? undefined
       : SQL.compose([' AND (', plan.predicate, ')'])
-    if (plan.resultType === 'record') {
-      const matches = plan.identity
-        .map((column, index) => (
-          `${column} = ${quote(alias)}.${quote(plan.identityColumns[index] as string)}`
-        ))
-        .join(' AND ')
-      return SQL.compose([
-        'EXISTS (SELECT 1 FROM ', plan.relation, ' WHERE ', plan.condition,
-        predicate, ' AND ', matches, ')',
-      ])
-    }
     const rootAlias = plan.rootAlias
     if (rootAlias === undefined) {
       throw new Error(`Entity collection "${plan.collection.name}" has no identity root`)
@@ -838,7 +820,7 @@ class QueryProjection {
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, plan.collection.name, true)
-    const count = collectionIdentityCount(adapter.compile(filter), adapter.identity)
+    const count = collectionIdentityCount(adapter.compile(filter), adapter.identity, adapter.identityUnique)
     return bind => `(${SQL.bindFragment(count, bind)})`
   }
 
@@ -1118,7 +1100,7 @@ class QueryProjection {
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, key, true)
     const member = adapter.compile(undefined)
-    const count = collectionIdentityCount(member, adapter.identity)
+    const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
     const exists = SQL.compose(['EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const empty = SQL.compose(['NOT EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const scope: CountScope = {
@@ -1660,11 +1642,18 @@ class QueryProjection {
     const orderings = collectionOrderings(plan, effective.orderBy, adapter)
     const matched = adapter.compile(filter)
     const total = filter === undefined ? undefined : adapter.compile(undefined)
-    const matchedCount = collectionIdentityCount(matched, adapter.identity)
+    const matchedCount = collectionIdentityCount(matched, adapter.identity, adapter.identityUnique)
     const totalCount = total === undefined
       ? undefined
-      : collectionIdentityCount(total, adapter.identity)
-    const page = collectionIdentityPage(matched, adapter.identity, orderings, limit, offset)
+      : collectionIdentityCount(total, adapter.identity, adapter.identityUnique)
+    const page = collectionIdentityPage(
+      matched,
+      adapter.identity,
+      orderings,
+      limit,
+      offset,
+      adapter.identityUnique,
+    )
     const items = collectionItems(page, orderings)
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
@@ -1776,6 +1765,7 @@ class QueryProjection {
     return {
       compile,
       identity: ['id'],
+      identityUnique: true,
       orderable: new Set([...fields, ...edgeFields]),
     }
   }
@@ -1832,6 +1822,7 @@ class QueryProjection {
     return {
       compile,
       identity,
+      identityUnique: true,
       orderable: new Set(fields),
     }
   }
@@ -2394,12 +2385,17 @@ function identityColumns(alias: string, identity: readonly string[]): string {
  * Count distinct result identities in one member query.
  * @param member - Member query before identity selection.
  * @param identity - Output aliases forming the identity.
+ * @param unique - Whether member rows are already unique by identity.
  * @returns The count fragment.
  */
 function collectionIdentityCount(
   member: SqlFragment,
   identity: readonly string[],
+  unique: boolean,
 ): SqlFragment {
+  if (unique) {
+    return SQL.compose(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
+  }
   return SQL.compose([
     'SELECT count(*)::int FROM (SELECT DISTINCT ON (',
     identityColumns('__member', identity),
@@ -2416,6 +2412,7 @@ function collectionIdentityCount(
  * @param orderings - Requested and stable ordering.
  * @param limit - Page size, or null for unlimited.
  * @param offset - Rows to skip.
+ * @param unique - Whether member rows are already unique by identity.
  * @returns The ordered and paged identity query.
  */
 function collectionIdentityPage(
@@ -2424,18 +2421,29 @@ function collectionIdentityPage(
   orderings: readonly CollectionOrdering[],
   limit: number | null,
   offset: number,
+  unique: boolean,
 ): SqlFragment {
+  const order = orderings
+    .map(entry => `${quote('__member')}.${quote(entry.name)} ${entry.direction}`)
+    .join(', ')
+  if (unique) {
+    const paged = SQL.compose([
+      'SELECT * FROM (', member, ') AS "__member"',
+      order === '' ? undefined : ` ORDER BY ${order}`,
+    ])
+    return SQL.compose([paged, SQL.paginate(limit, offset, 0)])
+  }
   const distinct = SQL.compose([
     'SELECT DISTINCT ON (', identityColumns('__member', identity), ') * FROM (',
     member,
     ') AS "__member" ORDER BY ', identityColumns('__member', identity),
   ])
-  const order = orderings
+  const distinctOrder = orderings
     .map(entry => `${quote('__distinct')}.${quote(entry.name)} ${entry.direction}`)
     .join(', ')
   const paged = SQL.compose([
     'SELECT * FROM (', distinct, ') AS "__distinct"',
-    order === '' ? undefined : ` ORDER BY ${order}`,
+    distinctOrder === '' ? undefined : ` ORDER BY ${distinctOrder}`,
   ])
   return SQL.compose([paged, SQL.paginate(limit, offset, 0)])
 }
