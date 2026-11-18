@@ -393,6 +393,46 @@ describe('Graph', () => {
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
   })
 
+  test('supports Entity-projected relationship-owned policy predicates', () => {
+    const accessGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'members',
+              target: 'User',
+              type: 'Collection',
+              via: 'WorkspaceAccess[workspace = @].user',
+            },
+          ],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: {
+              where: 'members $contains (id = $me $and workspaceAccess.quantity > 4)',
+            },
+          },
+        },
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Scope' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
+          { field: 'scope', target: 'Scope' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'WorkspaceAccess',
+      }],
+    })
+    const helper = accessGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_'))
+    expect(helper?.sql).toContain('FROM "WorkspaceAccess"')
+    expect(helper?.sql).toContain('"quantity" > 4')
+    expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
+  })
+
   test('rejects unsupported authorization collection predicates', () => {
     const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
       entities: [

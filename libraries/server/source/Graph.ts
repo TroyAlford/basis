@@ -735,11 +735,11 @@ export class Graph {
       resolve: value => this.#policyEntity(value),
     })
     const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-    const prefix = collection.kind === 'relationship'
+    const prefix = 'relationship' in collection
       ? `${lowerFirst(collection.relationship.name)}.`
       : ''
     if ('kind' in resolved) {
-      if (collection.kind === 'relationship' && normalized.startsWith(prefix)) {
+      if ('relationship' in collection && normalized.startsWith(prefix)) {
         throw new Error(
           'Graph: unknown relationship field ' +
           `"${collection.relationship.name}.${normalized.slice(prefix.length)}"`,
@@ -923,7 +923,7 @@ export class Graph {
     if (rowAlias === undefined) {
       throw new Error(`Graph: collection "${name}" has no row alias`)
     }
-    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
+    const relationship = 'relationship' in collection ? collection.relationship : undefined
     const resolver = this.#policyResolver(
       target,
       quoteIdentifier(rowAlias),
@@ -952,9 +952,11 @@ export class Graph {
           throw new Error(`Graph: relationship field "${normalized}" is not policy-safe`)
         }
         if (!sql.relationshipAlias) throw new Error(`Graph: unresolved relationship "${normalized}"`)
+        const endpoint = relationship?.between.find(candidate => candidate.field === property)
+        const column = endpoint === undefined ? property : `${endpoint.field}.id`
         expressions.set(
           normalized,
-          `${quoteIdentifier(sql.relationshipAlias)}.${quoteIdentifier(property)}`,
+          `${quoteIdentifier(sql.relationshipAlias)}.${quoteIdentifier(column)}`,
         )
         return member.field
       }
