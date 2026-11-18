@@ -288,6 +288,95 @@ export const Application = () => React.createElement('main', null, value)
   }
 }, 30_000)
 
+test('cleans obsolete SSR artifacts and removes its scope on shutdown', async () => {
+  const dir = tempDirectory('basis-ssr-cleanup')
+  const dependency = join(dir, 'value.ts')
+  try {
+    symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'), 'dir')
+    await Bun.write(dependency, "export const value = 'one'\n")
+    await Bun.write(
+      join(dir, 'Application.tsx'),
+      `import * as React from 'react'
+import { value } from './value'
+export const Application = () => React.createElement('main', null, value)
+`,
+    )
+    const server = new Server().root(dir).main('./Application.tsx').start({ hostname: '127.0.0.1', port: 0 })
+    try {
+      await server.ready()
+      const base = `http://127.0.0.1:${server.port}`
+      for (const value of ['two', 'three']) {
+        await Bun.write(dependency, `export const value = '${value}'\n`)
+        const deadline = Date.now() + 5_000
+        while (Date.now() < deadline) {
+          if ((await Bun.fetch(base).then(response => response.text())).includes(value)) break
+          await Bun.sleep(50)
+        }
+      }
+
+      const ssrRoot = join(dir, '.basis', 'ssr')
+      const scopes = (await import('node:fs')).readdirSync(ssrRoot)
+      expect(scopes).toHaveLength(1)
+      const versions = (await import('node:fs')).readdirSync(join(ssrRoot, scopes[0]))
+      expect(versions).toHaveLength(1)
+    } finally {
+      await server.shutdown()
+    }
+    const leftover = (await import('node:fs')).existsSync(join(dir, '.basis', 'ssr'))
+      ? (await import('node:fs')).readdirSync(join(dir, '.basis', 'ssr'))
+      : []
+    expect(leftover).toEqual([])
+  } finally {
+    await rm(dir, { force: true, recursive: true })
+  }
+}, 30_000)
+
+test('recovers when a superseded SSR build fails', async () => {
+  const dir = tempDirectory('basis-ssr-superseded-failure')
+  const dependency = join(dir, 'value.ts')
+  const originalBuild = Bun.build
+  let calls = 0
+  const buildSpy = spyOn(Bun, 'build').mockImplementation(async (...args) => {
+    const entrypoint = String((args[0] as { entrypoints?: string[] }).entrypoints?.[0] ?? '')
+    if (entrypoint.endsWith('Application.tsx')) calls += 1
+    if (calls === 2 && entrypoint.endsWith('Application.tsx')) {
+      await Bun.sleep(2_000)
+      return { logs: [{ message: 'forced failure' }], success: false } as Awaited<ReturnType<typeof Bun.build>>
+    }
+    return originalBuild(...args)
+  })
+  try {
+    symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'), 'dir')
+    await Bun.write(dependency, "export const value = 'initial'\n")
+    await Bun.write(
+      join(dir, 'Application.tsx'),
+      `import * as React from 'react'
+import { value } from './value'
+export const Application = () => React.createElement('main', null, value)
+`,
+    )
+    const server = new Server().root(dir).main('./Application.tsx').start({ hostname: '127.0.0.1', port: 0 })
+    try {
+      await server.ready()
+      const base = `http://127.0.0.1:${server.port}`
+      await Bun.write(dependency, "export const value = 'second'\n")
+      await Bun.sleep(200)
+      const first = Bun.fetch(base).then(response => response.text())
+      await Bun.sleep(20)
+      await Bun.write(dependency, "export const value = 'third'\n")
+      await Bun.sleep(1_000)
+      const html = await first
+
+      expect(html).toContain('<main>third</main>')
+    } finally {
+      await server.shutdown()
+    }
+  } finally {
+    buildSpy.mockRestore()
+    await rm(dir, { force: true, recursive: true })
+  }
+}, 30_000)
+
 describe('Server development HMR', () => {
   test('delivers a hot update over the HMR socket when a source file changes', async () => {
     const dir = tempDirectory('basis-hmr')

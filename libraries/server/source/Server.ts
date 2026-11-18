@@ -92,7 +92,7 @@ export class Server<AppContext extends object = Record<string, never>> {
   #contextLoader: ((request: Request) => AppContext | Promise<AppContext>) | null = null
   #mainComponent: React.ComponentType<AppContext> | null = null
   #mainComponentVersion = -1
-  #mainBuild: { promise: Promise<React.ComponentType<AppContext>>, version: number } | null = null
+  #mainBuilds = new Map<number, Promise<React.ComponentType<AppContext>>>()
   #mainPath: string | null = null
   #mainVersion = 0
   #ssrScope = Math.random().toString(16).slice(2)
@@ -436,21 +436,32 @@ export class Server<AppContext extends object = Record<string, never>> {
         return this.#mainComponent
       }
 
-      let build = this.#mainBuild
-      if (!build || build.version !== version) {
-        const promise = this.#buildMain(version)
-        build = { promise, version }
-        this.#mainBuild = build
-        void promise.finally(() => {
-          if (this.#mainBuild === build) this.#mainBuild = null
+      let build = this.#mainBuilds.get(version)
+      if (!build) {
+        build = this.#buildMain(version)
+        this.#mainBuilds.set(version, build)
+        void build.finally(() => {
+          if (this.#mainBuilds.get(version) === build) this.#mainBuilds.delete(version)
         }).catch(() => undefined)
       }
 
-      const component = await build.promise
-      if (this.#mainVersion !== version) continue
+      let component: React.ComponentType<AppContext>
+      try {
+        component = await build
+      } catch (error) {
+        this.#removeSSRVersion(version)
+        if (this.#mainVersion !== version) continue
+        throw error
+      }
+
+      if (this.#mainVersion !== version) {
+        this.#removeSSRVersion(version)
+        continue
+      }
 
       this.#mainComponent = component
       this.#mainComponentVersion = version
+      this.#cleanupSSRArtifacts(version)
       return component
     }
   }
@@ -475,6 +486,7 @@ export class Server<AppContext extends object = Record<string, never>> {
       target: 'bun',
     })
     if (!result.success) {
+      fs.rmSync(outdir, { force: true, recursive: true })
       const details = result.logs.map(log => log.message).join('\n')
       throw new Error(`Basis: server module build failed: ${details}`)
     }
@@ -488,6 +500,46 @@ export class Server<AppContext extends object = Record<string, never>> {
       throw new Error(`Basis: main module "${this.#mainPath}" must export Application or a default component`)
     }
     return component
+  }
+
+  /**
+   * Remove one version directory after its build has finished and failed or
+   * been superseded.
+   * @param version - The source version to remove.
+   */
+  #removeSSRVersion(version: number): void {
+    fs.rmSync(path.join(this.#ssrScopeDir(), String(version)), { force: true, recursive: true })
+  }
+
+  /**
+   * Remove obsolete version directories while preserving the active version and
+   * every build still in flight.
+   * @param active - The version now installed as the application component.
+   */
+  #cleanupSSRArtifacts(active: number): void {
+    const directory = this.#ssrScopeDir()
+    if (!fs.existsSync(directory)) return
+
+    const keep = new Set<number>([active, ...this.#mainBuilds.keys()])
+    for (const entry of fs.readdirSync(directory)) {
+      if (!/^\d+$/.test(entry)) continue
+      const version = Number(entry)
+      if (keep.has(version)) continue
+      fs.rmSync(path.join(directory, entry), { force: true, recursive: true })
+    }
+  }
+
+  /** Remove every server-owned SSR artifact for this server instance. */
+  #cleanupSSRArtifactsAll(): void {
+    fs.rmSync(this.#ssrScopeDir(), { force: true, recursive: true })
+  }
+
+  /**
+   * The server-owned SSR artifact directory for this server instance.
+   * @returns The absolute scope directory.
+   */
+  #ssrScopeDir(): string {
+    return path.join(this.#root, '.basis', 'ssr', this.#ssrScope)
   }
 
   /**
@@ -673,6 +725,8 @@ export class Server<AppContext extends object = Record<string, never>> {
   async shutdown(): Promise<void> {
     this.stop()
     await this.#closing
+    await Promise.allSettled([...this.#mainBuilds.values()])
+    this.#cleanupSSRArtifactsAll()
   }
 
   /**
