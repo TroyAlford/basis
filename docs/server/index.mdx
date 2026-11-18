@@ -24,7 +24,7 @@ const server = new Server()
 
 ## Lifecycle
 
-Bun's dev server owns the module graph, file watching, HMR, and React Fast Refresh. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
+Bun's dev server owns the module graph, file watching, HMR, and React Fast Refresh. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
 `/api/health` is the readiness API. It stays `503 starting` until the initial build and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 
@@ -61,7 +61,7 @@ new Server<AppContext>()
   })
 ```
 
-The loader receives the request and should return a JSON-serializable value. Keep server-only capabilities such as `db`, `identity`, and the logger on the standard `RouteContext`; the application context is the shape embedded into the SSR bootstrap and hydrated in the browser.
+The loader receives the request and should return a JSON-serializable value. Basis resolves the verified identity first, then runs the loader and the SSR render inside the same actor scope used by API handlers, so RLS applies consistently. Keep server-only capabilities such as `db`, `identity`, and the logger on the standard `RouteContext`; the application context is the shape embedded into the SSR bootstrap and hydrated in the browser.
 
 ## Static files
 
@@ -90,6 +90,10 @@ server.socket('room/:id', {
 ## Logging and runtime context
 
 `Server` owns a standard Basis logger and writes lifecycle output through it. Read it with `server.logger`, or inject a custom logger through `start({ logger })`. Runtime facts (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) are embedded into the SPA shell; `server.runtime` exposes the same facts to the host.
+
+## Page titles
+
+`basis/react` exports `Head` and `HeadProvider`. During SSR, `Head` collects the title synchronously for the shell. In the browser, title updates happen after commit, not during React's render phase. Server output escapes the title exactly once.
 
 ## Favicon and icons
 

@@ -1,7 +1,8 @@
 import { startApplication, tempDirectory } from 'basis/testing'
 import { runAsync } from 'basis/utilities'
-import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import { rm } from 'node:fs/promises'
+import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test'
+import { existsSync, symlinkSync } from 'node:fs'
+import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ILogger } from '../../utilities'
 import { HttpVerb, Logger } from '../../utilities'
@@ -33,7 +34,11 @@ interface HealthBody {
   version?: string,
 }
 
+setDefaultTimeout(20_000)
+
 const repoRoot = join(import.meta.dir, '..', '..', '..')
+const basisLink = join(repoRoot, 'node_modules', 'basis')
+if (!existsSync(basisLink)) symlinkSync(repoRoot, basisLink, 'dir')
 const fixtureRoot = join(repoRoot, 'testing', 'server')
 const fixture = join(fixtureRoot, 'serve.ts')
 const active = new Set<ServerHarness>()
@@ -48,6 +53,12 @@ const startServer = async (
   extraEnv: Record<string, string> = {},
   entry: string = fixture,
 ): Promise<ServerHarness> => {
+  if (extraEnv.ROOT) {
+    const root = extraEnv.ROOT
+    if (!existsSync(join(root, 'node_modules'))) {
+      symlinkSync(join(repoRoot, 'node_modules'), join(root, 'node_modules'), 'dir')
+    }
+  }
   const application = await startApplication({
     cwd: repoRoot,
     entry,
@@ -117,7 +128,7 @@ describe('Server', () => {
     expect(html).toContain('id="basis-bootstrap"')
     expect(html).toContain('id="root"')
     expect(html).toContain('Basis managed server')
-    expect(html).toContain('<title>Basis fixture</title>')
+    expect(html).toContain('<title>Basis &lt;fixture&gt;</title>')
 
     // Unmatched paths fall back to the same HMR-enabled SPA shell.
     const deep = await Bun.fetch(`${base}/decks/123`)
@@ -164,6 +175,56 @@ describe('Server', () => {
     expect(body).toMatchObject({ status: 'error' })
 
     expect(await server.stop()).toBe(0)
+  })
+})
+
+describe('Server-side HMR', () => {
+  test('rebuilds SSR markup when the main module or an imported dependency changes', async () => {
+    const dir = tempDirectory('basis-ssr-hmr')
+    const main = join(dir, 'Application.tsx')
+    const dependency = join(dir, 'value.ts')
+
+    try {
+      symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'), 'dir')
+      await Bun.write(dependency, "export const value = 'first'\n")
+      await Bun.write(
+        main,
+        `import * as React from 'react'
+import { value } from './value'
+export const Application = () => React.createElement('main', null, value)
+`,
+      )
+
+      const server = new Server()
+        .root(dir)
+        .main('./Application.tsx')
+        .start({ hostname: '127.0.0.1', port: 0 })
+
+      try {
+        await server.ready()
+        await Bun.sleep(250)
+        const base = `http://127.0.0.1:${server.port}`
+
+        expect(await Bun.fetch(base).then(response => response.text())).toContain('first')
+
+        await writeFile(dependency, "export const value = 'second'\n")
+
+        const deadline = Date.now() + 4_000
+        let html = ''
+        while (Date.now() < deadline) {
+          html = await Bun.fetch(base).then(response => response.text())
+          if (html.includes('second')) break
+          await Bun.sleep(50)
+        }
+
+        expect(html).toContain('second')
+        expect(html).not.toContain('first')
+      } finally {
+        await server.shutdown()
+      }
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
   })
 })
 

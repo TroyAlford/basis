@@ -7,10 +7,11 @@ import { randomUUID } from 'node:crypto'
 import { fixtureRows, removeService, withDatabase } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
-import { openAdmin } from './Database'
+import { createDatabase, openAdmin } from './Database'
 import { Constraint } from './EntityDefinitions'
 import { Action, ADMIN_ROLE_ID, Security } from './Graph'
 import { Graph } from './Graph'
+import type { MigrationArtifact } from './Schema'
 import { installBasis } from './Schema'
 import { Server } from './Server'
 
@@ -113,27 +114,35 @@ function captureSetCookie(): { readonly cookies: string[], restore: () => void }
 async function start(install: string, applicationGraph: Graph = graph): Promise<Server> {
   const previous = process.cwd()
   process.chdir(install)
+  const database = createDatabase({ authorization: true, entities: applicationGraph.definitions })
+  let artifact: MigrationArtifact
+  try {
+    await database.connect()
+    const admin = await openAdmin(database)
+    try {
+      await installBasis(admin.sql)
+      artifact = await installSchema(admin.sql, applicationGraph, {
+        appRole: 'basis_app',
+        schema: 'public',
+        superuser: true,
+        version: `authorization-${randomUUID()}`,
+      })
+    } finally {
+      await admin.close()
+    }
+  } finally {
+    await database.close()
+  }
   const server = new Server()
     .graph(applicationGraph)
     .database()
     .root(install)
+    .migration(artifact)
   server.start({ hostname: '127.0.0.1', logger: silent, port: 0 })
   try {
     await server.ready()
   } finally {
     process.chdir(previous)
-  }
-  const admin = await openAdmin(server.db)
-  try {
-    await installBasis(admin.sql)
-    await installSchema(admin.sql, applicationGraph, {
-      appRole: 'basis_app',
-      schema: 'public',
-      superuser: true,
-      version: `authorization-${randomUUID()}`,
-    })
-  } finally {
-    await admin.close()
   }
   return server
 }

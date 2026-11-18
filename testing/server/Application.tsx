@@ -6,7 +6,7 @@ export class Application extends ApplicationBase {
   layout(content: React.ReactNode): React.ReactNode {
     return (
       <>
-        <Head title="Basis fixture" />
+        <Head title="Basis <fixture>" />
         <main data-testid="application">Basis managed server{content}</main>
       </>
     )

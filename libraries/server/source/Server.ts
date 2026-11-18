@@ -1,4 +1,5 @@
 import type { Server as BunServer, ServerWebSocket } from 'bun'
+import type { FSWatcher } from 'chokidar'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -91,6 +92,9 @@ export class Server<AppContext extends object = Record<string, never>> {
   #contextLoader: ((request: Request) => AppContext | Promise<AppContext>) | null = null
   #mainComponent: React.ComponentType<AppContext> | null = null
   #mainPath: string | null = null
+  #mainVersion = 0
+  #loadedMainVersion = -1
+  #watcher: FSWatcher | null = null
   #favIcon: ResolvedFavIcon | null = null
   #favIconInput: FavIconInput | null = null
   #favIconOptions: IconOptions = {}
@@ -232,31 +236,30 @@ export class Server<AppContext extends object = Record<string, never>> {
     const identity = this.#authorization
       ? await this.#authorization.resolve(verified)
       : verified
-    const context: RouteContext<AppContext> = {
-      context: await this.#resolveContext(request),
-      db: this.#database,
-      identity,
-      logger: this.#logger,
-      request,
-    }
-
-    for (const target of this.#targets(uri)) {
-      if (!target) continue
-
-      for (const [template, { handler, verbs }] of this.#apis.entries()) {
-        if (!verbs.has(request.method as HttpVerb)) continue
-
-        const params = parseTemplateURI(target, template)
-        if (!params) continue
-
-        if (this.#authorization) {
-          return await runAsActor({ id: identity }, () => handler(params, context))
-        }
-        return await handler(params, context)
+    return runAsActor({ id: identity }, async () => {
+      const context: RouteContext<AppContext> = {
+        context: await this.#resolveContext(request),
+        db: this.#database,
+        identity,
+        logger: this.#logger,
+        request,
       }
-    }
 
-    return null
+      for (const target of this.#targets(uri)) {
+        if (!target) continue
+
+        for (const [template, { handler, verbs }] of this.#apis.entries()) {
+          if (!verbs.has(request.method as HttpVerb)) continue
+
+          const params = parseTemplateURI(target, template)
+          if (!params) continue
+
+          return await handler(params, context)
+        }
+      }
+
+      return null
+    })
   }
 
   /**
@@ -296,17 +299,16 @@ export class Server<AppContext extends object = Record<string, never>> {
         const identity = this.#authorization
           ? await this.#authorization.resolve(verified)
           : verified
-        const context = {
-          context: await this.#resolveContext(request),
-          db: this.#database,
-          identity,
-          logger: this.#logger,
-          request,
-        } as RouteContext
-        if (this.#authorization) {
-          return runAsActor({ id: identity }, () => sseResponse(params, context, handler))
-        }
-        return sseResponse(params, context, handler)
+        return runAsActor({ id: identity }, async () => {
+          const context = {
+            context: await this.#resolveContext(request),
+            db: this.#database,
+            identity,
+            logger: this.#logger,
+            request,
+          } as RouteContext
+          return sseResponse(params, context, handler)
+        })
       }
     }
 
@@ -362,53 +364,56 @@ export class Server<AppContext extends object = Record<string, never>> {
     const verified = request && this.#identity ? this.#identity.get(request) : null
     const identity = this.#authorization ? await this.#authorization.resolve(verified) : verified
     const runtime: BasisRuntime = { ...this.runtime, identity }
-    const context = request ? await this.#resolveContext(request) : {} as AppContext
-    const component = await this.#loadMain()
-    const head: HeadCollector = {}
-    const rendered = component
-      ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
-      : null
-    const application = rendered ? renderToString(rendered) : ''
-    const title = escapeHtml(head.title || this.#title)
-    const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
-    const runtimeScript = [
-      '<script id="basis-runtime" type="application/json">',
-      serializeBasisRuntime(runtime),
-      '</script>',
-    ].join('')
-    const bootstrapScript = [
-      '<script id="basis-bootstrap" type="application/json">',
-      serializeBootstrap(context),
-      '</script>',
-    ].join('')
 
-    if (!this.#server) {
-      const fallback = renderToString(React.createElement(IndexHTML, {
-        favicon: false,
-        runtime,
-        scripts: [],
-        title,
-      }))
-      const html = fallback
-        .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
-        .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
-      return new Response(html, {
-        headers: { 'Content-Type': 'text/html' },
-      })
-    }
+    return runAsActor({ id: identity }, async () => {
+      const context = request ? await this.#resolveContext(request) : {} as AppContext
+      const component = await this.#loadMain()
+      const head: HeadCollector = {}
+      const rendered = component
+        ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
+        : null
+      const application = rendered ? renderToString(rendered) : ''
+      const title = head.title || this.#title
+      const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
+      const runtimeScript = [
+        '<script id="basis-runtime" type="application/json">',
+        serializeBasisRuntime(runtime),
+        '</script>',
+      ].join('')
+      const bootstrapScript = [
+        '<script id="basis-bootstrap" type="application/json">',
+        serializeBootstrap(context),
+        '</script>',
+      ].join('')
 
-    const response = await Bun.fetch(this.#devShellURL())
-    return new HTMLRewriter()
-      .on('title', {
-        element: element => { element.setInnerContent(title) },
-      })
-      .on('head', {
-        element: element => { element.append(`${favicon}${runtimeScript}${bootstrapScript}`, { html: true }) },
-      })
-      .on('#root', {
-        element: element => { element.setInnerContent(application, { html: true }) },
-      })
-      .transform(response)
+      if (!this.#server) {
+        const fallback = renderToString(React.createElement(IndexHTML, {
+          favicon: false,
+          runtime,
+          scripts: [],
+          title,
+        }))
+        const html = fallback
+          .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
+          .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
+        return new Response(html, {
+          headers: { 'Content-Type': 'text/html' },
+        })
+      }
+
+      const response = await Bun.fetch(this.#devShellURL())
+      return new HTMLRewriter()
+        .on('title', {
+          element: element => { element.setInnerContent(title) },
+        })
+        .on('head', {
+          element: element => { element.append(`${favicon}${runtimeScript}${bootstrapScript}`, { html: true }) },
+        })
+        .on('#root', {
+          element: element => { element.setInnerContent(application, { html: true }) },
+        })
+        .transform(response)
+    })
   }
 
   /**
@@ -417,9 +422,27 @@ export class Server<AppContext extends object = Record<string, never>> {
    */
   async #loadMain(): Promise<React.ComponentType<AppContext> | null> {
     if (!this.#mainPath) return null
-    if (this.#mainComponent) return this.#mainComponent
+    if (this.#mainComponent && this.#mainVersion === this.#loadedMainVersion) {
+      return this.#mainComponent
+    }
 
-    const module = await import(pathToFileURL(this.#mainPath).href) as {
+    const outdir = path.join(this.#root, '.basis', 'ssr', String(this.#mainVersion))
+    const result = await Bun.build({
+      entrypoints: [this.#mainPath],
+      external: ['basis', 'basis/*'],
+      format: 'esm',
+      naming: 'entry.js',
+      outdir,
+      packages: 'external',
+      sourcemap: 'none',
+      target: 'bun',
+    })
+    if (!result.success) {
+      const details = result.logs.map(log => log.message).join('\n')
+      throw new Error(`Basis: server module build failed: ${details}`)
+    }
+
+    const module = await import(`${pathToFileURL(path.join(outdir, 'entry.js')).href}?v=${this.#mainVersion}`) as {
       Application?: React.ComponentType<AppContext>,
       default?: React.ComponentType<AppContext>,
     }
@@ -428,7 +451,27 @@ export class Server<AppContext extends object = Record<string, never>> {
       throw new Error(`Basis: main module "${this.#mainPath}" must export Application or a default component`)
     }
     this.#mainComponent = component
+    this.#loadedMainVersion = this.#mainVersion
     return component
+  }
+
+  /**
+   * Watches application source so the server-rendered component is rebuilt on
+   * the next request after a source change.
+   */
+  async #watchMain(): Promise<void> {
+    if (!this.#mainPath || this.#watcher) return
+    const { watch } = await import('chokidar')
+    const watcher = watch(this.#root, {
+      ignoreInitial: true,
+      ignored: [/(^|[/\\])(?:node_modules|\.basis)([/\\]|$)/],
+    })
+    this.#watcher = watcher
+    watcher.on('all', (_event, filename) => {
+      if (!/\.(?:ts|tsx|js|jsx)$/.test(filename)) return
+      this.#mainVersion += 1
+    })
+    await new Promise<void>(resolveReady => watcher.once('ready', () => resolveReady()))
   }
 
   /**
@@ -521,7 +564,7 @@ export class Server<AppContext extends object = Record<string, never>> {
 
     this.#readyError = null
     this.#status = 'starting'
-    this.#ready = this.#trackReady(databaseReady)
+    const watcherReady = this.#watchMain()
 
     this.#server = Bun.serve({
       development: { hmr: true },
@@ -549,7 +592,7 @@ export class Server<AppContext extends object = Record<string, never>> {
     process.on('SIGTERM', this.#handleSignal)
 
     // The Bun dev shell builds lazily; prove one build before reporting healthy.
-    this.#warmShell(databaseReady)
+    this.#warmShell(databaseReady, watcherReady)
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -568,6 +611,9 @@ export class Server<AppContext extends object = Record<string, never>> {
     process.off('SIGTERM', this.#handleSignal)
 
     this.#logger.info('stopping')
+
+    void this.#watcher?.close()
+    this.#watcher = null
 
     this.#server?.stop()
     this.#server = null
@@ -890,13 +936,14 @@ export class Server<AppContext extends object = Record<string, never>> {
    * `/api/health` stay `starting` until one build has actually succeeded. A failed
    * build reports `error` rather than a healthy process.
    * @param databaseReady - The pending database startup.
+   * @param watcherReady - Resolves when the SSR source watcher is ready.
    */
-  #warmShell(databaseReady: Promise<void>): void {
+  #warmShell(databaseReady: Promise<void>, watcherReady: Promise<void>): void {
     const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
     this.#ready = this.#trackReady(
-      Promise.all([buildReady, databaseReady]).then(() => undefined),
+      Promise.all([buildReady, databaseReady, watcherReady]).then(() => undefined),
     )
   }
 
@@ -1078,15 +1125,6 @@ export class Server<AppContext extends object = Record<string, never>> {
     void this.shutdown().finally(() => process.exit(0))
   }
 
-}
-
-/**
- * Escape text for an HTML title element.
- * @param value - The title text.
- * @returns The escaped title.
- */
-function escapeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
 /**

@@ -6,6 +6,7 @@ export interface HeadCollector {
 }
 
 interface HeadContextValue {
+  collector?: HeadCollector,
   setTitle: (title: string) => void,
 }
 
@@ -24,6 +25,7 @@ interface HeadProviderProps {
  */
 export class HeadProvider extends React.Component<HeadProviderProps> {
   #value: HeadContextValue = {
+    collector: this.props.collector,
     setTitle: (title: string): void => {
       if (this.props.collector) this.props.collector.title = title
       if (typeof document !== 'undefined') document.title = title
@@ -46,8 +48,22 @@ export class Head extends React.Component<{ title?: string }> {
   static contextType = HeadContext
   declare context: React.ContextType<typeof HeadContext>
 
+  componentDidMount(): void {
+    if (typeof document !== 'undefined' && this.props.title) {
+      this.context?.setTitle(this.props.title)
+    }
+  }
+
+  componentDidUpdate(): void {
+    if (typeof document !== 'undefined' && this.props.title) {
+      this.context?.setTitle(this.props.title)
+    }
+  }
+
   render(): React.ReactNode {
-    if (this.props.title) this.context?.setTitle(this.props.title)
+    if (this.context?.collector && this.props.title) {
+      this.context.setTitle(this.props.title)
+    }
     return null
   }
 }
