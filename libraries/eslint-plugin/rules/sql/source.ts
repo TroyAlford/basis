@@ -24,6 +24,12 @@ export interface SourceSpan {
   start: number,
 }
 
+/** An alias with its optional source column list. */
+export interface SourceAlias {
+  columns: string[],
+  name?: string,
+}
+
 const COMMENT_TOKENS = new Set(['C_COMMENT', 'SQL_COMMENT'])
 const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_$]*$/u
 
@@ -185,6 +191,43 @@ export class SourceText {
     let alias = this.tokens[index + 1]
     if (alias?.text.toLowerCase() === 'as') alias = this.tokens[index + 2]
     return alias && isNameToken(alias) ? alias.text : undefined
+  }
+
+  /** Return a source alias and column list following an expression. */
+  aliasAfterExpression(position: number): SourceAlias {
+    let index = this.tokens.findIndex(token => token.end > position)
+    if (index < 0) return { columns: [] }
+    while (index < this.tokens.length) {
+      if ((this.tokens[index] as SourceToken).text === ')') break
+      index += 1
+    }
+    if (index >= this.tokens.length) return { columns: [] }
+    while (index < this.tokens.length && (this.tokens[index] as SourceToken).text === ')') index += 1
+    while (index < this.tokens.length) {
+      const token = this.tokens[index] as SourceToken
+      const word = unquote(token.text).toLowerCase()
+      if (token.text.startsWith('"') || (word !== 'with' && word !== 'ordinality')) break
+      index += 1
+    }
+    if (this.tokens[index]?.text.toLowerCase() === 'as') index += 1
+    const nameToken = this.tokens[index]
+    if (nameToken === undefined || !isNameToken(nameToken)) return { columns: [] }
+    const name = nameToken.text
+    if (ALIAS_STOP_WORDS.has(unquote(name).toLowerCase())) return { columns: [] }
+    index += 1
+    const columns: string[] = []
+    if (this.tokens[index]?.text === '(') {
+      index += 1
+      while (index < this.tokens.length) {
+        const token = this.tokens[index] as SourceToken
+        if (token.text === ')') break
+        if (isNameToken(token) && !ALIAS_STOP_WORDS.has(unquote(token.text).toLowerCase())) {
+          columns.push(token.text)
+        }
+        index += 1
+      }
+    }
+    return { columns, name }
   }
 
   /** Return the token after an explicit top-level AS, if one exists. */

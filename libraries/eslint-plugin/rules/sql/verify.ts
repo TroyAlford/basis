@@ -414,6 +414,48 @@ function compareIdentifiers(
     case 'FunctionParameter':
       compareIdentifierAt(original, formatted, originalSource, formattedSource, 'name')
       break
+    case 'RangeSubselect': {
+      const originalValue = bodyOf<Record<string, unknown>>(original)
+      const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+      compareExpressionAlias(
+        originalValue,
+        formattedValue,
+        originalSource,
+        formattedSource,
+        originalSource.span(originalValue.subquery as Node)?.end ?? 0,
+        formattedSource.span(formattedValue.subquery as Node)?.end ?? 0,
+        'derived-table alias',
+      )
+      break
+    }
+    case 'RangeFunction': {
+      const originalValue = bodyOf<Record<string, unknown>>(original)
+      const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+      compareExpressionAlias(
+        originalValue,
+        formattedValue,
+        originalSource,
+        formattedSource,
+        originalSource.span(originalValue.functions)?.end ?? 0,
+        formattedSource.span(formattedValue.functions)?.end ?? 0,
+        'range-function alias',
+      )
+      break
+    }
+    case 'JoinExpr': {
+      const originalValue = bodyOf<Record<string, unknown>>(original)
+      const formattedValue = bodyOf<Record<string, unknown>>(formatted)
+      compareExpressionAlias(
+        originalValue,
+        formattedValue,
+        originalSource,
+        formattedSource,
+        originalSource.span(original)?.end ?? 0,
+        formattedSource.span(formatted)?.end ?? 0,
+        'join alias',
+      )
+      break
+    }
     default:
       break
   }
@@ -472,6 +514,23 @@ function compareAlias(
     typeof formattedValue.location === 'number' ? formattedValue.location : undefined,
   )
   compareParts([originalAlias ?? ''], [formattedAlias ?? ''], 'alias')
+}
+
+/** Compare an expression-level alias and its column aliases. */
+function compareExpressionAlias(
+  original: Record<string, unknown>,
+  formatted: Record<string, unknown>,
+  originalSource: SourceText,
+  formattedSource: SourceText,
+  originalPosition: number,
+  formattedPosition: number,
+  label: string,
+): void {
+  if (!original.alias && !formatted.alias) return
+  const originalAlias = originalSource.aliasAfterExpression(originalPosition)
+  const formattedAlias = formattedSource.aliasAfterExpression(formattedPosition)
+  compareParts([originalAlias.name ?? ''], [formattedAlias.name ?? ''], `${label} name`)
+  compareParts(originalAlias.columns, formattedAlias.columns, `${label} columns`)
 }
 
 /** Compare a ResTarget identifier at its source position. */

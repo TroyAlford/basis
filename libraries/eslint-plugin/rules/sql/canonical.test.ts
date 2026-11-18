@@ -174,4 +174,55 @@ describe('SQL canonical formatting', () => {
       FROM "outer_table" "X"
     `)
   })
+
+  test('preserves mixed-case derived-table aliases and column aliases', () => {
+    const derived = formatted(`
+      select UserGroup.id from (select id from users) UserGroup
+    `)
+    expect(derived).toMatchIndented(`
+      SELECT "UserGroup"."id"
+      FROM (
+        SELECT "id"
+        FROM "users"
+      ) "UserGroup"
+    `)
+    expect(formatted(derived)).toBe(derived)
+
+    const columns = formatted(`
+      select UserGroup.UserId from (select id from users) AS UserGroup("UserId")
+    `)
+    expect(columns).toMatchIndented(`
+      SELECT "UserGroup"."UserId"
+      FROM (
+        SELECT "id"
+        FROM "users"
+      ) "UserGroup"("UserId")
+    `)
+    expect(formatted(columns)).toBe(columns)
+  })
+
+  test('preserves mixed-case range-function aliases', () => {
+    const once = formatted(`
+      select U.UserId from generate_series(1,2) AS U("UserId")
+    `)
+    expect(once).toMatchIndented(`
+      SELECT "U"."UserId"
+      FROM GENERATE_SERIES(1, 2) "U"("UserId")
+    `)
+    expect(formatted(once)).toBe(once)
+  })
+
+  test('preserves mixed-case parenthesized JOIN aliases', () => {
+    const once = formatted(`
+      select J.id from (a join b on a.id = b.id) J
+    `)
+    expect(once).toMatchIndented(`
+      SELECT "J"."id"
+      FROM (
+        "a"
+        JOIN "b" ON "a"."id" = "b"."id"
+      ) "J"
+    `)
+    expect(formatted(once)).toBe(once)
+  })
 })

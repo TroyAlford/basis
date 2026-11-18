@@ -4,7 +4,7 @@ import type { Node } from 'libpg-query'
 import type { SqlDoc } from './doc'
 import { concat, group, hardline, indent, join, line, text } from './doc'
 import type { ValueOf } from './expressions'
-import { empty, functionName, printRangeVar, printSortBy, printTypeName, quoteIdentifier, quotePart } from './expressions'
+import { empty, functionName, printAlias, printRangeVar, printSortBy, printTypeName, quoteIdentifier, quotePart } from './expressions'
 import type { PrintContext } from './printer'
 import type { SourceText } from './source'
 import { bodyOf, booleanValue, kindOf, stringValue, stringValues, UnsupportedNodeError } from './types'
@@ -147,16 +147,27 @@ function collectFromAliases(
         const source = ctx.source.relationAlias(relation.location) ?? relation.alias.aliasname ?? ''
         aliases.set(foldedIdentifier(source), quotePart(source, ctx))
       }
-    } else if (kind === 'RangeSubselect' || kind === 'RangeFunction') {
-      const value = bodyOf<{ alias?: { aliasname?: string } }>(node)
-      if (value.alias?.aliasname) {
-        aliases.set(value.alias.aliasname.toLowerCase(), quoteIdentifier(value.alias.aliasname))
+    } else if (kind === 'RangeSubselect') {
+      const value = bodyOf<ValueOf<'RangeSubselect'>>(node)
+      if (value.alias) {
+        const source = ctx.source.aliasAfterExpression(ctx.source.span(value.subquery as Node)?.end ?? 0)
+        const name = source.name ?? value.alias.aliasname ?? ''
+        aliases.set(foldedIdentifier(name), quotePart(name, ctx))
+      }
+    } else if (kind === 'RangeFunction') {
+      const value = bodyOf<ValueOf<'RangeFunction'>>(node)
+      if (value.alias) {
+        const source = ctx.source.aliasAfterExpression(ctx.source.span(value.functions)?.end ?? 0)
+        const name = source.name ?? value.alias.aliasname ?? ''
+        aliases.set(foldedIdentifier(name), quotePart(name, ctx))
       }
     } else if (kind === 'JoinExpr') {
       const joinNode = bodyOf<ValueOf<'JoinExpr'>>(node)
       collectFromAliases([joinNode.larg as Node, joinNode.rarg as Node], ctx, aliases)
-      if (joinNode.alias?.aliasname) {
-        aliases.set(joinNode.alias.aliasname.toLowerCase(), quoteIdentifier(joinNode.alias.aliasname))
+      if (joinNode.alias) {
+        const source = ctx.source.aliasAfterExpression(ctx.source.span(node)?.end ?? 0)
+        const name = source.name ?? joinNode.alias.aliasname ?? ''
+        aliases.set(foldedIdentifier(name), quotePart(name, ctx))
       }
     }
   }
@@ -230,17 +241,22 @@ export function printJoin(node: ValueOf<'JoinExpr'>, ctx: PrintContext): SqlDoc 
     ? concat(text(' USING ('), join(text(', '), stringValues(node.usingClause).map(name => text(quoteIdentifier(name)))), text(')'))
     : empty
   const on = node.quals ? concat(text(' ON '), ctx.print(node.quals)) : empty
-  const alias = node.alias
-    ? concat(text(' '), text(quoteIdentifier(node.alias.aliasname ?? '')))
-    : empty
-  return concat(
+  const body = concat(
     ctx.print(node.larg as Node),
     hardline(),
     text(`${natural}${kind} `),
     ctx.print(node.rarg as Node),
-    alias,
     using,
     on,
+  )
+  if (!node.alias) return body
+  const sourceAlias = ctx.source.aliasAfterExpression(ctx.source.span(node)?.end ?? 0)
+  return concat(
+    text('('),
+    indent(concat(hardline(), body)),
+    hardline(),
+    text(') '),
+    printAlias(node.alias, ctx, sourceAlias),
   )
 }
 

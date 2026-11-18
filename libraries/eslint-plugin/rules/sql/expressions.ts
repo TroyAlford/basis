@@ -4,6 +4,7 @@ import type { Node } from 'libpg-query'
 import type { SqlDoc } from './doc'
 import { concat, group, hardline, indent, join, line, softline, text } from './doc'
 import type { PrintContext } from './printer'
+import type { SourceAlias } from './source'
 import type { PgKind, PgNode } from './types'
 import { bodyOf, booleanValue, kindOf, stringValue, stringValues, tagNode, UnsupportedNodeError } from './types'
 
@@ -833,12 +834,15 @@ function printOrderNode(node: Node, ctx: PrintContext, aliases: ReadonlyMap<stri
  * Print an alias, including its optional column list.
  * @param node
  */
-export function printAlias(node: ValueOf<'Alias'>, ctx: PrintContext): SqlDoc {
-  const aliasName = node.aliasname ?? ''
-  const columns = node.colnames?.length
-    ? concat(text('('), join(text(', '), stringValues(node.colnames).map(name => text(quoteIdentifier(name)))), text(')'))
-    : empty
-  return concat(text(ctx.opaque.has(aliasName) ? aliasName : quoteIdentifier(aliasName)), columns)
+export function printAlias(node: ValueOf<'Alias'>, ctx: PrintContext, source?: SourceAlias): SqlDoc {
+  const aliasName = source?.name ?? node.aliasname ?? ''
+  const sourceColumns = source?.columns ?? []
+  const columns = sourceColumns.length > 0
+    ? concat(text('('), join(text(', '), sourceColumns.map(name => text(quotePart(name, ctx)))), text(')'))
+    : node.colnames?.length
+      ? concat(text('('), join(text(', '), stringValues(node.colnames).map(name => text(quoteIdentifier(name)))), text(')'))
+      : empty
+  return concat(text(quotePart(aliasName, ctx)), columns)
 }
 
 /**
@@ -848,7 +852,8 @@ export function printAlias(node: ValueOf<'Alias'>, ctx: PrintContext): SqlDoc {
  */
 export function printRangeSubselect(node: ValueOf<'RangeSubselect'>, ctx: PrintContext): SqlDoc {
   const lateral = node.lateral ? text('LATERAL ') : empty
-  const alias = node.alias ? concat(text(' '), printAlias(node.alias, ctx)) : empty
+  const sourceAlias = ctx.source.aliasAfterExpression(ctx.source.span(node.subquery as Node)?.end ?? 0)
+  const alias = node.alias ? concat(text(' '), printAlias(node.alias, ctx, sourceAlias)) : empty
   return concat(
     lateral,
     text('('),
@@ -871,7 +876,8 @@ export function printRangeFunction(node: ValueOf<'RangeFunction'>, ctx: PrintCon
     if (items.length === 0) throw new UnsupportedNodeError('RangeFunction', 'missing function')
     return ctx.print(items[0] as Node)
   })
-  const alias = node.alias ? concat(text(' '), printAlias(node.alias, ctx)) : empty
+  const sourceAlias = ctx.source.aliasAfterExpression(ctx.source.span(node.functions)?.end ?? 0)
+  const alias = node.alias ? concat(text(' '), printAlias(node.alias, ctx, sourceAlias)) : empty
   return concat(
     node.lateral ? text('LATERAL ') : empty,
     join(text(', '), functions),
