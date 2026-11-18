@@ -6,7 +6,7 @@ import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 
 setDefaultTimeout(60_000)
 import { randomUUID } from 'node:crypto'
-import { rm, symlink } from 'node:fs/promises'
+import { mkdir, readdir, rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { installSchema } from '../testing/Schema'
 import { createDatabase, openAdmin } from './Database'
@@ -50,6 +50,21 @@ interface Fixture {
 }
 
 /**
+ * Give the temporary install a real node_modules directory. Symlinking the whole directory
+ * breaks Basis's relative self-link when the install is outside the repository.
+ * @param install - Temporary installation root.
+ * @returns A promise that settles after the links are created.
+ */
+async function linkDependencies(install: string): Promise<void> {
+  const modules = join(install, 'node_modules')
+  const source = join(repoRoot, 'node_modules')
+  await mkdir(modules, { recursive: true })
+  for (const entry of await readdir(source)) {
+    await symlink(entry === 'basis' ? repoRoot : join(source, entry), join(modules, entry), 'dir')
+  }
+}
+
+/**
  * Start a Graph-backed server whose context loader reads RLS-protected data.
  * @param install - Temporary installation root.
  * @param loads - Mutable counter for loader invocations.
@@ -57,7 +72,7 @@ interface Fixture {
  * @returns The server fixture.
  */
 async function start(install: string, loads: { count: number }): Promise<Fixture> {
-  await symlink(join(repoRoot, 'node_modules'), join(install, 'node_modules'), 'dir')
+  await linkDependencies(install)
 
   const previous = process.cwd()
   process.chdir(install)
