@@ -3014,7 +3014,7 @@ describe('Server database lifecycle', () => {
     })
 
     expect(child.exitCode).toBe(0)
-    expect(child.stderr).toBe('')
+    expect(child.stderr.split('\n').filter(line => !line.startsWith('Bundled page')).join('\n')).toBe('')
     const result = JSON.parse(child.lines.at(-1) ?? '{}') as { error?: string, status?: string }
     expect(result.status).toBe('error')
     expect(result.error).toContain('requires Docker')

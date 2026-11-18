@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
 import { render } from '../../testing/render'
+import { waitFor } from '../../testing/waitFor'
 import type { HeadCollector } from './Head'
 import { Head, HeadProvider } from './Head'
 
@@ -24,14 +25,14 @@ describe('Head', () => {
       </HeadProvider>,
     )
 
-    expect(document.title).toBe('First')
+    await waitFor(() => document.title === 'First')
 
     await application.update(
       <HeadProvider>
         <Head title="Second" />
       </HeadProvider>,
     )
-    expect(document.title).toBe('Second')
+    await waitFor(() => document.title === 'Second')
 
     application.unmount()
   })

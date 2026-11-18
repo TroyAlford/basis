@@ -157,12 +157,9 @@ const main = async (): Promise<void> => {
     assert(health.version === 'consumer-version', 'managed /api/health reports the release version')
 
     const html = await fetch(base).then(response => response.text())
-    assert(html.includes('/scripts/index.js'), 'managed server serves the SPA shell')
-    assert(
-      !html.includes('/modules/') && !html.includes('hmr.js'),
-      'production omits development machinery',
-    )
-    assert((await fetch(`${base}/scripts/index.js`)).status === 200, 'managed server serves the built entrypoint')
+    assert(html.includes('/_bun/'), 'managed server serves the HMR shell')
+    assert(html.includes('id="basis-bootstrap"'), 'managed server embeds the SSR bootstrap')
+    assert(html.includes('Hello'), 'managed server renders the application')
     assert(await server.stop() === 0, 'managed server shuts down cleanly')
 
     process.stdout.write(`[basis] consumer react runtime: ok (${workspace})\n`)

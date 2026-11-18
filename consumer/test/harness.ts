@@ -60,7 +60,7 @@ export const REACT_TSCONFIG = JSON.stringify(
  */
 export const REACT_APP_SOURCE = `import { Button, Theme } from 'basis/react'
 
-export const component = (
+export const Application = () => (
   <Theme>
     <Button disabled>Hello</Button>
   </Theme>

@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Component } from '../Component/Component'
 
 /** Collects page-head updates while rendering on the server. */
 export interface HeadCollector {
@@ -21,9 +22,9 @@ interface HeadProviderProps {
  * Provides page-head updates to the application tree.
  *
  * On the server, a collector receives the title for the shell. In the browser,
- * the same component updates `document.title` immediately.
+ * the same component updates `document.title` after commit.
  */
-export class HeadProvider extends React.Component<HeadProviderProps> {
+export class HeadProvider extends Component<HeadProviderProps> {
   #value: HeadContextValue = {
     collector: this.props.collector,
     setTitle: (title: string): void => {
@@ -32,7 +33,7 @@ export class HeadProvider extends React.Component<HeadProviderProps> {
     },
   }
 
-  render(): React.ReactNode {
+  override render(): React.ReactNode {
     return (
       <HeadContext.Provider value={this.#value}>
         {this.props.children}
@@ -44,23 +45,24 @@ export class HeadProvider extends React.Component<HeadProviderProps> {
 /**
  * Sets the current page title. Renders nothing.
  */
-export class Head extends React.Component<{ title?: string }> {
+export class Head extends Component<{ title?: string }> {
   static contextType = HeadContext
   declare context: React.ContextType<typeof HeadContext>
 
   componentDidMount(): void {
+    super.componentDidMount()
     if (typeof document !== 'undefined' && this.props.title) {
       this.context?.setTitle(this.props.title)
     }
   }
 
-  componentDidUpdate(): void {
+  override componentDidUpdate(): void {
     if (typeof document !== 'undefined' && this.props.title) {
       this.context?.setTitle(this.props.title)
     }
   }
 
-  render(): React.ReactNode {
+  override render(): React.ReactNode {
     if (this.context?.collector && this.props.title) {
       this.context.setTitle(this.props.title)
     }
