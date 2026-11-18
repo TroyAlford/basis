@@ -47,24 +47,6 @@ export interface PolymorphicQueryOptions {
   readonly projectionBudget?: ProjectionBudget,
   /** Internal raw root condition used to correlate a projected collection. */
   readonly rawWhere?: SqlFragment,
-  /**
-   * Internal relationship metadata for flattened relationship-owned fields.
-   * Only used by a collection child query.
-   */
-  readonly relationship?: {
-    /** Correlated scalar expression for one relationship-owned field. */
-    readonly expression: (
-      field: string,
-      targetAlias: string,
-      bind?: (value: BoundScalar) => string,
-    ) => string,
-    /** Scalar relationship-owned fields by flattened name. */
-    readonly fields: ReadonlyMap<string, QueryFieldDefinition>,
-    /** Relationship name used by explicit `membership.role` paths. */
-    readonly name: string,
-    /** Target effective field names that make a flattened path ambiguous. */
-    readonly targetFields: ReadonlySet<string>,
-  },
   /** Internal root alias used by correlated projected collections. */
   readonly rootAlias?: string,
   /** Effective-field predicate. */
@@ -795,57 +777,45 @@ class QueryProjection {
   }
 
   /**
-   * Build flattened relationship metadata for one collection child query.
+   * Correlate one child query to qualifying source edges for a member filter.
+   *
+   * The filter is compiled against the collection relation joined to its
+   * target, so target and relationship predicates must match the same edge.
    * @param plan - Collection relation plan.
-   * @param target - Child target entity.
-   * @returns Relationship metadata, or undefined for inverse collections.
+   * @param key - Stable logical collection path.
+   * @param filter - Collection member predicate.
+   * @param alias - Child target alias.
+   * @returns Correlated existence condition with the filter and bound values.
    */
-  #relationshipOptions(
+  #filteredCollectionCorrelation(
     plan: CollectionRelationPlan,
-    target: EntityDefinition,
-  ): NonNullable<PolymorphicQueryOptions['relationship']> | undefined {
-    const relationship = plan.relationship
-    const relationshipAlias = plan.relationshipAlias
-    const remote = plan.targetEndpoint
-    if (relationship === undefined || relationshipAlias === undefined || remote === undefined) {
-      return undefined
-    }
-    const endpoints = new Map(relationship.between.map(endpoint => [endpoint.field, endpoint]))
-    const prefix = `${lowerFirst(relationship.name)}.`
-    const predicate = plan.predicate === undefined
+    key: string,
+    filter: string,
+    alias: string,
+  ): SqlFragment {
+    const scope = this.#scopeForCollection(
+      { collection: plan.collection, parentAlias: plan.parentAlias },
+      key,
+      false,
+    )
+    const normalized = QueryNormalizer.normalize(
+      plan.target,
+      filter,
+      scope.field,
+      scope.collection,
+      scope.array,
+    ) ?? undefined
+    const predicate = SQL.where(this.#entities, plan.target.name, normalized, scope)
+    const identity = scope.expression(scope.field('id'))
+    const filterFragment = predicate.sql === ''
       ? undefined
-      : SQL.compose([' AND (', plan.predicate, ')'])
-    return {
-      expression: (
-        field: string,
-        targetAlias: string,
-        bind?: (value: BoundScalar) => string,
-      ): string => {
-        const name = field.startsWith(prefix) ? field.slice(prefix.length) : field
-        const endpoint = endpoints.get(name)
-        const column = endpoint === undefined ? name : `${endpoint.field}.id`
-        if (bind === undefined) {
-          throw new Error('Collection relationship expression requires a value binder')
-        }
-        return SQL.bindFragment(SQL.compose([
-          '(SELECT ', `${quote(relationshipAlias)}.${quote(column)}`, ' FROM ', plan.relation,
-          ' WHERE ', plan.condition, predicate, ' AND ',
-          `${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
-            `${quote(targetAlias)}.${quote('id')}`, ')',
-        ]), bind)
-      },
-      fields: new Map<string, QueryFieldDefinition>([
-        ...relationship.fields
-          .filter(field => field.type !== FieldType.Array && field.type !== FieldType.JSON)
-          .map(field => [field.name, field] as const),
-        ...relationship.between.map(endpoint => [
-          endpoint.field,
-          { name: endpoint.field, type: FieldType.ID },
-        ] as const),
-      ]),
-      name: relationship.name,
-      targetFields: new Set(target.effectiveFields.map(field => field.name)),
-    }
+      : { sql: predicate.sql.replace(/^WHERE\s+/u, ''), values: predicate.values }
+    return SQL.compose([
+      'EXISTS (SELECT 1 FROM ', scope.relation, ' WHERE ', scope.condition,
+      scope.predicate === undefined ? undefined : SQL.compose([' AND (', scope.predicate, ')']),
+      filterFragment === undefined ? undefined : SQL.compose([' AND (', filterFragment, ')']),
+      ' AND ', identity, ' = ', `${quote(alias)}.${quote('id')}`, ')',
+    ])
   }
 
   /**
@@ -867,7 +837,7 @@ class QueryProjection {
     }
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, spec, true)
-      : this.#entityMember(plan, spec, true)
+      : this.#entityMember(plan, spec, plan.collection.name, true)
     const count = collectionIdentityCount(adapter.compile(filter), adapter.identity)
     return bind => `(${SQL.bindFragment(count, bind)})`
   }
@@ -983,16 +953,15 @@ class QueryProjection {
 
   /**
    * Build the correlated scope used by one resolved collection.
-   * @param resolved - Resolved collection and its parent occurrence.
+   * @param resolved - Resolved collection and its owning occurrence.
    * @param resolved.collection - Collection navigation.
-   * @param resolved.context - Occurrence owning the collection.
    * @param resolved.parentAlias - Alias of the occurrence owning the collection.
    * @param name - Stable logical collection path.
    * @param root - Whether this is a root-level collection.
    * @returns The collection scope.
    */
   #scopeForCollection(
-    resolved: { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string },
+    resolved: { collection: DerivedCollectionDefinition, parentAlias: string },
     name: string,
     root: boolean,
   ): CollectionScope {
@@ -1080,6 +1049,23 @@ class QueryProjection {
           expressions.set(path, `"${relationshipAlias}".${quote(property.name)}`)
           return field
         }
+        if (!path.includes('.')) {
+          const property = relationship.fields.find(candidate => candidate.name === path)
+          if (property !== undefined) {
+            if (context.effective.has(path)) {
+              throw new Error(
+                `Ambiguous collection field "${path}": target and relationship both declare it`,
+              )
+            }
+            if (property.type === FieldType.Array || property.type === FieldType.JSON) {
+              throw new Error(`Relationship field "${relationship.name}.${path}" is not a scalar property`)
+            }
+            const field: QueryFieldDefinition = { ...property, name: path }
+            resolvedFields.set(path, field)
+            expressions.set(path, `"${relationshipAlias}".${quote(path)}`)
+            return field
+          }
+        }
       }
       const segments = path.split('.')
       if (segments.some(segment => segment.length === 0)) throw new Error(`Invalid filter path "${path}"`)
@@ -1130,7 +1116,7 @@ class QueryProjection {
     }
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, spec, true)
-      : this.#entityMember(plan, spec, true)
+      : this.#entityMember(plan, spec, key, true)
     const member = adapter.compile(undefined)
     const count = collectionIdentityCount(member, adapter.identity)
     const exists = SQL.compose(['EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
@@ -1658,7 +1644,7 @@ class QueryProjection {
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, spec)
-      : this.#entityMember(plan, spec)
+      : this.#entityMember(plan, spec, key)
     const orderings = collectionOrderings(plan, spec.orderBy, adapter)
     const matched = adapter.compile(filter)
     const total = filter === undefined ? undefined : adapter.compile(undefined)
@@ -1711,12 +1697,14 @@ class QueryProjection {
    * Build the physical member adapter for an Entity-projected collection.
    * @param plan - Collection relation plan.
    * @param spec - Requested projection paths.
+   * @param key - Stable logical collection path.
    * @param countOnly - Whether only identity rows are required.
    * @returns The Entity member adapter.
    */
   #entityMember(
     plan: CollectionRelationPlan,
     spec: ProjectedCollectionSpec,
+    key: string,
     countOnly = false,
   ): CollectionMemberAdapter {
     const target = plan.target
@@ -1739,17 +1727,18 @@ class QueryProjection {
     const edgeFields = countOnly ? [] : [...spec.edgeFields]
     const orderOnly = new Set(fields.filter(name => !requested.has(name)))
     const childAlias = this.#nextAlias(countOnly ? 'cm' : 'c')
-    const relationshipOptions = this.#relationshipOptions(plan, target)
     const compile = (filter?: string): CollectionMemberQuery => {
+      const filtered = filter !== undefined && relationship !== undefined
       const child = compilePolymorphicQuery(this.#entities, target, {
         aliasPrefix: `${childAlias}_`,
         fields,
         limit: null,
         offset: 0,
-        rawWhere: this.#collectionCorrelation(plan, childAlias),
-        ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
+        rawWhere: filtered
+          ? this.#filteredCollectionCorrelation(plan, key, filter, childAlias)
+          : this.#collectionCorrelation(plan, childAlias),
         rootAlias: childAlias,
-        ...(filter === undefined ? {} : { where: filter }),
+        ...(filter === undefined || filtered ? {} : { where: filter }),
       })
       let query: SqlFragment = { sql: child.sql, values: child.values }
       if (edgeFields.length > 0) {
@@ -2136,38 +2125,7 @@ export function compilePolymorphicQuery(
     filterKind: name => projection.filterKind(name),
     orderField: name => projection.orderField(name),
   }
-  const relationship = options.relationship
-  const relationshipPrefix = relationship === undefined
-    ? ''
-    : `${lowerFirst(relationship.name)}.`
-  const resolveRelationship = (name: string): QueryFieldDefinition | undefined => {
-    if (relationship === undefined) return undefined
-    if (name.startsWith(relationshipPrefix)) {
-      const property = relationship.fields.get(name.slice(relationshipPrefix.length))
-      if (property === undefined) throw new Error(`Unknown relationship field "${name}"`)
-      return { ...property, name }
-    }
-    const property = relationship.fields.get(name)
-    if (property === undefined) return undefined
-    if (relationship.targetFields.has(name)) {
-      throw new Error(
-        `Ambiguous collection field "${name}": target.${name} and ` +
-        `${relationship.name}.${name} both exist`,
-      )
-    }
-    return property
-  }
-  const scope: QueryScope = relationship === undefined ? baseScope : {
-    ...baseScope,
-    expression: (value, bind) => {
-      if (value.name.startsWith(relationshipPrefix)
-        || (relationship.fields.has(value.name) && !relationship.targetFields.has(value.name))) {
-        return relationship.expression(value.name, projection.root.baseAlias, bind)
-      }
-      return baseScope.expression(value, bind)
-    },
-    filterField: name => resolveRelationship(name) ?? baseScope.filterField?.(name) ?? baseScope.field(name),
-  }
+  const scope: QueryScope = baseScope
   const where = typeof options.where === 'string'
     ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
     : options.where

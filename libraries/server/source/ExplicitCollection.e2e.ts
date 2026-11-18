@@ -337,4 +337,43 @@ describe('Explicit collections', () => {
       expect(entities).toEqual(records)
     })
   })
+
+  test('filters Entity projections through qualifying edges', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const query = async (filter: string) => {
+        const rows = await queryEntity<{
+          readonly cards: Envelope<{ readonly title: string }>,
+          readonly id: string,
+        }>(database.sql, definitions, 'Deck', {
+          fields: ['id', `cards[${filter}]`, 'cards.title'],
+          orderBy: 'id',
+          where: { id: deckA },
+        })
+        return rows[0]?.cards
+      }
+
+      const positive = await query('deckCardPrinting.quantity > 4')
+      expect(positive?.$matched).toBe(1)
+      expect(positive?.$total).toBe(2)
+      expect(positive?.items.map(item => item.title)).toEqual(['Card One'])
+
+      const negative = await query('deckCardPrinting.quantity > 6')
+      expect(negative?.$matched).toBe(0)
+      expect(negative?.$total).toBe(2)
+      expect(negative?.items).toEqual([])
+
+      const mixedPositive = await query(
+        "title = 'Card One' $and deckCardPrinting.quantity > 4",
+      )
+      expect(mixedPositive?.$matched).toBe(1)
+      expect(mixedPositive?.$total).toBe(2)
+
+      const mixedNegative = await query(
+        "title = 'Card Two' $and deckCardPrinting.quantity > 4",
+      )
+      expect(mixedNegative?.$matched).toBe(0)
+      expect(mixedNegative?.$total).toBe(2)
+    })
+  })
 })
