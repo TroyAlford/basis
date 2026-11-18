@@ -759,6 +759,7 @@ export class Graph {
    * @param baseAlias - Alias of the table owning local entity fields, when present.
    * @param rootAlias - Alias of the joined `Entity` root row, when present.
    * @param allowSubqueries - Whether inherited fields may be read through correlated subqueries.
+   * @param nextAlias - Allocator for one collision-free subquery alias.
    * @param parentId - Identity expression for a row reached through a reference hop.
    * @returns A resolver for one logical path.
    */
@@ -767,6 +768,7 @@ export class Graph {
     baseAlias: string | undefined,
     rootAlias: string | undefined,
     allowSubqueries: boolean,
+    nextAlias: () => string,
     parentId?: string,
   ): (path: string) => { readonly expression: string, readonly field: QueryFieldDefinition } {
     const cache = new Map<string, { readonly expression: string, readonly field: QueryFieldDefinition }>()
@@ -800,6 +802,7 @@ export class Graph {
           currentRoot,
           currentParent,
           allowSubqueries,
+          nextAlias,
         )
         const target = hop.field.target === 'Entity'
           ? identityDefinition()
@@ -817,6 +820,7 @@ export class Graph {
         currentRoot,
         currentParent,
         true,
+        nextAlias,
       )
       const result = resolved.identity
         ? { expression, field: { name: path, type: FieldType.ID as const } }
@@ -835,6 +839,7 @@ export class Graph {
    * @param rootAlias - Alias of the joined `Entity` root row, when present.
    * @param parentId - Identity expression for a row reached through a reference hop.
    * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextPolicyFieldAlias - Allocator for one collision-free subquery alias.
    * @returns The SQL field expression.
    */
   #policyFieldExpression(
@@ -844,6 +849,7 @@ export class Graph {
     rootAlias: string | undefined,
     parentId: string | undefined,
     allowSubqueries: boolean,
+    nextPolicyFieldAlias: () => string,
   ): string {
     const column = field.type === FieldType.Entity ? field.column : field.name
     if (field.type !== FieldType.Entity && field.name === 'id' && baseAlias !== undefined) {
@@ -866,8 +872,9 @@ export class Graph {
     if (!identity) {
       throw new Error(`Graph: inherited policy field "${entity.name}.${field.name}" has no row identity`)
     }
-    return `(SELECT ${quoteIdentifier(column)} FROM ${quoteIdentifier(field.owner)} __policy_field ` +
-      `WHERE __policy_field.${quoteIdentifier('id')} = ${identity})`
+    const alias = nextPolicyFieldAlias()
+    return `(SELECT ${quoteIdentifier(column)} FROM ${quoteIdentifier(field.owner)} ${alias} ` +
+      `WHERE ${alias}.${quoteIdentifier('id')} = ${identity})`
   }
 
   /**
@@ -878,6 +885,7 @@ export class Graph {
    * @param baseAlias - Alias of the table owning the policy entity's local fields.
    * @param rootAlias - Alias of the joined `Entity` root row, when present.
    * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextPolicyFieldAlias - Allocator for one collision-free subquery alias.
    * @param depth - Number of nested collection scopes.
    * @returns Collection scope, or undefined when not a collection.
    */
@@ -888,6 +896,7 @@ export class Graph {
     baseAlias: string | undefined,
     rootAlias: string | undefined,
     allowSubqueries: boolean,
+    nextPolicyFieldAlias: () => string,
     depth = 0,
   ): CollectionScope | undefined {
     const resolved = resolveCollectionPath(entity, name, {
@@ -908,7 +917,7 @@ export class Graph {
     const targetAlias = `__policy_${suffix}_target`
     const rootAliasName = `__policy_${suffix}_root`
     const prefix = resolved.prefix
-    const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries)
+    const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries, nextPolicyFieldAlias)
     const parentId = prefix === ''
       ? `${parentAlias}.${quoteIdentifier('id')}`
       : row(prefix).expression
@@ -929,6 +938,7 @@ export class Graph {
       quoteIdentifier(rowAlias),
       quoteIdentifier(record ? rowAlias : rootAliasValue as string),
       true,
+      nextPolicyFieldAlias,
     )
     const recordIdentities = record
       ? new Set(collection.relationship.between.map(endpoint => endpoint.field))
@@ -981,6 +991,7 @@ export class Graph {
         quoteIdentifier(sql.targetAlias ?? rowAlias),
         quoteIdentifier(rootAliasValue as string),
         true,
+        nextPolicyFieldAlias,
         depth + 1,
       )
     }
@@ -1335,7 +1346,13 @@ export class Graph {
       (grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target))
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
     const rootAlias = entity.name === 'Entity' ? alias : undefined
-    const resolver = this.#policyResolver(entity, alias, rootAlias, allowSubqueries)
+    let policyFieldIndex = 0
+    const nextAlias = (): string => {
+      const name = policyFieldIndex === 0 ? '__policy_field' : `__policy_field_${policyFieldIndex}`
+      policyFieldIndex += 1
+      return name
+    }
+    const resolver = this.#policyResolver(entity, alias, rootAlias, allowSubqueries, nextAlias)
     const expressions = new Map<string, string>()
     const field = (name: string): QueryFieldDefinition => {
       const resolved = resolver(name)
@@ -1360,7 +1377,7 @@ export class Graph {
           return undefined
         }
       },
-      collection: name => this.#collectionSqlScope(entity, name, alias, alias, rootAlias, allowSubqueries),
+      collection: name => this.#collectionSqlScope(entity, name, alias, alias, rootAlias, allowSubqueries, nextAlias),
       definition: entity,
       expression: value => {
         const expression = expressions.get(value.name)
