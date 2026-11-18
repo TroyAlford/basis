@@ -2701,13 +2701,20 @@ describe('Server database lifecycle', () => {
       $total: 1,
       items: [expect.objectContaining({ id: cardX })],
     })
-    const records = await queryEntity<{ entries: { $matched: number } }>(
+    const records = await queryEntity<{
+      entries: { $matched: number, items: { quantity: number }[] },
+    }>(
       database.sql,
       entities,
       'Deck',
-      { fields: ['id', 'entries'], where: { id: deck } },
+      { fields: ['id', 'entries{$limit:null}'], where: { id: deck } },
     )
     expect(records[0]?.entries.$matched).toBe(3)
+    expect(records[0]?.entries.items.map(item => item.quantity)).toEqual([2, 5, 1])
+    await expect(queryEntity(database.sql, entities, 'Deck', {
+      fields: ['id', 'cards.quantity'],
+      where: { id: deck },
+    })).rejects.toThrow(/record collection|relationship property/i)
     const filteredByEdge = await queryEntity<{
       cards: { $matched: number, $total: number, items: { id: string }[] },
     }>(database.sql, entities, 'Deck', {

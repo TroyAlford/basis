@@ -58,6 +58,8 @@ export interface CollectionScope {
   readonly collection?: (name: string, parent?: QueryScope) => CollectionScope | undefined,
   /** Correlated join condition against the root occurrence. */
   readonly condition: string,
+  /** Bound values referenced by `condition`. */
+  readonly conditionValues?: readonly unknown[],
   /** Consume finite compiler work for one emitted correlated predicate. */
   readonly consume?: (units?: number) => void,
   /** Related item entity definition. */
@@ -363,9 +365,16 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
+      const condition = (collection.conditionValues ?? []).reduce<string>(
+        (sql, value, index) => sql.replaceAll(
+          `$${index + 1}`,
+          bind(value as BoundScalar),
+        ),
+        collection.condition,
+      )
       if (collectionFilter.operator === Operator.Comparison.Empty) {
         collection.consume?.(collection.work ?? 1)
-        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition})`
+        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${condition})`
       }
       if (collectionFilter.operator !== Operator.Comparison.Contains) {
         throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
@@ -377,7 +386,7 @@ function whereClause(
         const inner = compile(requirement, collection)
         collection.consume?.(collection.work ?? 1)
         return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition} AND (${inner}))`
+          `${condition} AND (${inner}))`
       })
       return requirements.join(' AND ')
     }

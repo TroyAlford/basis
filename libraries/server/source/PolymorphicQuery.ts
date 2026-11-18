@@ -295,8 +295,8 @@ interface CollectionRelationPlan {
   readonly relationshipAlias?: string,
   /** Target universal-root alias. */
   readonly rootAlias: string,
-  /** Non-correlated source predicate used by grouped counts. */
-  readonly sourceFilter?: string,
+  /** Non-correlated source predicate and its bound values. */
+  readonly sourceFilter?: { readonly sql: string, readonly values: readonly unknown[] },
   /** Target entity definition, absent for the universal root. */
   readonly target?: EntityDefinition,
   /** Physical target table alias, absent for the universal root. */
@@ -349,6 +349,8 @@ class QueryProjection {
   readonly #budget: ProjectionBudget
   /** Values bound by collection subqueries. */
   readonly values: unknown[] = []
+  /** Values bound by grouped count CTEs. */
+  readonly cteValues: unknown[] = []
   /** Starting placeholder index for collection values. */
   #valueStart = 1
   /** Prefix that keeps nested compiler aliases unique. */
@@ -731,6 +733,15 @@ class QueryProjection {
       const relationship = collection.relationship
       const ownerColumn = `${collection.ownerEndpoint.field}.id`
       const alias = this.#nextAlias('cr')
+      let sourceFilter: { sql: string, values: readonly unknown[] } | undefined
+      if (collection.viaFilter !== undefined) {
+        sourceFilter = compileViaFilter(
+          this.#entities,
+          relationship,
+          collection.viaFilter,
+          alias,
+        )
+      }
       const plan: CollectionRelationPlan = {
         collection,
         condition: `${quote(alias)}.${quote(ownerColumn)} = "${parentAlias}".${quote('id')}`,
@@ -738,6 +749,7 @@ class QueryProjection {
         parentId: `${quote(alias)}.${quote(ownerColumn)}`,
         relation: `${quote(relationship.name)} ${quote(alias)}`,
         rootAlias: alias,
+        ...(sourceFilter === undefined ? {} : { sourceFilter }),
         target: this.#entities.relationshipRecord(relationship.name),
         targetAlias: alias,
         work: 1,
@@ -759,20 +771,18 @@ class QueryProjection {
       target: targetAlias ?? '',
     })
     const relation = sql.relation
-    let sourceFilter: string | undefined
+    let sourceFilter: { sql: string, values: readonly unknown[] } | undefined
     if (collection.kind === 'explicit'
       && collection.viaFilter !== undefined
       && sql.relationshipAlias !== undefined) {
-      sourceFilter = compileViaFilterSql(
+      sourceFilter = compileViaFilter(
         this.#entities,
         collection.relationship,
         collection.viaFilter,
         sql.relationshipAlias,
       )
     }
-    const condition = sourceFilter === undefined
-      ? sql.condition
-      : `(${sql.condition}) AND (${sourceFilter})`
+    const condition = sql.condition
     const parentId = collection.kind === 'inverse'
       ? targetAlias === undefined
         ? `"${rootAlias}".${quote('id')}`
@@ -798,16 +808,16 @@ class QueryProjection {
   }
 
   /**
-   * Correlate one child query to a collection relation plan.
+   * Build the source-filtered collection condition and bound values.
    * @param plan - Collection relation plan.
-   * @param alias - Child target alias.
-   * @returns Correlated existence condition.
+   * @returns Correlated condition and values.
    */
-  #collectionCorrelation(plan: CollectionRelationPlan, alias: string): string {
-    return (
-      `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
-      `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(alias)}.${quote('id')})`
-    )
+  #collectionCondition(plan: CollectionRelationPlan): { sql: string, values: readonly unknown[] } {
+    if (plan.sourceFilter === undefined) return { sql: plan.condition, values: [] }
+    return {
+      sql: `(${plan.condition}) AND (${plan.sourceFilter.sql})`,
+      values: plan.sourceFilter.values,
+    }
   }
 
   /**
@@ -827,20 +837,26 @@ class QueryProjection {
       : this.#entities.entity(collection.target)
     if (!target) throw new Error(`Unknown target entity "${collection.target}"`)
     const childAlias = this.#nextAlias('cm')
+    const condition = this.#collectionCondition(plan)
     const edgeFilter = collection.kind === 'explicit' && collection.targetEndpoint !== undefined
       ? this.#collectionEdgeFilter(plan, filter)
       : undefined
+    const rawWhereValues = [
+      ...condition.values,
+      ...(edgeFilter === undefined ? [] : edgeFilter.values),
+    ]
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields: ['id'],
       limit: null,
       offset: 0,
       rawWhere: edgeFilter === undefined
-        ? this.#collectionCorrelation(plan, childAlias)
-        : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+        ? `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
+          `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`
+        : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
           `AND (${edgeFilter.sql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
           `${quote(childAlias)}.${quote('id')})`,
-      ...(edgeFilter === undefined ? {} : { rawWhereValues: edgeFilter.values }),
+      ...(rawWhereValues.length === 0 ? {} : { rawWhereValues }),
       rootAlias: childAlias,
       ...(edgeFilter === undefined ? { where: filter } : {}),
     })
@@ -930,7 +946,7 @@ class QueryProjection {
       ? plan.collection.relationship
       : undefined
     const relationshipAlias = plan.relationshipAlias
-    const condition = plan.condition
+    const condition = this.#collectionCondition(plan)
     if (root) {
       this.#countFields.set(
         `${name}.$total`,
@@ -988,7 +1004,8 @@ class QueryProjection {
         const inner = this.#resolveCollectionPath(context, nested, sink)
         return inner ? this.#scopeForCollection(inner, `${name}.${nested}`, false) : undefined
       },
-      condition,
+      condition: condition.sql,
+      ...(condition.values.length === 0 ? {} : { conditionValues: condition.values }),
       consume: units => this.#consume(units),
       definition: plan.target ?? identityDefinition(),
       expression: field => {
@@ -1018,6 +1035,14 @@ class QueryProjection {
       if (expression) return expression
       const cteName = this.#nextAlias('cc')
       const joinAlias = this.#nextAlias('c')
+      let sourceFilter = 'TRUE'
+      if (plan.sourceFilter !== undefined) {
+        const offset = this.cteValues.length
+        sourceFilter = plan.sourceFilter.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+          `$${offset + Number(value)}`
+        ))
+        this.cteValues.push(...plan.sourceFilter.values)
+      }
       this.ctes.push(
         `"${cteName}" AS (` +
         `SELECT ${plan.parentId} AS "parent_id", ${
@@ -1025,7 +1050,7 @@ class QueryProjection {
             ? `count(DISTINCT ${quote(plan.targetAlias ?? plan.rootAlias)}.${quote('id')})`
             : 'count(*)'
         }::int AS "total" ` +
-        `FROM ${plan.relation} WHERE ${plan.sourceFilter ?? 'TRUE'} GROUP BY ${plan.parentId})`,
+        `FROM ${plan.relation} WHERE ${sourceFilter} GROUP BY ${plan.parentId})`,
       )
       this.joins.push(
         `LEFT JOIN "${cteName}" "${joinAlias}" ` +
@@ -1262,6 +1287,12 @@ class QueryProjection {
       if (collection.kind === 'explicit' && collection.targetEndpoint) {
         const edge = relationshipProperty(this.#entities, collection, rest[0], path)
         if (edge !== undefined) {
+          if (collection.relationship.between.length !== 2) {
+            throw new Error(
+              `Relationship property "${path}" is ambiguous on a projected Entity collection; ` +
+              'project the relationship-record collection instead',
+            )
+          }
           if (rest.length > 1) {
             throw new Error(`Cannot traverse relationship property "${path}"`)
           }
@@ -1768,11 +1799,16 @@ class QueryProjection {
       .map(order => order.name)
       .filter(name => !projectedFields.has(name)))
     const childAlias = this.#nextAlias('c')
+    const condition = this.#collectionCondition(plan)
     const edgeFilter = spec.collection.kind === 'explicit'
       && spec.collection.targetEndpoint !== undefined
       && directives.filter !== undefined
       ? this.#collectionEdgeFilter(plan, directives.filter)
       : undefined
+    const rawWhereValues = [
+      ...condition.values,
+      ...(edgeFilter === undefined ? [] : edgeFilter.values),
+    ]
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
       fields: [...new Set([
@@ -1786,11 +1822,12 @@ class QueryProjection {
       offset: 0,
       orderBy: orderings.map(order => (order.direction === 'DESC' ? `-${order.name}` : order.name)),
       rawWhere: edgeFilter === undefined
-        ? this.#collectionCorrelation(plan, childAlias)
-        : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+        ? `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
+          `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`
+        : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
           `AND (${edgeFilter.sql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
           `${quote(childAlias)}.${quote('id')})`,
-      ...(edgeFilter === undefined ? {} : { rawWhereValues: edgeFilter.values }),
+      ...(rawWhereValues.length === 0 ? {} : { rawWhereValues }),
       rootAlias: childAlias,
       ...(edgeFilter !== undefined || directives.filter === undefined
         ? {}
@@ -1804,7 +1841,9 @@ class QueryProjection {
         fields: ['id'],
         limit: null,
         offset: 0,
-        rawWhere: this.#collectionCorrelation(plan, availableAlias),
+        rawWhere: `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
+          `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(availableAlias)}.${quote('id')})`,
+        ...(condition.values.length === 0 ? {} : { rawWhereValues: condition.values }),
         rootAlias: availableAlias,
       })
     }
@@ -2322,10 +2361,17 @@ export function compilePolymorphicQuery(
       `$${rawWhereOffset + Number(value)}`
     ))
   }
+  const cteCount = projection.cteValues.length
+  const shift = (sql: string): string => {
+    if (cteCount === 0) return sql
+    return sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+      `$${cteCount + Number(value)}`
+    ))
+  }
   const conditions = [
     ...(definition.abstract ? [leafFilter] : []),
-    ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')]),
-    ...(rawWhere === undefined ? [] : [rawWhere]),
+    ...(predicate.sql === '' ? [] : [shift(predicate.sql.replace(/^WHERE /u, ''))]),
+    ...(rawWhere === undefined ? [] : [shift(rawWhere)]),
   ]
   const whereSql = conditions.length === 0
     ? ''
@@ -2342,14 +2388,15 @@ export function compilePolymorphicQuery(
     }),
     sql: [
       ...(projection.ctes.length === 0 ? [] : [`WITH ${projection.ctes.join(', ')}`]),
-      `SELECT ${projection.columns.join(', ')}`,
+      `SELECT ${projection.columns.map(shift).join(', ')}`,
       `FROM ${quote(definition.name)} "${projection.root.baseAlias}"`,
-      ...projection.joins,
+      ...projection.joins.map(shift),
       whereSql,
       ordering,
-      pagination.sql,
+      shift(pagination.sql),
     ].filter(part => part !== '').join(' '),
     values: [
+      ...projection.cteValues,
       ...predicate.values,
       ...projection.values,
       ...(options.rawWhereValues ?? []),
@@ -2572,12 +2619,12 @@ function parseCollectionOrdering(
  * @param alias - Relationship-table alias.
  * @returns SQL predicate.
  */
-function compileViaFilterSql(
+function compileViaFilter(
   entities: EntityDefinitions,
   relationship: RelationshipDefinition,
   filter: Filter,
   alias: string,
-): string {
+): { sql: string, values: readonly unknown[] } {
   const view = entities.relationshipRecord(relationship.name)
   if (!view) throw new Error(`Unknown relationship "${relationship.name}"`)
   const field = relationship.fields[0]?.name ?? relationship.between[0]?.field
@@ -2589,37 +2636,10 @@ function compileViaFilterSql(
     rootAlias: alias,
     where: filter,
   })
-  if (compiled.predicateSql === undefined) return 'TRUE'
-  return inlineSqlValues(compiled.predicateSql, compiled.predicateValues ?? [])
-}
-
-/**
- * Inline positional SQL bindings as literals.
- * @param sql - SQL with positional placeholders.
- * @param values - Bound values.
- * @returns SQL with literals.
- */
-function inlineSqlValues(sql: string, values: readonly unknown[]): string {
-  return sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-    inlineSqlValue(values[Number(value) - 1])
-  ))
-}
-
-/**
- * Render one SQL literal.
- * @param value - Runtime value.
- * @returns SQL literal.
- */
-function inlineSqlValue(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
-  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
-  if (value instanceof Date) return `'${value.toISOString()}'::timestamptz`
-  if (Array.isArray(value)) return `'${JSON.stringify(value).replaceAll("'", "''")}'`
-  if (typeof value === 'object') {
-    return `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`
+  return {
+    sql: compiled.predicateSql ?? 'TRUE',
+    values: compiled.predicateValues ?? [],
   }
-  return `'${String(value).replaceAll("'", "''")}'`
 }
 
 /**

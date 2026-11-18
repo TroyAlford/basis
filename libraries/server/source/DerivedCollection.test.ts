@@ -115,6 +115,73 @@ describe('Derived Collection contract', () => {
       .toThrow(/ambiguous/)
   })
 
+  test('rejects relationship properties on projected Entity items', () => {
+    expect(() => compile('cards.quantity')).toThrow(/record collection|relationship property/i)
+  })
+
+  test('keeps authored via values parameterized through projection and counts', () => {
+    const parameterized = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [{
+            field: 'filtered',
+            target: 'DeckCardPrinting',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @ $and label = "O\'Brien" ' +
+              "$and occurredOn = '2026-01-02' " +
+              "$and recordedAt = '2026-01-02T03:04:05Z' " +
+              "$and card = '00000000-0000-4000-8000-000000000902']",
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [
+          { field: 'label', type: 'String' },
+          { field: 'occurredOn', type: 'Date' },
+          { field: 'recordedAt', type: 'Timestamp' },
+        ],
+        name: 'DeckCardPrinting',
+      }],
+    }))
+    const projected = compileEntityQuery(parameterized, 'Deck', {
+      fields: ['id', 'filtered'],
+    })
+    expect(projected.sql).not.toContain("O'Brien")
+    expect(projected.sql).toContain('$1')
+    expect(projected.values).toEqual(expect.arrayContaining([
+      "O'Brien",
+      '2026-01-02',
+      '2026-01-02T03:04:05Z',
+      '00000000-0000-4000-8000-000000000902',
+    ]))
+    const counted = compileEntityQuery(parameterized, 'Deck', {
+      fields: ['id'],
+      where: 'filtered.$total = 1',
+    })
+    expect(counted.sql).not.toContain("O'Brien")
+    expect(counted.sql).toContain('$1')
+    expect(counted.values).toEqual(expect.arrayContaining([
+      "O'Brien",
+      '2026-01-02',
+      '2026-01-02T03:04:05Z',
+      '00000000-0000-4000-8000-000000000902',
+    ]))
+    const combined = compileEntityQuery(parameterized, 'Deck', {
+      fields: ['id', 'filtered[label = "query\'value"]'],
+    })
+    expect(combined.sql).not.toContain("O'Brien")
+    expect(combined.sql).not.toContain("query'value")
+    expect(combined.values).toEqual(expect.arrayContaining(["O'Brien", "query'value"]))
+  })
+
   test('relationship records retain composite identity', () => {
     const records = compile('entries')
     expect(records.sql).toContain('"DeckCardPrinting"')
