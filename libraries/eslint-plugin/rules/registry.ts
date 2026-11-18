@@ -23,7 +23,9 @@ import { noTestDatabaseIsolationFramework } from './noTestDatabaseIsolationFrame
 import { sortInterface } from './sortInterface'
 import { sortKeys } from './sortKeys'
 import { sortStringEnum } from './sortStringEnum'
+import { sqlIdentifierStyle } from './sqlIdentifierStyle'
 import { sqlTemplateFormat } from './sqlTemplateFormat'
+import { sqlTemplateValidity } from './sqlTemplateValidity'
 import { transactionSqlName } from './transactionSqlName'
 
 export default {
@@ -52,7 +54,9 @@ export default {
     'sort-interface': sortInterface,
     'sort-keys': sortKeys,
     'sort-string-enum': sortStringEnum,
+    'sql-identifier-style': sqlIdentifierStyle,
     'sql-template-format': sqlTemplateFormat,
+    'sql-template-valid': sqlTemplateValidity,
     'transaction-sql-name': transactionSqlName,
   },
 }

@@ -106,8 +106,7 @@ describe('Server database lifecycle', () => {
     const result = await database.tx(async sql => {
       await sql`
         INSERT INTO tx_probe
-        VALUES
-          ('committed')
+        VALUES ('committed')
       `
       return 'callback-result'
     })
@@ -116,7 +115,7 @@ describe('Server database lifecycle', () => {
     const count = async (): Promise<number | undefined> => (
       await database.tx(async sql => {
         const rows = await sql<{ count: number }[]>`
-          SELECT COUNT(*)::int AS count
+          SELECT COUNT(*)::INT AS count
           FROM tx_probe
         `
         return rows[0]?.count
@@ -127,8 +126,7 @@ describe('Server database lifecycle', () => {
     await expect(database.tx(async sql => {
       await sql`
         INSERT INTO tx_probe
-        VALUES
-          ('thrown')
+        VALUES ('thrown')
       `
       throw new Error('rollback')
     })).rejects.toThrow('rollback')
@@ -137,8 +135,7 @@ describe('Server database lifecycle', () => {
     await expect(database.tx(async sql => {
       await sql`
         INSERT INTO tx_probe
-        VALUES
-          ('failed')
+        VALUES ('failed')
       `
       await sql`
         SELECT *
@@ -167,8 +164,7 @@ describe('Server database lifecycle', () => {
         data_type AS "dataType",
         is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = ${'Note'}
+      WHERE table_schema = CURRENT_SCHEMA() AND table_name = ${'Note'}
       ORDER BY ordinal_position
     `
     const accountColumns = await database.sql<{
@@ -183,8 +179,7 @@ describe('Server database lifecycle', () => {
         data_type AS "dataType",
         is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = ${'Account'}
+      WHERE table_schema = CURRENT_SCHEMA() AND table_name = ${'Account'}
       ORDER BY ordinal_position
     `
     expect([...noteColumns, ...accountColumns]).toEqual([
@@ -218,17 +213,15 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-      VALUES
-        (${keptId}, 'kept', TRUE, 1.5, '2026-01-02', NOW())
+      VALUES (${keptId}, 'kept', TRUE, 1.5, '2026-01-02', NOW())
     `
     await database.sql`
       INSERT INTO "Account" ("id", "label")
-      VALUES
-        (${accountId}, ${'Troy'})
+      VALUES (${accountId}, ${'Troy'})
     `
     await installSchema(database.sql, entities)
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::INT AS count
       FROM "Note"
     `)
       .toEqual([{ count: 1 }])
@@ -258,18 +251,21 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "favorite.id")
-        VALUES
-          (${userId}, ${'User'}, ${'user@example.test'}, ${'admin'}, ${novelId})
+        VALUES (
+          ${userId},
+          ${'User'},
+          ${'user@example.test'},
+          ${'admin'},
+          ${novelId}
+        )
       `
       await sql`
         INSERT INTO "Book" ("id", "title")
-        VALUES
-          (${novelId}, ${'Book'})
+        VALUES (${novelId}, ${'Book'})
       `
       await sql`
         INSERT INTO "Novel" ("id", "genre")
-        VALUES
-          (${novelId}, ${'Genre'})
+        VALUES (${novelId}, ${'Genre'})
       `
       await sql`
         SET constraints ALL immediate
@@ -286,13 +282,17 @@ describe('Server database lifecycle', () => {
     const invalid = await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${invalidId}, ${'Invalid user'}, ${'SystemUser'})
+        VALUES (${invalidId}, ${'Invalid user'}, ${'SystemUser'})
       `
       await sql`
         INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "manager.id")
-        VALUES
-          (${invalidId}, ${'Invalid user'}, ${'invalid@example.test'}, ${'admin'}, ${randomUUID()})
+        VALUES (
+          ${invalidId},
+          ${'Invalid user'},
+          ${'invalid@example.test'},
+          ${'admin'},
+          ${randomUUID()}
+        )
       `
       await sql`
         SET constraints ALL immediate
@@ -364,8 +364,7 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "SystemUser" ("id", "permissions", "status", "manager.id")
-        VALUES
-          (${systemUserId}, ${'admin'}, ${'active'}, ${clientManagerId})
+        VALUES (${systemUserId}, ${'admin'}, ${'active'}, ${clientManagerId})
       `
       await sql`
         INSERT INTO "Client" ("id", "company", "status")
@@ -721,8 +720,7 @@ describe('Server database lifecycle', () => {
     const failure = await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error)
     expect(failure).toMatchObject({ message: expect.stringContaining('Migration plan has blocking drift') })
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
-      SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
-        to_regclass('"Good"') IS NOT NULL AS good
+      SELECT to_regclass('"Entity"') IS NOT NULL AS entity, to_regclass('"Good"') IS NOT NULL AS good
     `)).toEqual([{ entity: false, good: false }])
   })
 
@@ -734,8 +732,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
       SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = 'Entity'
+      WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'Entity'
       ORDER BY ordinal_position
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO' },
@@ -747,9 +744,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"
       FROM pg_indexes
-      WHERE schemaname = CURRENT_SCHEMA()
-        AND tablename = 'Entity'
-        AND indexname LIKE 'Entity_name%'
+      WHERE schemaname = CURRENT_SCHEMA() AND tablename = 'Entity' AND indexname LIKE 'Entity_name%'
       ORDER BY indexname
     `).toEqual([
       { indexName: 'Entity_name_id_idx' },
@@ -766,8 +761,7 @@ describe('Server database lifecycle', () => {
     expect(await database.captureError(async db => {
       await db.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          ('42', 'Abstract', 'User')
+        VALUES ('42', 'Abstract', 'User')
       `
     })).toMatchObject({ errno: '23514' })
   })
@@ -786,13 +780,11 @@ describe('Server database lifecycle', () => {
     const id = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES
-        (${id}, 'Actor', 'Actor')
+      VALUES (${id}, 'Actor', 'Actor')
     `
     await database.sql`
       INSERT INTO "Actor" ("id", "label")
-      VALUES
-        (${id}, 'Selected')
+      VALUES (${id}, 'Selected')
     `
 
     expect(await database.query<{ id: string, label: string }>('Actor', {
@@ -852,8 +844,7 @@ describe('Server database lifecycle', () => {
         is_nullable AS "isNullable",
         udt_name AS "udtName"
       FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = 'Article'
+      WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'Article'
       ORDER BY ordinal_position
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO', udtName: 'text' },
@@ -864,8 +855,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
       SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = CURRENT_SCHEMA()
-        AND table_name = 'Membership'
+      WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'Membership'
       ORDER BY ordinal_position
     `).toEqual([
       { columnName: 'user.id', dataType: 'text', isNullable: 'NO' },
@@ -876,14 +866,12 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ definition: string }[]>`
       SELECT PG_GET_CONSTRAINTDEF(oid) AS definition
       FROM pg_constraint
-      WHERE conrelid = '"Membership"'::regclass
-        AND contype = 'p'
+      WHERE conrelid = '"Membership"'::REGCLASS AND contype = 'p'
     `).toEqual([{ definition: 'PRIMARY KEY ("user.id", "campaign.id")' }])
     expect(await database.sql<{ definition: string }[]>`
       SELECT PG_GET_CONSTRAINTDEF(oid) AS definition
       FROM pg_constraint
-      WHERE conrelid = '"Membership"'::regclass
-        AND contype = 'f'
+      WHERE conrelid = '"Membership"'::REGCLASS AND contype = 'f'
       ORDER BY conname
     `).toEqual([
       { definition: 'FOREIGN KEY ("campaign.id") REFERENCES "Campaign"(id) DEFERRABLE' },
@@ -892,8 +880,7 @@ describe('Server database lifecycle', () => {
     expect((await database.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"
       FROM pg_indexes
-      WHERE schemaname = CURRENT_SCHEMA()
-        AND tablename = 'Membership'
+      WHERE schemaname = CURRENT_SCHEMA() AND tablename = 'Membership'
       ORDER BY indexname
     `).map(row => row.indexName)).toEqual([
       'Membership_campaign_idx',
@@ -921,22 +908,17 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "User" ("id")
-      VALUES
-        (${ada}),
-        (${grace}),
-        (${linus})
+      VALUES (${ada}), (${grace}), (${linus})
     `
     await database.sql`
       INSERT INTO "Campaign" ("id")
-      VALUES
-        (${campaign}),
-        (${secondCampaign})
+      VALUES (${campaign}), (${secondCampaign})
     `
     await database.sql`
       INSERT INTO "Article" ("id", "author.id", "tags", "payload")
       VALUES
-        (${articleOne}, ${ada}, ARRAY ['one', 'two'], '{"kind":"note"}'::jsonb),
-        (${articleTwo}, ${ada}, ARRAY ['three'], '{"kind":"memo"}'::jsonb)
+        (${articleOne}, ${ada}, ARRAY ['one', 'two'], '{"kind":"note"}'::JSONB),
+        (${articleTwo}, ${ada}, ARRAY ['three'], '{"kind":"memo"}'::JSONB)
     `
     await database.sql`
       INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
@@ -945,22 +927,20 @@ describe('Server database lifecycle', () => {
         (${grace}, ${campaign}, 'Player', 'cards')
     `
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::INT AS count
       FROM "Entity"
       WHERE "entity" = 'Membership'
     `).toEqual([{ count: 0 }])
     expect(await database.captureError(async db => {
       await db.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
-        VALUES
-          (${ada}, ${campaign}, 'Duplicate', 'none')
+        VALUES (${ada}, ${campaign}, 'Duplicate', 'none')
       `
     })).toMatchObject({ errno: '23505' })
     expect(await database.captureError(async db => {
       await db.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
-        VALUES
-          (${randomUUID()}, ${campaign}, 'Dangling', 'none')
+        VALUES (${randomUUID()}, ${campaign}, 'Dangling', 'none')
       `
     })).toMatchObject({ errno: '23503' })
 
@@ -1045,8 +1025,7 @@ describe('Server database lifecycle', () => {
 
     await database.sql`
       INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
-      VALUES
-        (${linus}, ${campaign}, 'Player', 'cards')
+      VALUES (${linus}, ${campaign}, 'Player', 'cards')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
       fields: ['id', 'members{$limit:1,$offset:1}'],
@@ -1119,28 +1098,23 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "User" ("id")
-      VALUES
-        (${userId})
+      VALUES (${userId})
     `
     await database.sql`
       INSERT INTO "SystemUser" ("id", "permissions")
-      VALUES
-        (${userId}, 'admin')
+      VALUES (${userId}, 'admin')
     `
     await database.sql`
       INSERT INTO "Campaign" ("id")
-      VALUES
-        (${campaignId})
+      VALUES (${campaignId})
     `
     await database.sql`
       INSERT INTO "Article" ("id", "author.id")
-      VALUES
-        (${articleId}, ${userId})
+      VALUES (${articleId}, ${userId})
     `
     await database.sql`
       INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
-      VALUES
-        (${userId}, ${campaignId}, 'GM', 'dice')
+      VALUES (${userId}, ${campaignId}, 'GM', 'dice')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'SystemUser', {
       fields: ['id', 'campaigns', 'campaigns.role', 'articles'],
@@ -1219,18 +1193,15 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "User" ("id")
-      VALUES
-        (${user})
+      VALUES (${user})
     `
     await database.sql`
       INSERT INTO "Pet" ("id", "owner.id", "label")
-      VALUES
-        (${pet}, ${user}, 'Dog')
+      VALUES (${pet}, ${user}, 'Dog')
     `
     await database.sql`
       INSERT INTO "Toy" ("id", "pet.id", "label")
-      VALUES
-        (${toy}, ${pet}, 'Red')
+      VALUES (${toy}, ${pet}, 'Red')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
       fields: ['id', 'pets', 'pets.label', 'pets.toys', 'pets.toys.label'],
@@ -1286,29 +1257,24 @@ describe('Server database lifecycle', () => {
     ] as const
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES
-        (${campaign}, 'Campaign', 'Campaign')
+      VALUES (${campaign}, 'Campaign', 'Campaign')
     `
     await database.sql`
       INSERT INTO "Campaign" ("id")
-      VALUES
-        (${campaign})
+      VALUES (${campaign})
     `
     for (const [id, name] of users) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${id}, ${name}, 'User')
+        VALUES (${id}, ${name}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id")
-        VALUES
-          (${id})
+        VALUES (${id})
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES
-          (${id}, ${campaign}, 'Player')
+        VALUES (${id}, ${campaign}, 'Player')
       `
     }
 
@@ -1415,47 +1381,39 @@ describe('Server database lifecycle', () => {
     ] as const) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${id}, ${name}, 'Campaign')
+        VALUES (${id}, ${name}, 'Campaign')
       `
       await database.sql`
         INSERT INTO "Campaign" ("id")
-        VALUES
-          (${id})
+        VALUES (${id})
       `
     }
     for (const member of members) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${member.id}, ${member.name}, 'User')
+        VALUES (${member.id}, ${member.name}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id", "active")
-        VALUES
-          (${member.id}, ${member.active})
+        VALUES (${member.id}, ${member.active})
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES
-          (${member.id}, ${campaign}, ${member.role})
+        VALUES (${member.id}, ${campaign}, ${member.role})
       `
     }
     for (const member of tied) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${member.id}, ${member.name}, 'User')
+        VALUES (${member.id}, ${member.name}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id", "active")
-        VALUES
-          (${member.id}, TRUE)
+        VALUES (${member.id}, TRUE)
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES
-          (${member.id}, ${tiedCampaign}, ${member.role})
+        VALUES (${member.id}, ${tiedCampaign}, ${member.role})
       `
     }
 
@@ -1586,29 +1544,24 @@ describe('Server database lifecycle', () => {
     const expected = [...members].sort((left, right) => left[1].localeCompare(right[1]))
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES
-        (${campaign}, 'Ordering Campaign', 'Campaign')
+      VALUES (${campaign}, 'Ordering Campaign', 'Campaign')
     `
     await database.sql`
       INSERT INTO "Campaign" ("id")
-      VALUES
-        (${campaign})
+      VALUES (${campaign})
     `
     for (const [id, email] of members) {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${id}, ${email}, 'User')
+        VALUES (${id}, ${email}, 'User')
       `
       await database.sql`
         INSERT INTO "User" ("id", "email")
-        VALUES
-          (${id}, ${email})
+        VALUES (${id}, ${email})
       `
       await database.sql`
         INSERT INTO "Membership" ("user.id", "campaign.id", "role")
-        VALUES
-          (${id}, ${campaign}, 'GM')
+        VALUES (${id}, ${campaign}, 'GM')
       `
     }
 
@@ -1693,12 +1646,11 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ indexName: string, isUnique: boolean }[]>`
       SELECT indexname AS "indexName", indisunique AS "isUnique"
       FROM pg_indexes
-      JOIN pg_class ON pg_class.relname = indexname
+      JOIN pg_class
+        ON pg_class.relname = indexname
         AND pg_class.relnamespace = current_schema()::regnamespace
       JOIN pg_index ON pg_index.indexrelid = pg_class.oid
-      WHERE schemaname = current_schema()
-        AND tablename = 'Pet'
-        AND indexname LIKE 'Pet_%_fk_idx'
+      WHERE schemaname = current_schema() AND tablename = 'Pet' AND indexname LIKE 'Pet_%_fk_idx'
       ORDER BY indexname
     `).toEqual([
       { indexName: 'Pet_guardian_fk_idx', isUnique: true },
@@ -1716,8 +1668,7 @@ describe('Server database lifecycle', () => {
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
-      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet"("guardian.id")
-      WHERE FALSE
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet"("guardian.id") WHERE FALSE
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('Migration plan has blocking drift')
@@ -1760,10 +1711,7 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "Person" ("id")
-      VALUES
-        (${personOne}),
-        (${personTwo}),
-        (${personThree})
+      VALUES (${personOne}), (${personTwo}), (${personThree})
     `
     await database.sql`
       INSERT INTO "Pet" ("id", "owner.id", "guardian.id")
@@ -1775,13 +1723,11 @@ describe('Server database lifecycle', () => {
     expect(await database.captureError(async db => {
       await db.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${'00000000-0000-4000-8000-000000000014'}, 'Duplicate', 'Pet')
+        VALUES (${'00000000-0000-4000-8000-000000000014'}, 'Duplicate', 'Pet')
       `
       await db.sql`
         INSERT INTO "Pet" ("id", "owner.id", "guardian.id")
-        VALUES
-          (${'00000000-0000-4000-8000-000000000014'}, ${personOne}, ${personOne})
+        VALUES (${'00000000-0000-4000-8000-000000000014'}, ${personOne}, ${personOne})
       `
     })).toMatchObject({ errno: '23505' })
 
@@ -2090,9 +2036,7 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "Cat" ("id", "lives")
-      VALUES
-        (${catOne}, 9),
-        (${catTwo}, 9)
+      VALUES (${catOne}, 9), (${catTwo}, 9)
     `
 
     const ids = async (entity: string, where: string): Promise<unknown[]> => (
@@ -2153,13 +2097,17 @@ describe('Server database lifecycle', () => {
     await database.sql`
       INSERT INTO "Note" ("id", "tags", "scores", "payload")
       VALUES
-        (${one}, ARRAY ['urgent', 'important'], ARRAY [1, 2, 2],
-          '{"kind":"note","meta":{"active":true}}'::jsonb),
-        (${two}, ARRAY ['urgent'], ARRAY [3], '{"kind":"other"}'::jsonb),
-        (${three}, ARRAY []::text[], ARRAY []::double PRECISION[], '{}'::jsonb),
-        (${four}, ARRAY ['b', 'a'], ARRAY [2, 1, 1], '["a","b"]'::jsonb),
-        (${five}, ARRAY ['a', 'b'], ARRAY [1, 2], '{"kind":"note"}'::jsonb),
-        (${six}, ARRAY ['c'], ARRAY [4], '{"kind":null}'::jsonb)
+        (
+          ${one},
+          ARRAY ['urgent', 'important'],
+          ARRAY [1, 2, 2],
+          '{"kind":"note","meta":{"active":true}}'::JSONB
+        ),
+        (${two}, ARRAY ['urgent'], ARRAY [3], '{"kind":"other"}'::JSONB),
+        (${three}, ARRAY []::TEXT[], ARRAY []::DOUBLE PRECISION[], '{}'::JSONB),
+        (${four}, ARRAY ['b', 'a'], ARRAY [2, 1, 1], '["a","b"]'::JSONB),
+        (${five}, ARRAY ['a', 'b'], ARRAY [1, 2], '{"kind":"note"}'::JSONB),
+        (${six}, ARRAY ['c'], ARRAY [4], '{"kind":null}'::JSONB)
     `
 
     const ids = async (where: string): Promise<unknown[]> => (
@@ -2240,10 +2188,10 @@ describe('Server database lifecycle', () => {
     await database.sql`
       INSERT INTO "Note" ("id", "payload")
       VALUES
-        (${exact}, '{"account":9007199254740991}'::jsonb),
-        (${unsafe}, '{"account":9007199254740993}'::jsonb),
-        (${decimal}, '{"amount":1}'::jsonb),
-        (${precise}, '{"amount":1.0000000000000001}'::jsonb)
+        (${exact}, '{"account":9007199254740991}'::JSONB),
+        (${unsafe}, '{"account":9007199254740993}'::JSONB),
+        (${decimal}, '{"amount":1}'::JSONB),
+        (${precise}, '{"amount":1.0000000000000001}'::JSONB)
     `
     expect(await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
       fields: ['id'],
@@ -2379,21 +2327,15 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "Pet" ("id")
-      VALUES
-        (${petOne}),
-        (${petTwo})
+      VALUES (${petOne}), (${petTwo})
     `
     await database.sql`
       INSERT INTO "Visit" ("id", "pet.id")
-      VALUES
-        ('1001', ${petOne}),
-        ('1002', ${petOne})
+      VALUES ('1001', ${petOne}), ('1002', ${petOne})
     `
     await database.sql`
       INSERT INTO "SpecialVisit" ("id", "notes")
-      VALUES
-        ('1001', 'note'),
-        ('1002', 'other')
+      VALUES ('1001', 'note'), ('1002', 'other')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
       fields: ['id', 'visits'],
@@ -2422,18 +2364,15 @@ describe('Server database lifecycle', () => {
     await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${id}, ${'Ada'}, ${'MtiSystemUser'})
+        VALUES (${id}, ${'Ada'}, ${'MtiSystemUser'})
       `
       await sql`
         INSERT INTO "MtiUser" ("id", "label", "email")
-        VALUES
-          (${id}, ${'Ada'}, ${'ada@example.test'})
+        VALUES (${id}, ${'Ada'}, ${'ada@example.test'})
       `
       await sql`
         INSERT INTO "MtiSystemUser" ("id", "permissions", "manager.id")
-        VALUES
-          (${id}, ${'admin'}, ${id})
+        VALUES (${id}, ${'admin'}, ${id})
       `
       await sql`
         SET constraints ALL immediate
@@ -2444,8 +2383,7 @@ describe('Server database lifecycle', () => {
     const incomplete = await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${incompleteId}, ${'Incomplete'}, ${'MtiSystemUser'})
+        VALUES (${incompleteId}, ${'Incomplete'}, ${'MtiSystemUser'})
       `
       await sql`
         SET constraints ALL immediate
@@ -2457,13 +2395,11 @@ describe('Server database lifecycle', () => {
     const missingParent = await database.tx(async sql => {
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${missingParentId}, ${'Missing parent'}, ${'MtiSystemUser'})
+        VALUES (${missingParentId}, ${'Missing parent'}, ${'MtiSystemUser'})
       `
       await sql`
         INSERT INTO "MtiSystemUser" ("id", "permissions", "manager.id")
-        VALUES
-          (${missingParentId}, ${'admin'}, ${missingParentId})
+        VALUES (${missingParentId}, ${'admin'}, ${missingParentId})
       `
       await sql`
         SET constraints ALL immediate
@@ -2490,13 +2426,13 @@ describe('Server database lifecycle', () => {
     await database.use(entities)
     await database.sql`
       WITH rows AS (
-        SELECT gen_random_uuid()::text AS id, value
+        SELECT gen_random_uuid()::TEXT AS id, value
         FROM generate_series(1, 10) AS series(value)
       ),
       roots AS (
-        INSERT INTO "Entity"("id", "name", "entity")
-        SELECT id, 'Number ' || value, 'NumberRow'
-        FROM rows
+        INSERT INTO "Entity"("id", "name", "entity") SELECT id,
+        'Number ' || value,
+        'NumberRow' FROM rows
       )
       INSERT INTO "NumberRow"("id", "value")
       SELECT id, value
@@ -2556,9 +2492,8 @@ describe('Server database lifecycle', () => {
     const constraints = await database.sql<{ definition: string }[]>`
       SELECT pg_get_constraintdef(oid) AS definition
       FROM pg_constraint
-      WHERE conrelid = '"Post"'::regclass
-        AND contype = 'f'
-      ORDER BY conname collate "C"
+      WHERE conrelid = '"Post"'::REGCLASS AND contype = 'f'
+      ORDER BY conname COLLATE "C"
     `
     expect(constraints).toEqual([
       { definition: 'FOREIGN KEY (id) REFERENCES "Entity"(id) DEFERRABLE' },
@@ -2575,30 +2510,26 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "MtiUser" ("id", "label")
-      VALUES
-        (${userId}, ${'Ada'})
+      VALUES (${userId}, ${'Ada'})
     `
     await database.sql`
       INSERT INTO "Post" ("id", "author.id", "title")
-      VALUES
-        (${postId}, ${userId}, ${'Hello'})
+      VALUES (${postId}, ${userId}, ${'Hello'})
     `
     expect(await database.sql<{ userId: string }[]>`
-      SELECT "author.id"::text AS "userId"
+      SELECT "author.id"::TEXT AS "userId"
       FROM "Post"
     `).toEqual([{ userId }])
 
     const invalidId = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES
-        (${invalidId}, ${'Invalid'}, ${'Post'})
+      VALUES (${invalidId}, ${'Invalid'}, ${'Post'})
     `
     const invalidInsert = await database.captureError(async db => {
       await db.sql`
         INSERT INTO "Post" ("id", "author.id", "title")
-        VALUES
-          (${invalidId}, ${'1'}, ${'Invalid'})
+        VALUES (${invalidId}, ${'1'}, ${'Invalid'})
       `
     })
     expect(invalidInsert).toMatchObject({ errno: '23503' })
@@ -2611,7 +2542,7 @@ describe('Server database lifecycle', () => {
     })
     expect(blockedDelete).toMatchObject({ errno: '23503' })
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::INT AS count
       FROM "Post"
     `).toEqual([{ count: 1 }])
   })
@@ -2625,13 +2556,12 @@ describe('Server database lifecycle', () => {
     }[]>`
       SELECT
         conname AS name,
-        condeferrable AS DEFERRABLE,
+        condeferrable AS "deferrable",
         condeferred AS deferred,
         pg_get_constraintdef(oid) AS definition
       FROM pg_constraint
-      WHERE conrelid IN ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
-        AND contype = 'f'
-      ORDER BY conname collate "C"
+      WHERE conrelid IN ('"CycleUser"'::REGCLASS, '"CycleCar"'::REGCLASS) AND contype = 'f'
+      ORDER BY conname COLLATE "C"
     `)
     expect(constraints.map(constraint => ({
       deferrable: constraint.deferrable,
@@ -2660,19 +2590,17 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "CycleUser" ("id", "car.id")
-        VALUES
-          (${userId}, ${carId})
+        VALUES (${userId}, ${carId})
       `
       await sql`
         INSERT INTO "CycleCar" ("id", "user.id")
-        VALUES
-          (${carId}, ${userId})
+        VALUES (${carId}, ${userId})
       `
       await sql`
         SET constraints ALL immediate
       `
       expect(await sql<{ count: number }[]>`
-        SELECT COUNT(*)::int AS count
+        SELECT COUNT(*)::INT AS count
         FROM "CycleUser"
       `).toEqual([{ count: 1 }])
     })
@@ -2691,13 +2619,11 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "CycleUser" ("id", "car.id")
-        VALUES
-          (${invalidUserId}, ${invalidCarId})
+        VALUES (${invalidUserId}, ${invalidCarId})
       `
       await sql`
         INSERT INTO "CycleCar" ("id", "user.id")
-        VALUES
-          (${invalidCarId}, ${randomUUID()})
+        VALUES (${invalidCarId}, ${randomUUID()})
       `
       await sql`
         SET constraints ALL immediate
@@ -2714,17 +2640,15 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${nodeId}, ${'Node'}, ${'TreeNode'})
+        VALUES (${nodeId}, ${'Node'}, ${'TreeNode'})
       `
       await sql`
         INSERT INTO "TreeNode" ("id", "parent.id")
-        VALUES
-          (${nodeId}, ${nodeId})
+        VALUES (${nodeId}, ${nodeId})
       `
     })
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::INT AS count
       FROM "TreeNode"
     `)).toEqual([{ count: 1 }])
 
@@ -2735,13 +2659,11 @@ describe('Server database lifecycle', () => {
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES
-          (${invalidNodeId}, ${'Invalid node'}, ${'TreeNode'})
+        VALUES (${invalidNodeId}, ${'Invalid node'}, ${'TreeNode'})
       `
       await sql`
         INSERT INTO "TreeNode" ("id", "parent.id")
-        VALUES
-          (${invalidNodeId}, ${randomUUID()})
+        VALUES (${invalidNodeId}, ${randomUUID()})
       `
       await sql`
         SET constraints ALL immediate
@@ -2956,8 +2878,7 @@ describe('Server database lifecycle', () => {
       `
       await database.sql`
         INSERT INTO "NumberRow" ("id", "value")
-        VALUES
-          (GEN_RANDOM_UUID(), ${1.5})
+        VALUES (GEN_RANDOM_UUID(), ${1.5})
       `
       expect(await database.query<{ value: number }>('NumberRow', {
         fields: ['value'],
@@ -3000,8 +2921,7 @@ describe('Server database lifecycle', () => {
         `
         await database.sql`
           INSERT INTO "NumberRow" ("id", "value")
-          VALUES
-            (GEN_RANDOM_UUID(), ${1})
+          VALUES (GEN_RANDOM_UUID(), ${1})
         `
         expect(await database.query<{ value: number }>('NumberRow', {
           fields: ['value'],
@@ -3018,8 +2938,7 @@ describe('Server database lifecycle', () => {
         `
         await database.sql`
           INSERT INTO "NumberRow" ("id", "value")
-          VALUES
-            (GEN_RANDOM_UUID(), ${2})
+          VALUES (GEN_RANDOM_UUID(), ${2})
         `
         expect(await database.query<{ value: number }>('NumberRow', {
           fields: ['value'],
@@ -3032,7 +2951,7 @@ describe('Server database lifecycle', () => {
     expect(new Set(schemas).size).toBe(2)
     const { database } = await useDatabaseFixture('concurrent-check')
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::INT AS count
       FROM pg_catalog.pg_namespace
       WHERE nspname IN (${schemas[0]}, ${schemas[1]})
     `).toEqual([{ count: 0 }])
@@ -3061,7 +2980,7 @@ describe('Server database lifecycle', () => {
   test.serial('leaves no isolated database schemas behind', async () => {
     const { database } = await useDatabaseFixture('schema-leak-check')
     expect(await database.sql<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
+      SELECT COUNT(*)::INT AS count
       FROM pg_catalog.pg_namespace
       WHERE nspname LIKE 'basis_test_%'
     `).toEqual([{ count: 0 }])

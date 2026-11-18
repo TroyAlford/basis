@@ -133,21 +133,38 @@ async function seed(database: LifecycleDatabase): Promise<void> {
   await database.sql`
     INSERT INTO "Person" ("id", "title", "manager.id", "scores", "tags", "payload")
     VALUES
-      (${ada}, 'Ada', ${null}, ARRAY [1, 2, 2], ARRAY ['urgent', 'important'],
-        '{"kind":"note","meta":{"active":true}}'::jsonb),
-      (${grace}, 'Grace', ${ada}, ARRAY [3], ARRAY ['urgent'], '{"kind":"other"}'::jsonb),
-      (${linus}, 'Linus', ${ada}, ARRAY []::double PRECISION[], ARRAY []::text[], '{}'::jsonb)
+      (
+        ${ada},
+        'Ada',
+        ${null},
+        ARRAY [1, 2, 2],
+        ARRAY ['urgent', 'important'],
+        '{"kind":"note","meta":{"active":true}}'::JSONB
+      ),
+      (
+        ${grace},
+        'Grace',
+        ${ada},
+        ARRAY [3],
+        ARRAY ['urgent'],
+        '{"kind":"other"}'::JSONB
+      ),
+      (
+        ${linus},
+        'Linus',
+        ${ada},
+        ARRAY []::DOUBLE PRECISION[],
+        ARRAY []::TEXT[],
+        '{}'::JSONB
+      )
   `
   await database.sql`
     INSERT INTO "SystemUser" ("id", "permissions")
-    VALUES
-      (${ada}, 'admin'),
-      (${linus}, 'user')
+    VALUES (${ada}, 'admin'), (${linus}, 'user')
   `
   await database.sql`
     INSERT INTO "Client" ("id", "company")
-    VALUES
-      (${grace}, 'Acme')
+    VALUES (${grace}, 'Acme')
   `
   await database.sql`
     INSERT INTO "Pet" ("id", "age", "vaccinated", "owner.id")

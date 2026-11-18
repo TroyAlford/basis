@@ -8,6 +8,8 @@
     "bun": "*"
   },
   "dependencies": {
+    "@dprint/formatter": "^0.6.0",
+    "@dprint/sql": "^0.5.0",
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@typescript-eslint/parser": "^8.70.0",

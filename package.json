@@ -93,6 +93,8 @@
     "vfile": "^6.0.3"
   },
   "devDependencies": {
+    "@dprint/formatter": "^0.6.0",
+    "@dprint/sql": "^0.5.0",
     "@types/bun": "^1.4.2",
     "@types/estree": "1.0.8",
     "@types/pixelmatch": "^7.1.0",

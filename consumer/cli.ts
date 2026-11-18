@@ -141,6 +141,8 @@ const hasEslintConfig = (): boolean => ESLINT_CONFIG_FILES.some(name => existsSy
  *
  * A repository's own `eslint.config.*` wins when present; otherwise Basis
  * supplies its own config, so `basis lint` / `basis format` need no setup.
+ * `format` applies fixes and ignores warning-only diagnostics; `lint` reports
+ * warnings as actionable findings.
  * @param fix Whether to let ESLint apply the fixes it supports.
  * @param target Path to lint; defaults to the working directory.
  * @returns The child process exit code.
@@ -151,7 +153,7 @@ const runEslint = (fix: boolean, target = '.'): number => {
     target,
     ...config,
     ...eslintCache('style'),
-    ...(fix ? ['--fix'] : []),
+    ...(fix ? ['--fix', '--quiet'] : ['--max-warnings', '0']),
   ])
 }
 
