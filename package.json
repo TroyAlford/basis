@@ -41,6 +41,8 @@
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
+    "@dprint/formatter": "^0.6.0",
+    "@dprint/sql": "^0.5.0",
     "@eslint/js": "^10.0.1",
     "@floating-ui/dom": "^1.7.6",
     "@happy-dom/global-registrator": "^20.14.5",

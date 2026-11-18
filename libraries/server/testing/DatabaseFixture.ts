@@ -1269,44 +1269,35 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   `
   await sql`
     INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-    VALUES
-      (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
+    VALUES (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
   `
   await sql`
     INSERT INTO "Account" ("id", "label")
-    VALUES
-      (${row.account}, 'Fixture account')
+    VALUES (${row.account}, 'Fixture account')
   `
   await sql`
     INSERT INTO "NumberRow" ("id", "value")
-    VALUES
-      (${row.numberRow}, 7)
+    VALUES (${row.numberRow}, 7)
   `
   await sql`
     INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
-    VALUES
-      (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
+    VALUES (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
   `
   await sql`
     INSERT INTO "Article" ("id", "title", "owner.id")
-    VALUES
-      (${row.article}, 'Fixture article', ${row.alice})
+    VALUES (${row.article}, 'Fixture article', ${row.alice})
   `
   await sql`
     INSERT INTO "MemberNote" ("id", "title")
-    VALUES
-      (${row.memberNote}, 'Member note'),
-      (${row.linkedNote}, 'Linked note')
+    VALUES (${row.memberNote}, 'Member note'), (${row.linkedNote}, 'Linked note')
   `
   await sql`
     INSERT INTO "AnonymousNote" ("id", "title")
-    VALUES
-      (${row.anonymousNote}, 'Anonymous note')
+    VALUES (${row.anonymousNote}, 'Anonymous note')
   `
   await sql`
     INSERT INTO "ActorLink" ("note.id", "related.id")
-    VALUES
-      (${row.memberNote}, ${row.linkedNote})
+    VALUES (${row.memberNote}, ${row.linkedNote})
   `
   await sql`
     INSERT INTO "Workspace" ("id", "title")
@@ -1351,15 +1342,11 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   `
   await sql`
     INSERT INTO "Owner" ("id", "label")
-    VALUES
-      (${row.ownerA}, 'A'),
-      (${row.ownerB}, 'B')
+    VALUES (${row.ownerA}, 'A'), (${row.ownerB}, 'B')
   `
   await sql`
     INSERT INTO "Revision" ("id", "owner.id")
-    VALUES
-      (${row.revisionA}, ${row.ownerA}),
-      (${row.orphanRevision}, ${null})
+    VALUES (${row.revisionA}, ${row.ownerA}), (${row.orphanRevision}, ${null})
   `
   await sql`
     INSERT INTO "Record" ("id", "title", "status")
@@ -1379,13 +1366,11 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   `
   await sql`
     INSERT INTO "GuardedWorkspace" ("id", "flag", "title")
-    VALUES
-      (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
+    VALUES (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
   `
   await sql`
     INSERT INTO "GuardedMembership" ("workspace.id", "user.id")
-    VALUES
-      (${row.guardedWorkspace}, ${row.alice})
+    VALUES (${row.guardedWorkspace}, ${row.alice})
   `
 }
 
@@ -1661,8 +1646,7 @@ async function ensureGraphSchema(database: Database): Promise<string> {
         const [table] = await sql<{ table_name: string }[]>`
           SELECT table_name
           FROM information_schema.tables
-          WHERE table_schema = ${schema}
-            AND table_name = ${entity.name}
+          WHERE table_schema = ${schema} AND table_name = ${entity.name}
         `
         if (!table?.table_name) {
           complete = false
@@ -1673,11 +1657,13 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     if (complete) {
       for (const trigger of fixtureGraph.physicalSchema(FIXTURE_APP_ROLE, true).triggers) {
         const [found] = await sql<{ present: boolean }[]>`
-          SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    ${schema} AND TRIGGER.tgname = ${trigger.name}
-) AS present
+          SELECT EXISTS (
+            SELECT 1
+            FROM pg_trigger "trigger"
+            JOIN pg_class relation ON relation.oid = trigger.tgrelid
+            JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = ${schema} AND trigger.tgname = ${trigger.name}
+          ) AS present
         `
         if (!found?.present) {
           complete = false
@@ -1687,19 +1673,27 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     }
     if (complete) {
       const [legacy] = await sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    ${schema} AND(TRIGGER.tgname ILIKE '%enroll%' OR pg_get_triggerdef(TRIGGER.oid) ILIKE
-    '%enroll_identity%')
-) AS present
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_trigger "trigger"
+          JOIN pg_class relation ON relation.oid = trigger.tgrelid
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname = ${schema}
+            AND (
+              trigger.tgname ILIKE '%enroll%'
+              OR pg_get_triggerdef(trigger.oid) ILIKE '%enroll_identity%'
+            )
+        ) AS present
       `
       if (legacy?.present) complete = false
     }
     if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
-          ${fixtureRows.alice}) AS seeded
+        SELECT EXISTS (
+          SELECT 1
+          FROM ${sql(schema)}.${sql('Entity')}
+          WHERE "id" = ${fixtureRows.alice}
+        ) AS seeded
       `
       complete = Boolean(seeded?.seeded)
     }

@@ -9,6 +9,8 @@
         "@babel/parser": "^7.29.2",
         "@babel/traverse": "^7.29.0",
         "@babel/types": "^7.29.0",
+        "@dprint/formatter": "^0.6.0",
+        "@dprint/sql": "^0.5.0",
         "@eslint/js": "^10.0.1",
         "@floating-ui/dom": "^1.7.6",
         "@happy-dom/global-registrator": "^20.14.5",
@@ -121,6 +123,8 @@
     "libraries/eslint-plugin": {
       "name": "@basis/eslint-plugin",
       "dependencies": {
+        "@dprint/formatter": "^0.6.0",
+        "@dprint/sql": "^0.5.0",
         "@eslint/js": "^10.0.1",
         "@stylistic/eslint-plugin": "^5.10.0",
         "@typescript-eslint/parser": "^8.70.0",
@@ -375,6 +379,10 @@
     "@csstools/selector-resolve-nested": ["@csstools/selector-resolve-nested@4.0.2", "", { "peerDependencies": { "postcss-selector-parser": "^7.1.1" } }, "sha512-JpjNBJFA+4OnAHKRK4AMp8xrYyLhI9XapOeBlP2PhRU/IylSw+1ep3BFNTksBJnrTS3KT6kqKNVfpzLLwZUW5Q=="],
 
     "@csstools/selector-specificity": ["@csstools/selector-specificity@6.0.0", "", { "peerDependencies": { "postcss-selector-parser": "^7.1.1" } }, "sha512-4sSgl78OtOXEX/2d++8A83zHNTgwCJMaR24FvsYL7Uf/VS8HZk9PTwR51elTbGqMuwH3szLvvOXEaVnqn0Z3zA=="],
+
+    "@dprint/formatter": ["@dprint/formatter@0.6.0", "", {}, "sha512-otnYh2jmGWbekYkAd4xiF416lpdZwNCbhkDrLQcAanvvutp0PhTNSJrwJ4DKBEu6xtP36NUX70t9YQw3oC/ONg=="],
+
+    "@dprint/sql": ["@dprint/sql@0.5.0", "", {}, "sha512-lBGH2ynv4WlcQV4AEVw696eEvAz/y0A3gbYnDqncHci8siehg5xxTzCZVy1xgFFxztqwi3PVeEofaOBcnMN5Og=="],
 
     "@es-joy/jsdoccomment": ["@es-joy/jsdoccomment@0.98.0", "", { "dependencies": { "@types/estree": "^1.0.9", "@typescript-eslint/types": "^8.70.0", "comment-parser": "1.4.9", "esquery": "^1.7.0", "jsdoc-type-pratt-parser": "~9.2.2" } }, "sha512-QS+b7I2aaSM+gZfDz1b9E4B367JJ2qTjFXRKF289iKkh9sYdZ21Q5MiF/Duzouy3J0C4VhM3I/8f2F4+zT8gYQ=="],
 

@@ -1,3 +1,4 @@
+/* eslint-disable @stylistic/max-len -- dprint cannot break this trigger statement. */
 import { Graph } from 'basis/server'
 import type { WithDatabaseOptions } from 'basis/testing'
 import { withDatabase } from 'basis/testing'
@@ -196,14 +197,12 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
-          FUNCTION "resolve_invoice_status"()
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION "resolve_invoice_status"()
       `
       await installBasis(database.sql)
       await database.sql`
         INSERT INTO "Invoice" ("id")
-        VALUES
-          ('invoice-1')
+        VALUES ('invoice-1')
       `
       expect(await database.sql<{ status: string }[]>`
         SELECT "status"
@@ -211,11 +210,15 @@ describe('Basis substrate installation', () => {
       `)
         .toEqual([{ status: 'resolved' }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
-) AS present
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_trigger "trigger"
+          JOIN pg_class relation ON relation.oid = trigger.tgrelid
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND relation.relname = 'Invoice'
+            AND trigger.tgname = 'resolve_invoice_status'
+        ) AS present
       `).toEqual([{ present: true }])
     })
   })
@@ -236,8 +239,7 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
-          FUNCTION "resolve_invoice_status"()
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION "resolve_invoice_status"()
       `
       await database.sql.unsafe(`
         CREATE OR REPLACE FUNCTION basis.enroll_identity(
@@ -269,16 +271,19 @@ describe('Basis substrate installation', () => {
           TO_REGPROCEDURE('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
       `).toEqual([{ enroll: true, resolve: true, role: true, triggerFunction: true }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
-) AS present
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_trigger "trigger"
+          JOIN pg_class relation ON relation.oid = trigger.tgrelid
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname = current_schema()
+            AND relation.relname = 'Invoice'
+            AND trigger.tgname = 'resolve_invoice_status'
+        ) AS present
       `).toEqual([{ present: true }])
       await database.sql`
         INSERT INTO "Invoice" ("id")
-        VALUES
-          ('invoice-2')
+        VALUES ('invoice-2')
       `
       expect(await database.sql<{ status: string }[]>`
         SELECT "status"
