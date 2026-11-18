@@ -41,6 +41,12 @@ const definitions = EntityDefinitions.load(JSON.stringify({
           type: 'Collection',
           via: 'entries.printing',
         },
+        {
+          field: 'memberCards',
+          target: 'Card',
+          type: 'Collection',
+          via: 'DeckMember[deck = @].card',
+        },
       ],
       name: 'Deck',
     },
@@ -66,7 +72,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       { field: 'deck', inverse: 'memberRecords', target: 'Deck' },
       { field: 'card', target: 'Card' },
     ],
-    fields: [],
+    fields: [{ field: 'label', type: 'String' }],
     name: 'DeckMember',
   }],
 }))
@@ -95,8 +101,9 @@ describe('CollectionRelation', () => {
       'largeEntries',
       'cards',
       'printings',
+      'memberCards',
     ]))
-    expect(names).toHaveLength(6)
+    expect(names).toHaveLength(7)
   })
 
   test('resolves a relationship-record collection to composite identity', () => {
@@ -252,6 +259,14 @@ describe('CollectionRelation', () => {
       relationshipAlias: 'edge',
       resultType: 'record',
     })
+  })
+
+  test('projects unambiguous relationship properties on an Entity collection', () => {
+    const compiled = compileEntityQuery(definitions, 'Deck', {
+      fields: ['id', 'memberCards.label'],
+    })
+    expect(compiled.sql).toContain('json_build_object')
+    expect(compiled.sql).toContain('"label"')
   })
 
   test('rejects ambiguous relationship-owned projection on an Entity collection', () => {

@@ -1,7 +1,7 @@
 import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
-import { FieldType, identityDefinition } from './EntityDefinitions'
+import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
 import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
@@ -1333,7 +1333,7 @@ class QueryProjection {
         if (directives.orderBy !== undefined) spec.orderBy = directives.orderBy
       }
       if (rest.length === 0) return
-      if (collection.kind === 'relationship') {
+      if (collection.kind === 'relationship' || collection.kind === 'explicit') {
         const edge = relationshipProperty(this.#entities, collection, rest[0], path)
         if (edge !== undefined) {
           if (rest.length > 1) {
@@ -1711,21 +1711,33 @@ class QueryProjection {
     const target = plan.target
     const relationship = plan.relationship
     const prefix = relationship === undefined ? '' : `${lowerFirst(relationship.name)}.`
-    if (plan.collection.kind === 'explicit' && prefix !== '') {
-      const edge = [...spec.fields].find(name => name.startsWith(prefix))
-      if (edge !== undefined) {
+    const targetFields = countOnly ? new Set<string>() : new Set(spec.fields)
+    const edgeFields = countOnly ? [] : [...spec.edgeFields]
+    if (plan.collection.kind === 'explicit' && relationship !== undefined && prefix !== '') {
+      const projected = [...targetFields].filter(name => name.startsWith(prefix))
+      if (projected.length > 0 && !this.#edgeProjectionAllowed(plan)) {
         throw new Error(
           `Entity collection "${plan.collection.name}" cannot project relationship-owned field ` +
-          `"${edge}"; project the relationship record instead`,
+          `"${projected[0]}"; one Entity may map to multiple edges`,
+        )
+      }
+      for (const name of projected) {
+        targetFields.delete(name)
+        edgeFields.push(name.slice(prefix.length))
+      }
+      if (edgeFields.length > 0 && !this.#edgeProjectionAllowed(plan)) {
+        throw new Error(
+          `Entity collection "${plan.collection.name}" cannot project relationship-owned field ` +
+          `"${prefix}${edgeFields[0]}"; one Entity may map to multiple edges`,
         )
       }
     }
     const requested = countOnly
       ? new Set(['id'])
-      : new Set(['id', 'name', 'entity', ...spec.fields])
+      : new Set(['id', 'name', 'entity', ...targetFields])
     const orderFields = countOnly ? [] : collectionOrderNames(plan, spec.orderBy)
     const fields = [...new Set([...requested, ...orderFields])]
-    const edgeFields = countOnly ? [] : [...spec.edgeFields]
+    const projectedEdgeFields = [...new Set(edgeFields)]
     const orderOnly = new Set(fields.filter(name => !requested.has(name)))
     const childAlias = this.#nextAlias(countOnly ? 'cm' : 'c')
     const compile = (filter?: string): CollectionMemberQuery => {
@@ -1742,9 +1754,9 @@ class QueryProjection {
         ...(filter === undefined || filtered ? {} : { where: filter }),
       })
       let query: SqlFragment = { sql: child.sql, values: child.values }
-      if (edgeFields.length > 0) {
+      if (projectedEdgeFields.length > 0) {
         query = SQL.compose([
-          'SELECT "__child".*, ', this.#edgeProjection(plan, edgeFields),
+          'SELECT "__child".*, ', this.#edgeProjection(plan, projectedEdgeFields),
           ' AS "__edge" FROM (', query, ') AS "__child"',
         ])
       }
@@ -1766,7 +1778,7 @@ class QueryProjection {
       compile,
       identity: ['id'],
       identityUnique: true,
-      orderable: new Set([...fields, ...edgeFields]),
+      orderable: new Set([...fields, ...projectedEdgeFields]),
     }
   }
 
@@ -1828,9 +1840,29 @@ class QueryProjection {
   }
 
   /**
+   * Whether relationship-owned projection is unambiguous for one Entity collection.
+   * @param plan - Collection relation plan.
+   * @returns `true` when the owner/target pair is unique per edge.
+   */
+  #edgeProjectionAllowed(plan: CollectionRelationPlan): boolean {
+    const collection = plan.collection
+    if (collection.kind !== 'explicit') return true
+    const relationship = collection.relationship
+    if (relationship.between.length === 2) return true
+    const target = collection.targetEndpoint
+    if (!target) return false
+    return relationship.constraints.some(constraint => (
+      constraint.type === Constraint.Structural
+      && constraint.fields.length === 2
+      && constraint.fields.includes(collection.ownerEndpoint.field)
+      && constraint.fields.includes(target.field)
+    ))
+  }
+
+  /**
    * Build one correlated relationship-owned projection object.
    * @param plan - Collection relation plan.
-   * @param fields - Relationship-owned field names.
+   * @param fields - Relationship-owned property names.
    * @returns JSON object SQL with the owning row correlated as `__child`.
    */
   #edgeProjection(plan: CollectionRelationPlan, fields: readonly string[]): SqlFragment {
@@ -1839,6 +1871,14 @@ class QueryProjection {
     const remote = plan.targetEndpoint
     if (relationship === undefined || relationshipAlias === undefined || remote === undefined) {
       throw new Error(`Collection "${plan.collection.name}" has no relationship projection`)
+    }
+    for (const field of fields) {
+      if (!relationship.fields.some(candidate => candidate.name === field)) {
+        throw new Error(
+          `Entity collection "${plan.collection.name}" cannot project relationship endpoint ` +
+          `"${field}"`,
+        )
+      }
     }
     const values = fields.map(field => (
       `${quoteLiteral(field)}, ${quote(relationshipAlias)}.${quote(field)}`
@@ -2644,8 +2684,13 @@ function relationshipProperty(
   name: string,
   path: string,
 ): QueryFieldDefinition | undefined {
-  if (collection.kind !== 'relationship') return undefined
-  const property = collection.relationship.fields.find(field => field.name === name)
+  if (collection.kind === 'inverse') return undefined
+  if (collection.kind === 'explicit' && collection.targetEndpoint === undefined) return undefined
+  const relationship = collection.kind === 'relationship' || collection.kind === 'explicit'
+    ? collection.relationship
+    : undefined
+  if (relationship === undefined) return undefined
+  const property = relationship.fields.find(field => field.name === name)
   if (property === undefined) return undefined
   const target = collection.target === 'Entity'
     ? identityDefinition()
@@ -2653,7 +2698,7 @@ function relationshipProperty(
   if (target?.effectiveFields.some(field => field.name === name)) {
     throw new Error(
       `Ambiguous collection field "${path}": ${collection.target}.${name} and ` +
-      `${collection.relationship.name}.${name} both exist`,
+      `${relationship.name}.${name} both exist`,
     )
   }
   return property

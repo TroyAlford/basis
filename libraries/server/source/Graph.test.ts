@@ -934,6 +934,56 @@ describe('Graph', () => {
     expect(() => make({ read: { where: null } })).toThrow('must declare grant, role, or a non-empty where')
   })
 
+  test('compiles relationship policy helpers against composite endpoint columns', () => {
+    const relationshipGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'members',
+              target: 'User',
+              type: 'Collection',
+              via: 'Membership[workspace = @].user',
+            },
+          ],
+          name: 'Workspace',
+        },
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Item' },
+      ],
+      relationships: [
+        {
+          between: [
+            { field: 'workspace', target: 'Workspace' },
+            { field: 'user', target: 'User' },
+          ],
+          fields: [{ field: 'role', type: 'String' }],
+          name: 'Membership',
+        },
+        {
+          between: [
+            { field: 'workspace', target: 'Workspace' },
+            { field: 'item', target: 'Item' },
+          ],
+          fields: [],
+          name: 'ItemAccess',
+        },
+      ],
+      security: {
+        ItemAccess: {
+          [Action.Read]: { where: 'workspace.members $contains (id = $me)' },
+        },
+      },
+    })
+    const helper = relationshipGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_') && fn.sql.includes('ItemAccess'))
+    expect(helper?.signature).toBe('workspaceId text, itemId text')
+    expect(helper?.sql).toContain('"__row"."workspace.id" = workspaceId')
+    expect(helper?.sql).toContain('"__row"."item.id" = itemId')
+    expect(helper?.sql).not.toMatch(/"__row"\."id"/u)
+  })
+
   test('uses a body-safe dollar delimiter for generated helpers', () => {
     const payload = 'Safe $$ \' OR TRUE; DROP TABLE "Workspace"; --'
     const quoted = payload.replaceAll("'", "\\'")

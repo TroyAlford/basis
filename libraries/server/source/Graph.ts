@@ -1289,7 +1289,14 @@ export class Graph {
       return this.#compileDirectPredicate(grant, alias, table, true)
     }
     if (this.#requiresHelper(grant, table)) {
-      return `${this.#qualified(this.#helperName(grant))}(${alias}.${quoteIdentifier('id')})`
+      const relationship = this.definitions.relationship(table)
+      let args = `${alias}.${quoteIdentifier('id')}`
+      if (relationship) {
+        args = relationship.between
+          .map(endpoint => `${alias}.${quoteIdentifier(`${endpoint.field}.id`)}`)
+          .join(', ')
+      }
+      return `${this.#qualified(this.#helperName(grant))}(${args})`
     }
     return this.#compileDirectPredicate(grant, alias, table, false)
   }
@@ -1391,11 +1398,22 @@ export class Graph {
       seen.add(name)
       const qualified = this.#qualified(name)
       const predicate = this.#compileDirectPredicate(grant, '__row', grant.target, true)
+      const relationship = this.definitions.relationship(grant.target)
+      let signature = 'root_id text'
+      let identity = `"__row".${quoteIdentifier('id')} = root_id`
+      if (relationship) {
+        signature = relationship.between
+          .map(endpoint => `${endpoint.field}Id text`)
+          .join(', ')
+        identity = relationship.between
+          .map(endpoint => `"__row".${quoteIdentifier(`${endpoint.field}.id`)} = ${endpoint.field}Id`)
+          .join(' AND ')
+      }
       const body = `
         SELECT EXISTS (
           SELECT 1
           FROM ${quoteIdentifier(grant.target)} AS "__row"
-          WHERE "__row".${quoteIdentifier('id')} = root_id
+          WHERE ${identity}
             AND ${predicate}
         )
       `.trim()
@@ -1403,7 +1421,7 @@ export class Graph {
         body,
         qualified,
         searchPath: this.#searchPath(),
-        signature: 'root_id text',
+        signature,
       })
       functions.push({
         body: generated.body,
@@ -1412,7 +1430,7 @@ export class Graph {
         required: [name],
         searchPath: this.#searchPath(),
         securityDefiner: true,
-        signature: 'root_id text',
+        signature,
         sql: generated.sql,
       })
     }
