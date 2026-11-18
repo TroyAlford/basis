@@ -82,6 +82,15 @@ export function transformModule(
     const id = path.relative(cwd, filePath).split(path.sep).join('/')
     lines.push(`\nif (typeof ${REGISTER} === 'function') {`)
     lines.push(...names.map(name => `  ${REGISTER}(${name}, ${JSON.stringify(`${id}:${name}`)});`))
+    /*
+     * Bun renames colliding class declarations in the browser bundle (for example
+     * `SiteHeader` becomes `SiteHeader2`). Component class names must not follow
+     * that bundle-local rename, or SSR and hydration disagree. The source name is
+     * stable on both sides, so pin it as displayName when the component has none.
+     */
+    lines.push(...names.map(name => (
+      `  if (${name}.displayName == null) ${name}.displayName = ${JSON.stringify(name)};`
+    )))
     lines.push('}')
   }
 
