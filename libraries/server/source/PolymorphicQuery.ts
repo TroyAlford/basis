@@ -249,6 +249,8 @@ interface CollectionRelationPlan {
   readonly parentAlias: string,
   /** Expression yielding the owning identity for grouped counts. */
   readonly parentId: string,
+  /** Authored source predicate SQL, when the collection declares one. */
+  readonly predicate?: string,
   /** Base SQL relation containing target rows. */
   readonly relation: string,
   /** Named relationship providing source rows, when relationship-backed. */
@@ -729,6 +731,7 @@ class QueryProjection {
         : resolved.source.kind === 'inverse'
           ? targetAlias === undefined ? 1 : 2
           : targetAlias === undefined ? 2 : 3,
+      ...(sql.predicate === undefined ? {} : { predicate: sql.predicate }),
       ...(relationship === undefined ? {} : { relationship }),
       ...(relationshipAlias === undefined ? {} : { relationshipAlias }),
       ...(rootAlias === undefined ? {} : { rootAlias }),
@@ -1103,10 +1106,11 @@ class QueryProjection {
       const count = plan.collection.kind === 'explicit' && plan.resultType === 'entity'
         ? `count(DISTINCT ${plan.identity[0]})`
         : 'count(*)'
+      const where = plan.predicate === undefined ? '' : ` WHERE ${plan.predicate}`
       this.ctes.push(
         `"${cteName}" AS (` +
         `SELECT ${plan.parentId} AS "parent_id", ${count}::int AS "total" ` +
-        `FROM ${plan.relation} GROUP BY ${plan.parentId})`,
+        `FROM ${plan.relation}${where} GROUP BY ${plan.parentId})`,
       )
       this.joins.push(
         `LEFT JOIN "${cteName}" "${joinAlias}" ` +

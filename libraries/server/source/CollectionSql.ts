@@ -30,6 +30,8 @@ export interface CollectionSqlRelation {
   readonly identity: readonly string[],
   /** Fully qualified column carrying the owning identity. */
   readonly ownerId: string,
+  /** Authored source predicate SQL, when the collection declares one. */
+  readonly predicate?: string,
   /** SQL relation containing source rows and any required root/target joins. */
   readonly relation: string,
   /** Relationship-table alias, when relationship-backed. */
@@ -64,6 +66,7 @@ export function collectionSqlRelation(
   const predicateSuffix = predicate === undefined || predicate === ''
     ? ''
     : ` AND (${predicate})`
+  const predicateEntry = predicate === undefined ? {} : { predicate }
 
   if (resolved.resultType === 'record') {
     if (resolved.source.kind !== 'relationship' || resolved.identity.kind !== 'record') {
@@ -79,6 +82,7 @@ export function collectionSqlRelation(
       relation: `${quote(relationship.name)} ${quote(relationshipAlias)}`,
       relationshipAlias,
       resultType: 'record',
+      ...predicateEntry,
     }
   }
 
@@ -97,6 +101,7 @@ export function collectionSqlRelation(
         relation: `${quote('Entity')} ${quote(aliases.root)}`,
         resultType: 'entity',
         rootAlias: aliases.root,
+        ...predicateEntry,
       }
     }
     const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
@@ -112,6 +117,7 @@ export function collectionSqlRelation(
       resultType: 'entity',
       rootAlias: aliases.root,
       targetAlias: aliases.target,
+      ...predicateEntry,
     }
   }
 
@@ -136,6 +142,7 @@ export function collectionSqlRelation(
       relationshipAlias: aliases.relationship,
       resultType: 'entity',
       rootAlias: aliases.root,
+      ...predicateEntry,
     }
   }
   const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
@@ -150,6 +157,7 @@ export function collectionSqlRelation(
     resultType: 'entity',
     rootAlias: aliases.root,
     targetAlias: aliases.target,
+    ...predicateEntry,
   }
 }
 

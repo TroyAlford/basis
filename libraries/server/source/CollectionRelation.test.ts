@@ -220,6 +220,7 @@ describe('CollectionRelation', () => {
         '(COALESCE("edge"."quantity" > 3, FALSE))',
       identity: ['"root"."id"'],
       ownerId: '"edge"."deck.id"',
+      predicate: 'COALESCE("edge"."quantity" > 3, FALSE)',
       relation: '"DeckCardPrinting" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
       relationshipAlias: 'edge',
@@ -240,6 +241,7 @@ describe('CollectionRelation', () => {
         '(COALESCE("edge"."quantity" > 3, FALSE))',
       identity: ['"edge"."deck.id"', '"edge"."card.id"', '"edge"."printing.id"'],
       ownerId: '"edge"."deck.id"',
+      predicate: 'COALESCE("edge"."quantity" > 3, FALSE)',
       relation: '"DeckCardPrinting" "edge"',
       relationshipAlias: 'edge',
       resultType: 'record',

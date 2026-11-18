@@ -306,6 +306,51 @@ describe('Graph', () => {
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
   })
 
+  test('supports Entity-projected explicit collection membership policies', () => {
+    const explicitGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'cards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @].card',
+            },
+            {
+              field: 'largeCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 3].card',
+            },
+          ],
+          name: 'Deck',
+          security: { [Action.Read]: { where: 'largeCards $contains (id = $me)' } },
+        },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Card',
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    const helper = explicitGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_'))
+    expect(helper?.sql).toContain('FROM "DeckCardPrinting"')
+    expect(helper?.sql).toContain('"card.id"')
+    expect(helper?.sql).toContain('"quantity" > 3')
+    expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
+  })
+
   test('rejects unsupported authorization collection predicates', () => {
     const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
       entities: [

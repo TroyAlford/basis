@@ -261,4 +261,63 @@ describe('Explicit collections', () => {
       expect(large.map(row => row.id)).toEqual([deckA, deckB])
     })
   })
+
+  test('agrees between root count predicates and projected envelopes', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const total = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'cards.$total = 2',
+      })
+      expect(total.map(row => row.id)).toEqual([deckA])
+
+      const matched = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: "cards[title = 'Card One'].$matched = 1",
+      })
+      expect(matched.map(row => row.id)).toEqual([deckA])
+
+      const filteredEmpty = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: "cards[title = 'Missing'].$matched = 0",
+      })
+      expect(filteredEmpty.map(row => row.id)).toEqual([deckA, deckB, deckC])
+    })
+  })
+
+  test('counts record identities and ignores member filters for totals', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const rows = await queryEntity<{
+        readonly 'entries.$total': number,
+        readonly 'id': string,
+        readonly 'largeEntries.$total': number,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'entries.$total', 'largeEntries.$total'],
+        orderBy: 'id',
+      })
+      expect(rows).toEqual([
+        { 'entries.$total': 3, 'id': deckA, 'largeEntries.$total': 1 },
+        { 'entries.$total': 1, 'id': deckB, 'largeEntries.$total': 1 },
+        { 'entries.$total': 0, 'id': deckC, 'largeEntries.$total': 0 },
+      ])
+
+      const matched = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'entries[quantity > 4].$matched = 1',
+      })
+      expect(matched.map(row => row.id)).toEqual([deckA, deckB])
+
+      const ignoredFilter = await queryEntity<{ id: string }>(database.sql, definitions, 'Deck', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'entries[quantity > 100].$total = 1',
+      })
+      expect(ignoredFilter.map(row => row.id)).toEqual([deckB])
+    })
+  })
 })

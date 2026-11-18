@@ -901,8 +901,10 @@ export class Graph {
       return undefined
     }
     const collection = resolved.collection
-    if (collection.kind === 'explicit') {
-      throw new Error('Explicit Collections are not supported by the authorization compiler yet')
+    if (collection.kind === 'explicit' && collection.targetEndpoint === undefined) {
+      throw new Error(
+        'Explicit record Collections are not supported by the authorization compiler yet',
+      )
     }
     const target = this.#collectionTarget(collection)
     const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
