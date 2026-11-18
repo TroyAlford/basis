@@ -1,3 +1,4 @@
+import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
@@ -688,11 +689,15 @@ class QueryProjection {
     const rootAlias = this.#nextAlias('cr')
     const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
     const relationshipAlias = relationship ? this.#nextAlias('cj') : undefined
-    const sql = collectionSqlRelation(collection, `"${parentAlias}".${quote('id')}`, {
-      relationship: relationshipAlias ?? '',
-      root: rootAlias,
-      target: targetAlias ?? '',
-    })
+    const sql = collectionSqlRelation(
+      resolveCollectionRelation(collection, value => this.#entities.entity(value)),
+      `"${parentAlias}".${quote('id')}`,
+      {
+        relationship: relationshipAlias ?? '',
+        root: rootAlias,
+        target: targetAlias ?? '',
+      },
+    )
     const relation = sql.relation
     const condition = sql.condition
     let parentId: string

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
 import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
@@ -910,7 +911,8 @@ export class Graph {
     const parentId = prefix === ''
       ? `${parentAlias}.${quoteIdentifier('id')}`
       : row(prefix).expression
-    const sql = collectionSqlRelation(collection, parentId, {
+    const relation = resolveCollectionRelation(collection, value => this.#policyEntity(value))
+    const sql = collectionSqlRelation(relation, parentId, {
       relationship: relationshipAlias,
       root: rootAliasName,
       target: targetAlias,

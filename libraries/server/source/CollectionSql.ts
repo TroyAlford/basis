@@ -1,4 +1,4 @@
-import type { DerivedCollectionDefinition } from './EntityDefinitions'
+import type { ResolvedCollectionRelation } from './CollectionRelation'
 
 /** Aliases used to compile one collection relation. */
 export interface CollectionSqlAliases {
@@ -25,25 +25,29 @@ export interface CollectionSqlRelation {
 }
 
 /**
- * Compile the one canonical SQL relation for a collection navigation.
+ * Compile the one canonical SQL relation for a resolved collection navigation.
  *
  * Query compilation and authorization use the same relation and correlation
  * semantics; only the parent identity expression and aliases differ.
- * @param collection - Derived collection navigation.
+ * @param resolved - Canonical collection relation.
  * @param parentId - SQL expression for the owning row's universal identity.
  * @param aliases - Aliases reserved by the caller.
  * @returns The relation and its correlated condition.
  */
 export function collectionSqlRelation(
-  collection: DerivedCollectionDefinition,
+  resolved: ResolvedCollectionRelation,
   parentId: string,
   aliases: CollectionSqlAliases,
 ): CollectionSqlRelation {
-  const targetName = collection.target
-  if (collection.kind === 'explicit') {
+  if (resolved.collection.kind === 'explicit') {
     throw new Error('Explicit Collections are not supported by the query compiler yet')
   }
-  if (collection.kind === 'inverse') {
+  if (resolved.target.kind !== 'entity') {
+    throw new Error('Record Collections are not supported by the query compiler yet')
+  }
+  const targetName = resolved.target.definition.name
+  const source = resolved.source
+  if (source.kind === 'inverse') {
     if (targetName === 'Entity') {
       return {
         condition: `${quote(aliases.root)}.${quote('id')} = ${parentId}`,
@@ -56,17 +60,19 @@ export function collectionSqlRelation(
     const targetId = `${quote(aliases.target)}.${quote('id')}`
     const rootId = `${quote(aliases.root)}.${quote('id')}`
     return {
-      condition: `${quote(aliases.target)}.${quote(collection.reference.column)} = ${parentId}`,
+      condition: `${quote(aliases.target)}.${quote(resolved.owner.column)} = ${parentId}`,
       relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
       rootAlias: aliases.root,
       targetAlias: aliases.target,
     }
   }
-  const relationship = collection.relationship
-  const local = relationship.between[collection.endpoint]
-  const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
+  const relationship = source.relationship
+  const remote = source.remote
+  if (!remote) {
+    throw new Error(`Collection relationship "${relationship.name}" has no related endpoint`)
+  }
   const remoteColumn = quote(`${remote.field}.id`)
-  const condition = `${quote(aliases.relationship)}.${quote(`${local.field}.id`)} = ${parentId}`
+  const condition = `${quote(aliases.relationship)}.${quote(resolved.owner.column)} = ${parentId}`
   const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
   const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
   const rootId = `${quote(aliases.root)}.${quote('id')}`

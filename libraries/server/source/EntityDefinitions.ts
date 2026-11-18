@@ -2037,6 +2037,7 @@ function deriveNavigations(
     const endpoints = relationship.between
     for (const index of [0, 1] as const) {
       const endpoint = endpoints[index]
+      if (endpoint?.inverse === undefined) continue
       const remote = endpoints[index === 0 ? 1 : 0]
       addDirect(endpoint.target, {
         endpoint: index,
