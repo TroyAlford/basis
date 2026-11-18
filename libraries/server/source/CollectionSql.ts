@@ -14,6 +14,10 @@ export interface CollectionSqlAliases {
 export interface CollectionSqlRelation {
   /** Correlated condition joining the related row to its parent identity. */
   readonly condition: string,
+  /** SQL expressions that identify one distinct result. */
+  readonly identity: readonly string[],
+  /** Whether identity is an Entity key or a composite record key. */
+  readonly identityKind: 'entity' | 'record',
   /** SQL relation containing the related rows and any required root/target joins. */
   readonly relation: string,
   /** Relationship-table alias, when relationship-backed. */
@@ -47,6 +51,10 @@ export function collectionSqlRelation(
     if (collection.targetEndpoint === undefined) {
       return {
         condition: `${quote(aliases.relationship)}.${quote(ownerColumn)} = ${parentId}`,
+        identity: relationship.between.map(endpoint => (
+          `${quote(aliases.relationship)}.${quote(`${endpoint.field}.id`)}`
+        )),
+        identityKind: 'record',
         relation: relationshipSource,
         relationshipAlias: aliases.relationship,
         rootAlias: aliases.relationship,
@@ -58,6 +66,8 @@ export function collectionSqlRelation(
       const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
       return {
         condition,
+        identity: [`${quote(aliases.root)}.${quote('id')}`],
+        identityKind: 'entity',
         relation:
           `${relationshipSource} JOIN ${rootSource} ON ` +
           `${quote(aliases.root)}.${quote('id')} = ` +
@@ -70,6 +80,8 @@ export function collectionSqlRelation(
     const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
     return {
       condition,
+      identity: [`${quote(aliases.target)}.${quote('id')}`],
+      identityKind: 'entity',
       relation:
         `${relationshipSource} JOIN ${targetSource} ON ` +
         `${quote(aliases.target)}.${quote('id')} = ` +
@@ -84,6 +96,8 @@ export function collectionSqlRelation(
     if (targetName === 'Entity') {
       return {
         condition: `${quote(aliases.root)}.${quote('id')} = ${parentId}`,
+        identity: [`${quote(aliases.root)}.${quote('id')}`],
+        identityKind: 'entity',
         relation: `${quote('Entity')} ${quote(aliases.root)}`,
         rootAlias: aliases.root,
       }
@@ -94,6 +108,8 @@ export function collectionSqlRelation(
     const rootId = `${quote(aliases.root)}.${quote('id')}`
     return {
       condition: `${quote(aliases.target)}.${quote(collection.reference.column)} = ${parentId}`,
+      identity: [`${quote(aliases.target)}.${quote('id')}`],
+      identityKind: 'entity',
       relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
       rootAlias: aliases.root,
       targetAlias: aliases.target,

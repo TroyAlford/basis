@@ -9,6 +9,7 @@ import { arrayItemField } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope } from './SQL'
 import { SQL } from './SQL'
+import { shiftPlaceholders } from './SqlBinding'
 
 /** Maximum number of singular reference hops in one requested path. */
 const MAX_REFERENCE_DEPTH = 8
@@ -285,6 +286,10 @@ interface CollectionRelationPlan {
   readonly collection: DerivedCollectionDefinition,
   /** Correlated condition against the owning occurrence. */
   readonly condition: string,
+  /** SQL expressions identifying one distinct result. */
+  readonly identity: readonly string[],
+  /** Whether identity is an Entity key or a composite record key. */
+  readonly identityKind: 'entity' | 'record',
   /** Alias of the owning occurrence. */
   readonly parentAlias: string,
   /** Expression yielding the owning identity for grouped counts. */
@@ -745,6 +750,10 @@ class QueryProjection {
       const plan: CollectionRelationPlan = {
         collection,
         condition: `${quote(alias)}.${quote(ownerColumn)} = "${parentAlias}".${quote('id')}`,
+        identity: relationship.between.map(endpoint => (
+          `${quote(alias)}.${quote(`${endpoint.field}.id`)}`
+        )),
+        identityKind: 'record',
         parentAlias,
         parentId: `${quote(alias)}.${quote(ownerColumn)}`,
         relation: `${quote(relationship.name)} ${quote(alias)}`,
@@ -791,6 +800,8 @@ class QueryProjection {
     const plan: CollectionRelationPlan = {
       collection,
       condition,
+      identity: sql.identity,
+      identityKind: sql.identityKind,
       parentAlias,
       parentId,
       relation,
@@ -841,6 +852,9 @@ class QueryProjection {
     const edgeFilter = collection.kind === 'explicit' && collection.targetEndpoint !== undefined
       ? this.#collectionEdgeFilter(plan, filter)
       : undefined
+    const edgeSql = edgeFilter === undefined
+      ? undefined
+      : shiftPlaceholders(edgeFilter.sql, condition.values.length)
     const rawWhereValues = [
       ...condition.values,
       ...(edgeFilter === undefined ? [] : edgeFilter.values),
@@ -854,7 +868,7 @@ class QueryProjection {
         ? `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
           `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`
         : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
-          `AND (${edgeFilter.sql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
+          `AND (${edgeSql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
           `${quote(childAlias)}.${quote('id')})`,
       ...(rawWhereValues.length === 0 ? {} : { rawWhereValues }),
       rootAlias: childAlias,
@@ -1038,16 +1052,14 @@ class QueryProjection {
       let sourceFilter = 'TRUE'
       if (plan.sourceFilter !== undefined) {
         const offset = this.cteValues.length
-        sourceFilter = plan.sourceFilter.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-          `$${offset + Number(value)}`
-        ))
+        sourceFilter = shiftPlaceholders(plan.sourceFilter.sql, offset)
         this.cteValues.push(...plan.sourceFilter.values)
       }
       this.ctes.push(
         `"${cteName}" AS (` +
         `SELECT ${plan.parentId} AS "parent_id", ${
-          plan.collection.kind === 'explicit' && plan.collection.targetEndpoint !== undefined
-            ? `count(DISTINCT ${quote(plan.targetAlias ?? plan.rootAlias)}.${quote('id')})`
+          plan.identityKind === 'entity'
+            ? `count(DISTINCT ${plan.identity[0]})`
             : 'count(*)'
         }::int AS "total" ` +
         `FROM ${plan.relation} WHERE ${sourceFilter} GROUP BY ${plan.parentId})`,
@@ -1059,9 +1071,12 @@ class QueryProjection {
       expression = `COALESCE("${joinAlias}"."total", 0)`
       return expression
     }
+    const condition = this.#collectionCondition(plan)
     const count: CountScope = {
-      empty: `NOT EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition})`,
-      exists: `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition})`,
+      empty: `NOT EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql})`,
+      emptyValues: condition.values,
+      exists: `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql})`,
+      existsValues: condition.values,
       get expression() { return ensureCte() },
     }
     this.#countCtes.set(key, count)
@@ -1805,6 +1820,9 @@ class QueryProjection {
       && directives.filter !== undefined
       ? this.#collectionEdgeFilter(plan, directives.filter)
       : undefined
+    const edgeSql = edgeFilter === undefined
+      ? undefined
+      : shiftPlaceholders(edgeFilter.sql, condition.values.length)
     const rawWhereValues = [
       ...condition.values,
       ...(edgeFilter === undefined ? [] : edgeFilter.values),
@@ -1825,7 +1843,7 @@ class QueryProjection {
         ? `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
           `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`
         : `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${condition.sql} ` +
-          `AND (${edgeFilter.sql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
+          `AND (${edgeSql}) AND ${quote(plan.rootAlias)}.${quote('id')} = ` +
           `${quote(childAlias)}.${quote('id')})`,
       ...(rawWhereValues.length === 0 ? {} : { rawWhereValues }),
       rootAlias: childAlias,
@@ -2362,12 +2380,7 @@ export function compilePolymorphicQuery(
     ))
   }
   const cteCount = projection.cteValues.length
-  const shift = (sql: string): string => {
-    if (cteCount === 0) return sql
-    return sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-      `$${cteCount + Number(value)}`
-    ))
-  }
+  const shift = (sql: string): string => shiftPlaceholders(sql, cteCount)
   const conditions = [
     ...(definition.abstract ? [leafFilter] : []),
     ...(predicate.sql === '' ? [] : [shift(predicate.sql.replace(/^WHERE /u, ''))]),

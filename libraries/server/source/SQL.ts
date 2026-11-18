@@ -5,6 +5,7 @@ import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, isFieldOperand, Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
+import { bindPlaceholders } from './SqlBinding'
 
 /** A validated ordering clause. */
 export interface SQLOrder {
@@ -80,8 +81,12 @@ export interface CollectionScope {
 export interface CountScope {
   /** Zero-count predicate. */
   readonly empty: string,
+  /** Values bound by `empty`. */
+  readonly emptyValues?: readonly unknown[],
   /** Non-zero existence predicate. */
   readonly exists: string,
+  /** Values bound by `exists`. */
+  readonly existsValues?: readonly unknown[],
   /** Numeric count expression. */
   readonly expression: string,
 }
@@ -365,13 +370,7 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
-      const condition = (collection.conditionValues ?? []).reduce<string>(
-        (sql, value, index) => sql.replaceAll(
-          `$${index + 1}`,
-          bind(value as BoundScalar),
-        ),
-        collection.condition,
-      )
+      const condition = bindPlaceholders(collection.condition, collection.conditionValues ?? [], bind)
       if (collectionFilter.operator === Operator.Comparison.Empty) {
         collection.consume?.(collection.work ?? 1)
         return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${condition})`
@@ -399,10 +398,10 @@ function whereClause(
         : (active.filterField ?? active.field)(comparisonFilter.field)
       const count = active.filterCount?.(comparisonFilter.field)
       if (count && comparisonFilter.operator === Operator.Comparison.Equal && comparisonFilter.value === 0) {
-        return count.empty
+        return bindPlaceholders(count.empty, count.emptyValues ?? [], bind)
       }
       if (count && comparisonFilter.operator === Operator.Comparison.GreaterThan && comparisonFilter.value === 0) {
-        return count.exists
+        return bindPlaceholders(count.exists, count.existsValues ?? [], bind)
       }
       if (
         active.filterKind?.(comparisonFilter.field) === 'identity'

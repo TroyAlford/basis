@@ -2657,10 +2657,17 @@ describe('Server database lifecycle', () => {
         (${printing1}, 'Printing 1', 'Printing'),
         (${printing2}, 'Printing 2', 'Printing')
     `
+    const emptyDeck = '00000000-0000-4000-8000-000000000906'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${emptyDeck}, 'Empty Via Deck', 'Deck')
+    `
     await database.sql`
       INSERT INTO "Deck" ("id")
       VALUES
-        (${deck})
+        (${deck}),
+        (${emptyDeck})
     `
     await database.sql`
       INSERT INTO "Card" ("id")
@@ -2679,7 +2686,8 @@ describe('Server database lifecycle', () => {
       VALUES
         (${deck}, ${cardX}, ${printing1}, 2),
         (${deck}, ${cardX}, ${printing2}, 5),
-        (${deck}, ${cardY}, ${printing1}, 1)
+        (${deck}, ${cardY}, ${printing1}, 1),
+        (${emptyDeck}, ${cardY}, ${printing1}, 2)
     `
     const [envelope] = await queryEntity<{
       cards: { $matched: number, $total: number, items: { id: string }[] },
@@ -2774,6 +2782,48 @@ describe('Server database lifecycle', () => {
     expect(await roots('filteredCards.$matched = 1')).toEqual([{ id: deck }])
     expect(await roots('cards[quantity > 3].$matched = 1')).toEqual([{ id: deck }])
     expect(await roots('cards[quantity > 3].$total = 2')).toEqual([{ id: deck }])
+    const emptyFiltered = await queryEntity<{
+      filteredCards: { $matched: number, $total: number, items: unknown[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'filteredCards[quantity > 6]'],
+      where: { id: deck },
+    })
+    expect(emptyFiltered[0]?.filteredCards).toEqual({ $matched: 0, $total: 1, items: [] })
+    const matchingFiltered = await queryEntity<{
+      filteredCards: { $matched: number, $total: number, items: { id: string }[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'filteredCards[quantity > 4]'],
+      where: { id: deck },
+    })
+    expect(matchingFiltered[0]?.filteredCards.$matched).toBe(1)
+    expect(matchingFiltered[0]?.filteredCards.items).toEqual([expect.objectContaining({ id: cardX })])
+    const belowFiltered = await queryEntity<{
+      filteredCards: { $matched: number, $total: number, items: unknown[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'filteredCards[quantity < 5]'],
+      where: { id: deck },
+    })
+    expect(belowFiltered[0]?.filteredCards).toEqual({ $matched: 0, $total: 1, items: [] })
+    expect(await roots('filteredCards[quantity > 6].$matched = 0')).toEqual([
+      { id: deck },
+      { id: emptyDeck },
+    ])
+    expect(await roots('filteredCards[quantity > 4].$matched = 1')).toEqual([{ id: deck }])
+    expect(await roots('filteredCards[quantity < 5].$matched = 0')).toEqual([
+      { id: deck },
+      { id: emptyDeck },
+    ])
+    const emptyVia = await queryEntity<{
+      filteredCards: { $matched: number, $total: number, items: unknown[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'filteredCards'],
+      where: { id: emptyDeck },
+    })
+    expect(emptyVia[0]?.filteredCards).toEqual({ $matched: 0, $total: 0, items: [] })
+    expect(await roots(`id = '${emptyDeck}' $and filteredCards.$total = 0`)).toEqual([{ id: emptyDeck }])
+    expect(await roots(`id = '${emptyDeck}' $and filteredCards $empty`)).toEqual([{ id: emptyDeck }])
+    expect(await roots(`id = '${emptyDeck}' $and filteredCards.$total > 0`)).toEqual([])
+    expect(await roots(`id = '${emptyDeck}' $and filteredCards $contains (name = 'Card Y')`)).toEqual([])
   })
 
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
