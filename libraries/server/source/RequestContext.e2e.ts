@@ -90,7 +90,7 @@ async function start(install: string, loads: { count: number }): Promise<Fixture
     loads.count += 1
     const articles = await server.db.query<{ title: string }>('Article', { fields: ['title'] })
       .catch(() => [])
-    return { articles }
+    return { context: { articles } }
   })
   server.main(application)
     .api([HttpVerb.Get], 'context', (_params, context) => Response.json(context.context))

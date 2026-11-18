@@ -59,6 +59,11 @@ export interface OAuthOptions {
   logger?: ILogger,
   /** Fallback destination when a request has no valid `returnTo`. Defaults to `/`. */
   returnTo?: string,
+  /**
+   * Explicit domains that may receive cross-host return targets, including their
+   * subdomains. Omit to allow only the request's own origin.
+   */
+  returnToDomains?: readonly string[],
   /** The identity cookie capability used to sign the session in and out. */
   session: Identity,
   /** State cookie lifetime in seconds. Defaults to 600. */
@@ -92,7 +97,9 @@ export class OAuth {
       crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2, '0'),
     ).join('')
-    const returnTo = request ? safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request) : null
+    const returnTo = request
+      ? safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request, this.#options.returnToDomains)
+      : null
     const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials(), request) })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, { maxAgeSeconds: this.#stateMaxAge() }))
     if (returnTo !== null) {
@@ -139,6 +146,7 @@ export class OAuth {
     const returnTo = safeReturnTo(
       decodeReturnTo(readCookie(request.headers.get('cookie'), RETURN_TO_COOKIE)),
       request,
+      this.#options.returnToDomains,
     ) ?? this.#options.returnTo ?? '/'
     const headers = new Headers({ Location: returnTo })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
@@ -153,9 +161,11 @@ export class OAuth {
    * @returns A redirect back to the application.
    */
   logout(request: Request): Response {
-    const returnTo = safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request) ??
-      this.#options.returnTo ??
-      '/'
+    const returnTo = safeReturnTo(
+      new URL(request.url).searchParams.get('returnTo'),
+      request,
+      this.#options.returnToDomains,
+    ) ?? this.#options.returnTo ?? '/'
     const headers = new Headers({ Location: returnTo })
     this.#options.session.set(request, headers, null)
     return new Response(null, { headers, status: 302 })
@@ -220,13 +230,18 @@ function decodeReturnTo(value: string | null): string | null {
 }
 
 /**
- * Accept a relative path on the current origin, or an absolute URL on the same
- * application (the current host, its parent domain, or a sibling subdomain).
+ * Accept a relative path on the current origin, or an absolute URL on the
+ * current origin or an explicitly trusted application domain.
  * @param value - Candidate return target.
  * @param request - The login, callback, or logout request.
+ * @param domains - Explicit trusted domains, including their subdomains.
  * @returns A safe path or absolute URL, or `null` when the candidate is unsafe.
  */
-function safeReturnTo(value: string | null, request: Request): string | null {
+function safeReturnTo(
+  value: string | null,
+  request: Request,
+  domains: readonly string[] = [],
+): string | null {
   if (value === null || value === '' || value.includes('\\')) return null
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index)
@@ -248,39 +263,23 @@ function safeReturnTo(value: string | null, request: Request): string | null {
       : null
   }
 
-  if (!isSameApplication(target, base)) return null
-  return target.href
+  if (target.origin === base.origin) return target.href
+  if (target.protocol !== base.protocol || target.port !== base.port) return null
+  return isTrustedReturnHost(target.hostname, domains) ? target.href : null
 }
 
 /**
- * Whether two URLs belong to the same application: the same origin, or the
- * same parent domain with the same protocol and port.
- * @param target - Candidate URL.
- * @param base - Request URL.
- * @returns True when the target is in the same application.
+ * Whether a target host is one of the explicitly trusted domains or its subdomains.
+ * @param hostname - Target hostname.
+ * @param domains - Explicit trusted domains.
+ * @returns True when the target host is trusted.
  */
-function isSameApplication(target: URL, base: URL): boolean {
-  if (target.origin === base.origin) return true
-  if (target.protocol !== base.protocol || target.port !== base.port) return false
-  return sharesApplicationHost(target.hostname, base.hostname)
-}
-
-/**
- * Whether a hostname is the base host, its parent domain, or one of its
- * siblings. Localhost is treated as its own shared namespace.
- * @param candidate - Target hostname.
- * @param base - Request hostname.
- * @returns True when both hosts belong to one application.
- */
-function sharesApplicationHost(candidate: string, base: string): boolean {
-  if (candidate === base) return true
-  if (candidate.endsWith('.localhost') && base.endsWith('.localhost')) return true
-
-  const labels = base.split('.')
-  if (labels.length <= 2) return false
-  const parent = labels.slice(1).join('.')
-  if (!parent.includes('.')) return false
-  return candidate === parent || candidate.endsWith(`.${parent}`)
+function isTrustedReturnHost(hostname: string, domains: readonly string[]): boolean {
+  const candidate = hostname.toLowerCase()
+  return domains.some(domain => {
+    const trusted = domain.trim().toLowerCase().replace(/^\./, '')
+    return trusted.length > 0 && (candidate === trusted || candidate.endsWith(`.${trusted}`))
+  })
 }
 
 /**

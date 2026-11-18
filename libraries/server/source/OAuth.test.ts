@@ -60,6 +60,7 @@ function flow(overrides: Partial<OAuthOptions> = {}): OAuth {
     authorize: (state, credentials) => `https://provider.test/authorize?state=${state}&client_id=${credentials.public}`,
     exchange: async () => 'access-token',
     identity: async () => 'user-42',
+    returnToDomains: ['example.com'],
     session: new Identity(CREDENTIALS),
     ...overrides,
   })
@@ -151,7 +152,65 @@ describe('OAuth login', () => {
   })
 
   test('does not store an external or protocol-relative return target', () => {
-    for (const target of ['https://evil.test/steal', '//evil.test/steal', '/\\evil.test/steal']) {
+    for (const target of [
+      'https://evil.test/steal',
+      '//campaign.example.com/steal',
+      '/\\evil.test/steal',
+    ]) {
+      const capture = captureSetCookie()
+      try {
+        flow().login(requestFor(`${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(target)}`))
+        expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+      } finally {
+        capture.restore()
+      }
+    }
+  })
+
+  test('requires an explicit trusted boundary for multi-label public suffixes', () => {
+    const requestUrl = 'https://www.example.co.uk/api/oauth/login'
+    const candidate = 'https://campaign.example.co.uk/dashboard'
+    const untrusted = captureSetCookie()
+    try {
+      flow({ returnToDomains: [] }).login(
+        requestFor(`${requestUrl}?returnTo=${encodeURIComponent(candidate)}`),
+      )
+      expect(untrusted.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+    } finally {
+      untrusted.restore()
+    }
+
+    const trusted = captureSetCookie()
+    try {
+      flow({ returnToDomains: ['example.co.uk'] }).login(
+        requestFor(`${requestUrl}?returnTo=${encodeURIComponent(candidate)}`),
+      )
+      const returnCookie = trusted.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+      expect(decodeURIComponent(cookieValue(returnCookie))).toBe(candidate)
+    } finally {
+      trusted.restore()
+    }
+  })
+
+  test('does not infer shared-hosting suffixes without an explicit boundary', () => {
+    const capture = captureSetCookie()
+    try {
+      flow({ returnToDomains: [] }).login(requestFor(
+        `https://app.github.io/api/oauth/login?returnTo=${
+          encodeURIComponent('https://attacker.github.io/steal')
+        }`,
+      ))
+      expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('rejects matching hosts with a different protocol or port', () => {
+    for (const target of [
+      'http://campaign.example.com/done',
+      'https://campaign.example.com:8443/done',
+    ]) {
       const capture = captureSetCookie()
       try {
         flow().login(requestFor(`${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(target)}`))

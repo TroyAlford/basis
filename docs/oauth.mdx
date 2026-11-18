@@ -21,7 +21,7 @@ const identity = new Identity({
 
 ## Server integration
 
-`server.oauth` mounts `/api/oauth/login`, `/api/oauth/callback`, and `/api/oauth/logout`, owns the CSRF state cookie and redirects, and verifies the session capability. The login and callback requests are passed to `authorize` and `exchange`, so the redirect URI follows the host the flow started on. A `returnTo` query parameter on login or logout may be a relative path or an absolute URL on the same application (the current host, its parent domain, or a sibling subdomain); the flow stores it for the callback and rejects external targets.
+`server.oauth` mounts `/api/oauth/login`, `/api/oauth/callback`, and `/api/oauth/logout`, owns the CSRF state cookie and redirects, and verifies the session capability. The login and callback requests are passed to `authorize` and `exchange`, so the redirect URI follows the host the flow started on. A `returnTo` query parameter on login or logout may be a relative path or an absolute URL on the request origin or an explicitly trusted `returnToDomains` boundary; the flow stores it for the callback and rejects external targets, alternate protocols, alternate ports, and unconfigured hosts.
 
 ```ts
 const callbackFor = (request: Request): string =>
@@ -65,9 +65,10 @@ server.oauth({
   authorize: github.authorize,
   exchange: github.exchange,
   identity: token => github.userId(token),
+  returnToDomains: ['example.com'],
 })
 ```
 
 `identity` may return a bare provider subject or an `OAuthIdentity` object with `subject`, `displayName`, and `email`. The profile is passed to canonical identity enrollment; omitted values remain absent, so required application fields fail closed instead of receiving synthesized values.
 
-`OAuthOptions` also supports `logger`, `returnTo`, and `stateMaxAgeSeconds`. `returnTo` is the fallback destination when the request has no valid `returnTo` query value. Provider-specific endpoints, scopes, and error handling stay in the callback helpers; the flow itself remains provider-agnostic. Configuring OAuth or `server.identity(identity)` embeds the verified user id in the SPA runtime context.
+`OAuthOptions` also supports `logger`, `returnTo`, `returnToDomains`, and `stateMaxAgeSeconds`. `returnTo` is the fallback destination when the request has no valid `returnTo` query value. `returnToDomains` is the explicit boundary for cross-vhost returns; Basis never infers it from hostname labels, so public suffixes and shared-hosting domains are not accidentally trusted. Provider-specific endpoints, scopes, and error handling stay in the callback helpers; the flow itself remains provider-agnostic. Configuring OAuth or `server.identity(identity)` embeds the verified user id in the SPA runtime context.

@@ -29,6 +29,19 @@ export interface CookieChange {
 }
 
 /**
+ * Decode a cookie value, preserving malformed percent-encoded input as-is.
+ * @param value - Raw cookie value.
+ * @returns The decoded value, or the original value when malformed.
+ */
+const decodeCookieValue = (value: string): string => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+/**
  * A request's typed cookie values plus response mutation helpers.
  *
  * Reading is request-scoped. `set` and `delete` return mutations instead of
@@ -51,7 +64,7 @@ export class Cookies<Schema extends Record<string, string> = Record<string, stri
       if (separator === -1) continue
       const name = part.slice(0, separator).trim()
       if (!name) continue
-      this.#values[name] = part.slice(separator + 1).trim()
+      this.#values[name] = decodeCookieValue(part.slice(separator + 1).trim())
     }
   }
 

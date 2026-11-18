@@ -11,7 +11,7 @@ import { Server } from 'basis/server'
 
 const server = new Server()
   .root(import.meta.dir)
-  .context(async request => loadApplicationContext(request))
+  .context(async request => ({ context: await loadApplicationContext(request) }))
   .main('./Application.tsx')
   .start({
     hostname: Bun.env.HOST ?? '127.0.0.1',
@@ -54,14 +54,14 @@ type AppContext = {
 }
 
 new Server<AppContext>()
-  .context(async request => loadApplicationContext(request))
+  .context(async request => ({ context: await loadApplicationContext(request) }))
   .main('./Application.tsx')
   .api([HttpVerb.Get], 'campaign', (_params, { context }) => {
     return Response.json(context.campaign)
   })
 ```
 
-The loader receives the request, verified identity, database, logger, and parsed request cookies. It may return the application context directly, or `{ context, headers, cookies }` to contribute response metadata. `headers` is for non-cookie headers; cookies use the typed `Cookies` surface and are serialized into `Set-Cookie` for SSR, API, and SSE responses.
+The loader receives the request, verified identity, database, logger, and parsed request cookies. It returns the application context in a required `{ context, headers?, cookies? }` wrapper. `headers` is for non-cookie headers; cookies use the typed `Cookies` surface and are serialized into `Set-Cookie` for SSR, API, and SSE responses.
 
 Basis resolves the verified identity first, then runs the loader and the SSR render inside the same actor scope used by API handlers, so RLS applies consistently. Keep server-only capabilities such as `db`, `identity`, and the logger on the standard `RouteContext`; the application context is the shape embedded into the SSR bootstrap and hydrated in the browser.
 

@@ -67,7 +67,7 @@ type ContextLoader<
   CookieSchema extends Record<string, string>,
 > = (
   input: ContextInput<CookieSchema>,
-) => AppContext | ContextResult<AppContext> | Promise<AppContext | ContextResult<AppContext>>
+) => ContextResult<AppContext> | Promise<ContextResult<AppContext>>
 
 interface ResolvedContext<AppContext extends object> {
   readonly context: AppContext,
@@ -158,8 +158,8 @@ export class Server<
   #version = 'development'
 
   constructor() {
-    this.api([HttpVerb.Get], 'health', () => this.#health())
-    this.api([HttpVerb.Get], 'ping', ping)
+    this.#api([HttpVerb.Get], 'health', () => this.#health(), false)
+    this.#api([HttpVerb.Get], 'ping', ping, false)
   }
 
   /**
@@ -266,21 +266,21 @@ export class Server<
         return { context: {} as AppContext, cookies: [], headers: new Headers() }
       }
 
-      const value = await loader({
+      const value: unknown = await loader({
         cookies: new Cookies<CookieSchema>(request.headers.get('cookie')),
         db: this.#database,
         identity,
         logger: this.#logger,
         request,
       })
-      if (isContextResult<AppContext>(value)) {
-        const cookies = value.cookies === undefined
-          ? []
-          : Array.isArray(value.cookies) ? value.cookies : [value.cookies]
-        return { context: value.context, cookies, headers: new Headers(value.headers) }
+      if (!isContextResult<AppContext>(value)) {
+        throw new Error('Basis: a context loader must return { context }')
       }
 
-      return { context: value, cookies: [], headers: new Headers() }
+      const cookies = value.cookies === undefined
+        ? []
+        : Array.isArray(value.cookies) ? value.cookies : [value.cookies]
+      return { context: value.context, cookies, headers: new Headers(value.headers) }
     })()
     this.#contextCache.set(request, resolved)
     return resolved
@@ -319,6 +319,19 @@ export class Server<
    * @returns The API response, or `null` when no template matches.
    */
   async handleAPI(uri: URI, request: Request): Promise<Response | null> {
+    const match = this.#matchAPI(uri, request.method)
+    if (!match) return null
+
+    if (!match.route.requiresContext) {
+      return match.route.handler(match.params, {
+        context: {} as AppContext,
+        db: this.#database,
+        identity: null,
+        logger: this.#logger,
+        request,
+      })
+    }
+
     const verified = this.#identity?.get(request) ?? null
     const identity = this.#authorization
       ? await this.#authorization.resolve(verified)
@@ -332,21 +345,10 @@ export class Server<
         logger: this.#logger,
         request,
       }
-
-      for (const target of this.#targets(uri)) {
-        if (!target) continue
-
-        for (const [template, { handler, verbs }] of this.#apis.entries()) {
-          if (!verbs.has(request.method as HttpVerb)) continue
-
-          const params = parseTemplateURI(target, template)
-          if (!params) continue
-
-          return this.#withContextResponse(await handler(params, context), resolved)
-        }
-      }
-
-      return null
+      return this.#withContextResponse(
+        await match.route.handler(match.params, context),
+        resolved,
+      )
     })
   }
 
@@ -975,7 +977,24 @@ export class Server<
     template: string,
     handler: (params: Params, context: RouteContext<AppContext>) => Response | Promise<Response>,
   ): this {
-    this.#apis.set(template, { handler, verbs: new Set(verbs) })
+    return this.#api(verbs, template, handler)
+  }
+
+  /**
+   * Registers an API route with explicit context requirements.
+   * @param verbs - The HTTP methods to handle.
+   * @param template - The template URI to handle.
+   * @param handler - The handler for the API route.
+   * @param requiresContext - Whether the route needs the application context.
+   * @returns The server.
+   */
+  #api<Params extends object = object>(
+    verbs: HttpVerb[],
+    template: string,
+    handler: (params: Params, context: RouteContext<AppContext>) => Response | Promise<Response>,
+    requiresContext = true,
+  ): this {
+    this.#apis.set(template, { handler, requiresContext, verbs: new Set(verbs) })
     return this
   }
 
@@ -1277,6 +1296,31 @@ export class Server<
   }
 
   /**
+   * Find the API route matching a request without loading application context.
+   * @param uri - The parsed URI.
+   * @param method - The request method.
+   * @returns The matched route and params, or `null`.
+   */
+  #matchAPI(uri: URI, method: string): {
+    readonly params: Record<string, string>,
+    readonly route: APIRoute<object, AppContext>,
+  } | null {
+    for (const target of this.#targets(uri)) {
+      if (!target) continue
+
+      for (const [template, route] of this.#apis.entries()) {
+        if (!route.verbs.has(method as HttpVerb)) continue
+
+        const params = parseTemplateURI(target, template)
+        if (!params) continue
+
+        return { params, route }
+      }
+    }
+    return null
+  }
+
+  /**
    * The route targets an API URI can match.
    *
    * APIs live exclusively under `/api`; the root is the SPA surface, so an API
@@ -1322,17 +1366,14 @@ function serializeBootstrap(value: unknown): string {
 }
 
 /**
- * Distinguish an application context value from a context result wrapper.
+ * Validate the required context result wrapper.
  * @param value - Loader return value.
- * @returns Whether the value carries response metadata.
+ * @returns Whether the value is a context result.
  */
 function isContextResult<AppContext extends object>(
-  value: AppContext | ContextResult<AppContext>,
+  value: unknown,
 ): value is ContextResult<AppContext> {
-  return typeof value === 'object'
-    && value !== null
-    && 'context' in value
-    && ('headers' in value || 'cookies' in value)
+  return typeof value === 'object' && value !== null && 'context' in value
 }
 
 /**

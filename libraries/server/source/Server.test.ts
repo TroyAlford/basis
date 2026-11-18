@@ -145,7 +145,7 @@ describe('Server', () => {
     const server = new Server()
       .root(fixtureRoot)
       .main('./ContextApplication.tsx')
-      .context(async () => ({ greeting: 'hello from context' }))
+      .context(async () => ({ context: { greeting: 'hello from context' } }))
       .api([HttpVerb.Get], 'context', (_params, context) => new Response(context.context.greeting))
       .start({ hostname: '127.0.0.1', port: 0 })
 
@@ -162,6 +162,60 @@ describe('Server', () => {
     } finally {
       server.stop()
     }
+  })
+
+  test('keeps health independent of a failing application context loader', async () => {
+    let loads = 0
+    const server = new Server().context(async () => {
+      loads += 1
+      throw new Error('application dependency unavailable')
+    })
+
+    const response = await server.handle(new Request('http://localhost/api/health'))
+
+    expect(response?.status).toBe(503)
+    expect(await response?.json()).toMatchObject({ status: 'starting' })
+    expect(loads).toBe(0)
+  })
+
+  test('does not load context for unmatched API routes', async () => {
+    let loads = 0
+    const server = new Server().context(async () => {
+      loads += 1
+      return { context: {} }
+    })
+
+    const response = await server.handle(new Request('http://localhost/api/missing'))
+
+    expect(response?.status).toBe(400)
+    expect(loads).toBe(0)
+  })
+
+  test('rejects an application context returned without the result wrapper', async () => {
+    const server = new Server()
+      .context((() => ({ greeting: 'hello' })) as never)
+      .api([HttpVerb.Get], 'context', (_params, context) => Response.json(context.context))
+
+    await expect(server.handle(new Request('http://localhost/api/context')))
+      .rejects.toThrow('Basis: a context loader must return { context }')
+  })
+
+  test('applies context headers and cookies to SSE responses', async () => {
+    const server = new Server()
+      .context(async ({ cookies }) => ({
+        context: {},
+        cookies: cookies.set('stream', 'context-value', { path: '/' }),
+        headers: { 'X-Context-Stream': 'applied' },
+      }))
+      .sse('events', (_params, _context, channel) => {
+        channel.send('ready', {})
+      })
+
+    const response = await server.handle(new Request('http://localhost/events'))
+
+    expect(response?.headers.get('x-context-stream')).toBe('applied')
+    expect(response?.headers.get('set-cookie')).toContain('stream=context-value')
+    await response?.body?.cancel()
   })
 
   test('applies context headers and cookies to SSR and API responses', async () => {
