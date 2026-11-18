@@ -503,9 +503,55 @@ The gate covers:
 
 `QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization and RLS are deliberately outside this gate; collection `$total` and relational-planning validation are covered by stage 20a, and security deployment by 20b–20e.
 
-## Stage 20a — collection totals, matched counts, and relational planning (implemented)
+## Entity-owned collections (implemented)
 
-Inverse, named-relationship, and native-array collections expose a read-only `$total` intrinsic:
+An Entity-owned Collection is a virtual navigation authored with `type: 'Collection'`, a `target`, and an owner-relative `via`. It is the single authority for membership, result identity, authored restrictions, and query defaults. Inverse and relationship-derived navigations remain separate authoring surfaces; an explicit `via` does not create a second parser or relation builder.
+
+### Record versus Entity identity
+
+- When `target` names a relationship, the Collection is a **record collection**. Each item is one relationship row, identified by its complete endpoint tuple. `items` contains the endpoint fields and relationship properties; no surrogate record id is invented. `$total` and `$matched` count complete records, and ordering/paging use the composite endpoint tuple as the identity tie-break.
+- When `target` names an entity, the Collection is an **Entity collection**. Each item is a distinct target Entity, identified by Entity `id`. Multiple association edges to the same Entity collapse to one item after predicates; `$total` and `$matched` count distinct Entity identities, and ordering/paging use the Entity identity tie-break.
+
+### Authored versus query-time filters
+
+- The filter authored inside `via` is part of the ontology. It always applies to source edges before result identity is selected, and `@` names the owning entity.
+- A query-time collection filter such as `cards[deckCardPrinting.quantity > 4]` is ANDed with the authored filter.
+- Target and relationship-owned predicates in one requirement must match the same source edge. Bracketed `$contains [P, Q]` remains independent, while `$contains (P $and Q)` requires one edge to satisfy both.
+- Relationship properties use the lowercase relationship prefix on Entity collections (`deckCardPrinting.quantity`). Entity collections reject relationship-property projection because one Entity may have multiple qualifying edges; project the record collection to read per-edge quantities. Record collections expose endpoint and property names directly.
+
+### Projection, totals, and pagination
+
+- A collection envelope is `{ items, $matched, $total }`. `$total` is the authorized population after authored restrictions and before query filters; `$matched` is the authorized population after query filters and before paging. Without a query filter they are equal.
+- `viaLimit`, `viaOffset`, and `viaOrderBy` are authored defaults. A query-time `$limit`, `$offset`, or `$orderBy` overrides the matching default; effective options are resolved once. `$total` and `$matched` are pre-pagination and never change because of a page size or offset.
+- `$total` is also a read-only intrinsic in predicates, projections, and supported ordering paths. `$matched` is available on filter-qualified predicates such as `cards[deckCardPrinting.quantity > 4].$matched`. `$empty` and `$contains` test membership against the same relation and identity.
+
+### Retrieving quantities and totals
+
+Project the record collection and its relationship property to read per-edge quantities:
+
+```ts
+server.db.query('Deck', {
+  fields: ['id', 'entries', 'entries.quantity'],
+  where: { id: deckId },
+})
+```
+
+`entries` returns one item per relationship row with its `quantity`. Project the Entity collection to return distinct cards:
+
+```ts
+server.db.query('Deck', {
+  fields: ['id', 'cards.title', 'cards.$total'],
+  where: { id: deckId },
+})
+```
+
+Use an edge predicate to select qualifying cards (`cards[deckCardPrinting.quantity > 4]`), and `cards.$total` for the distinct Entity population before the query filter. Do not attach `quantity` to an Entity projection: multiple Printings make that value ambiguous, and the record collection is the authoritative per-edge view.
+
+### Authorization
+
+Collection membership policies use the same resolved relation, owner correlation, authored filter, result identity, and same-edge rules as queries. Entity membership compares the target Entity identity; record membership compares composite endpoint columns. `$me` is the actor shorthand. Generated policy SQL inlines only schema-time authored literals with proper PostgreSQL escaping; runtime query values remain bound. Explicit record collections do not introduce a surrogate record id.
+
+Inverse, named-relationship, explicit Collection, and native-array collections expose a read-only `$total` intrinsic:
 
 ```ts
 const countPredicates = [
@@ -515,32 +561,21 @@ const countPredicates = [
 ```
 
 - `$total` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references. A projected collection envelope exposes both `$total` (the authorized population before its filter) and `$matched` (the authorized count after the filter and before paging). `$matched` is also valid in predicates on a filter-qualified collection path (`members[role = 'GM'].$matched >= 2`); there, `$total` continues to count the whole authorized population and ignores the member filter. Pagination directives are not valid on count predicates.
-- Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
-- Relationship `collection.$total = 0` canonicalizes to `NOT EXISTS` and `collection.$total > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
-- Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.
-- The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants at 24-parent/70-child and 120-parent/540-child cardinalities, including selective, nonselective, indexed, and unindexed count conditions. All variants return the same rows; the evidence selects default CTE rendering for count aggregates while correlated rendering remains in use for collection predicates/previews. No blanket `MATERIALIZED` rule is applied.
-- The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.
+- Record collections count complete relationship rows; Entity collections count distinct result identities. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
+- Relationship `collection.$total = 0` canonicalizes to `NOT EXISTS` and `collection.$total > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared identity-count query. The Entity and record adapters each return one row per resolved identity, so the engine skips redundant `DISTINCT ON` work while preserving identity semantics.
+- Collection relation planning is shared by predicate scopes, projections, counts, count ordering, and authorization. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.
+- The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary. Collection membership policies consume the same scopes and resolved relation.
 
-Representative evidence from the analyzed 24-parent / 70-child fixture (local PostgreSQL; timings are illustrative, not CI thresholds):
+Representative local PostgreSQL evidence from a 120-deck / 20-card / 2-printing fixture (timings are illustrative, not CI thresholds):
 
-| Variant                  | Buffers | Execution ms | Planning ms | SQL bytes | Rows |
-| ------------------------ | ------: | -----------: | ----------: | --------: | ---: |
-| production @2            |       3 |        0.216 |       0.155 |       356 |   19 |
-| correlated @2            |      25 |        0.255 |       0.057 |       168 |   19 |
-| CTE default @2           |       2 |        0.193 |       0.079 |       315 |   19 |
-| CTE materialized @2      |       2 |        0.193 |       0.078 |       327 |   19 |
-| CTE not materialized @2  |       2 |        0.161 |       0.078 |       331 |   19 |
-| selective production @2  |       3 |        0.218 |       0.153 |       393 |    1 |
-| selective correlated @2  |       3 |        0.069 |       0.078 |       220 |    1 |
-| selective CTE default @2 |       2 |        0.061 |       0.095 |       367 |    1 |
-| unindexed production @2  |       3 |        0.216 |       0.188 |       393 |    1 |
-| unindexed correlated @2  |       3 |        0.094 |       0.055 |       220 |    1 |
-| unindexed CTE default @2 |       2 |        0.106 |       0.076 |       367 |    1 |
-| scale production @4      |      17 |        0.871 |       0.193 |       356 |   25 |
-| scale correlated @4      |     127 |        0.304 |       0.066 |       168 |   25 |
-| scale CTE default @4     |      10 |        0.426 |       0.083 |       315 |   25 |
+| Query                         | Execution ms | Shared buffers |
+| ----------------------------- | -----------: | -------------: |
+| Single-deck record projection |         0.29 |             58 |
+| 25-deck record projection     |         1.77 |           1167 |
+| 25-deck Entity projection     |        11.61 |         55,097 |
+| 25-deck record/Entity counts  |         5.50 |         20,687 |
 
-The default grouped CTE is selected for numeric count thresholds because it held buffer use to 2 blocks versus 25 for correlated in the indexed small-scale run and 10 versus 127 in the larger-scale run, avoiding per-parent index probes. It is not a blanket latency win: correlated execution was lower for the selective and unindexed conditions and for the larger scale, while the CTE was lower in the nonselective @2 run. Materialized CTE was not consistently better. Collection predicates and previews remain correlated, and canonical relationship-collection zero/nonzero counts remain `NOT EXISTS`/`EXISTS`. The benchmark emits its 23-measurement small-scale matrix and 3-measurement larger-scale matrix through `QueryPlanning.e2e.ts` for re-checking.
+Removing the redundant `DISTINCT ON` cut the 25-deck record projection from 4.19 ms / 1,469 buffers and the counts from 6.76 ms / 27,151 buffers in the same fixture. The Entity projection remains dominated by per-parent target joins and index-only scans, not by duplicate identity work; no additional aggregate path is introduced.
 
 ## Ordering, pagination, and exclusions
 

@@ -238,6 +238,7 @@ describe('EntityDefinitions', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
       'Array',
       'Boolean',
+      'Collection',
       'Date',
       'Entity',
       'Enum',
@@ -361,6 +362,150 @@ describe('EntityDefinitions', () => {
       },
     ]
     for (const value of cases) expect(() => load(value)).toThrow()
+  })
+
+  test('resolves Entity-owned Collection fields through via paths', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'entries', target: 'DeckCardPrinting', type: 'Collection', via: 'DeckCardPrinting[deck = @]' },
+            { field: 'cards', target: 'Card', type: 'Collection', via: 'entries.card' },
+            { field: 'printings', target: 'Printing', type: 'Collection', via: 'entries.printing' },
+            {
+              field: 'largeCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 3].card',
+            },
+            {
+              field: 'orderedEntries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$orderBy:-quantity}',
+            },
+          ],
+          name: 'Deck',
+        },
+        {
+          fields: [{
+            field: 'decks',
+            target: 'Deck',
+            type: 'Collection',
+            via: 'DeckCardPrinting[card = @].deck',
+          }],
+          name: 'Card',
+        },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(entities.entity('Deck')?.collections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'explicit', name: 'entries', target: 'DeckCardPrinting' }),
+      expect.objectContaining({ kind: 'explicit', name: 'cards', target: 'Card' }),
+      expect.objectContaining({ kind: 'explicit', name: 'printings', target: 'Printing' }),
+      expect.objectContaining({ kind: 'explicit', name: 'largeCards', target: 'Card' }),
+      expect.objectContaining({ kind: 'explicit', name: 'orderedEntries', viaOrderBy: '-quantity' }),
+    ]))
+    expect(entities.entity('Card')?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'decks', target: 'Deck' }),
+    )
+    expect(entities.entity('Deck')?.effectiveFields.some(field => field.name === 'entries')).toBe(false)
+    expect(entities.ddl.join('\n')).not.toContain('"entries"')
+    expect(() => load({
+      entities: [
+        {
+          fields: [{
+            field: 'entries',
+            target: 'DeckCardPrinting',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @]',
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).not.toThrow()
+    expect(() => load({
+      entities: [
+        {
+          fields: [{
+            field: 'cards',
+            target: 'Printing',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @].card',
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [{ field: 'deck', target: 'Deck' }, { field: 'card', target: 'Card' }],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('target')
+  })
+
+  test('preserves an explicit unlimited override on an inherited collection via path', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @]{$limit:5}',
+            },
+            {
+              field: 'cards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'entries{$limit:null}.card',
+            },
+          ],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    const deck = entities.entity('Deck')
+    expect(deck?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'entries', viaLimit: 5 }),
+    )
+    expect(deck?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'cards', viaLimit: null }),
+    )
   })
 
   test('rejects invalid relationship endpoints, names, fields and alias collisions', () => {

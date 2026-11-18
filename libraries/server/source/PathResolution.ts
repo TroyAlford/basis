@@ -164,12 +164,17 @@ export function resolveCollectionMember(
   options: PathResolutionOptions,
 ): CollectionMemberResolution | PathFailure {
   const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-  if (collection.kind === 'relationship') {
-    const prefix = `${lowerFirst(collection.relationship.name)}.`
+  const relationship = 'relationship' in collection ? collection.relationship : undefined
+  if (relationship !== undefined) {
+    const prefix = `${lowerFirst(relationship.name)}.`
     if (normalized.startsWith(prefix)) {
-      const property = normalized.slice(prefix.length)
-      const field = collection.relationship.fields.find(candidate => candidate.name === property)
-      if (!field) return { entity: collection.relationship.name, kind: 'unknown', path: normalized }
+      const name = normalized.slice(prefix.length)
+      const endpoint = relationship.between.find(candidate => candidate.field === name)
+      if (endpoint !== undefined) {
+        return { field: { name: normalized, type: FieldType.ID }, relationshipProperty: true }
+      }
+      const field = relationship.fields.find(candidate => candidate.name === name)
+      if (!field) return { entity: relationship.name, kind: 'unknown', path: normalized }
       return { field: { ...field, name: normalized }, relationshipProperty: true }
     }
   }

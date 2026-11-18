@@ -117,7 +117,11 @@ function entitySchema(
   const required = ['entity']
   if (entity.idFormat !== undefined) properties.id = identitySchema(entity.idFormat)
   for (const field of entity.fields) {
-    if (field.type === FieldType.Inverse || field.name === 'id') continue
+    if (
+      field.type === FieldType.Collection
+      || field.type === FieldType.Inverse
+      || field.name === 'id'
+    ) continue
     properties[field.name] = fieldSchema(field, definitions)
     required.push(field.name)
   }
@@ -139,6 +143,7 @@ function fieldSchema(
   field: FieldDefinition,
   definitions: Graph['definitions'],
 ): Record<string, unknown> {
+  if (field.type === FieldType.Collection) return {}
   if (field.type === FieldType.Inverse) return {}
   if (field.type === FieldType.Entity) {
     const reference = referenceForTarget(field.target, definitions)

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { Constraint } from './EntityDefinitions'
 import { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID, Security } from './Graph'
 import { Operator } from './Operator'
 
@@ -303,6 +304,133 @@ describe('Graph', () => {
       .find(fn => fn.name.startsWith('policy_'))
     expect(helper?.sql).toContain('FROM "Article"')
     expect(helper?.sql).toContain('"owner.id"')
+    expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
+  })
+
+  test('supports Entity-projected explicit collection membership policies', () => {
+    const explicitGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'cards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @].card',
+            },
+            {
+              field: 'largeCards',
+              target: 'Card',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 3].card',
+            },
+          ],
+          name: 'Deck',
+          security: { [Action.Read]: { where: 'largeCards $contains (id = $me)' } },
+        },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Card',
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    const helper = explicitGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_'))
+    expect(helper?.sql).toContain('FROM "DeckCardPrinting"')
+    expect(helper?.sql).toContain('"card.id"')
+    expect(helper?.sql).toContain('"quantity" > 3')
+    expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
+  })
+
+  test('supports record-projected explicit collection membership policies', () => {
+    const recordGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'entries',
+              target: 'DeckCardPrinting',
+              type: 'Collection',
+              via: 'DeckCardPrinting[deck = @ $and quantity > 0]',
+            },
+          ],
+          name: 'Deck',
+          security: {
+            [Action.Read]: { where: 'entries $contains (card = $me $and quantity > 1)' },
+          },
+        },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Card',
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    const helper = recordGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_'))
+    expect(helper?.sql).toContain('FROM "DeckCardPrinting"')
+    expect(helper?.sql).toContain('"card.id"')
+    expect(helper?.sql).toContain('"quantity" > 0')
+    expect(helper?.sql).toContain('"quantity" > 1')
+    expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
+  })
+
+  test('supports Entity-projected relationship-owned policy predicates', () => {
+    const accessGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'members',
+              target: 'User',
+              type: 'Collection',
+              via: 'WorkspaceAccess[workspace = @].user',
+            },
+          ],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: {
+              where: 'members $contains (id = $me $and workspaceAccess.quantity > 4)',
+            },
+          },
+        },
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Scope' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', target: 'Workspace' },
+          { field: 'user', target: 'User' },
+          { field: 'scope', target: 'Scope' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'WorkspaceAccess',
+      }],
+    })
+    const helper = accessGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_'))
+    expect(helper?.sql).toContain('FROM "WorkspaceAccess"')
+    expect(helper?.sql).toContain('"quantity" > 4')
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
   })
 
@@ -804,6 +932,85 @@ describe('Graph', () => {
     expect(() => make({ invalid: Security.Public })).toThrow('unknown action "invalid"')
     expect(() => make({ read: {} })).toThrow('must declare grant, role, or a non-empty where')
     expect(() => make({ read: { where: null } })).toThrow('must declare grant, role, or a non-empty where')
+  })
+
+  test('compiles relationship policy helpers against composite endpoint columns', () => {
+    const relationshipGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              field: 'members',
+              target: 'User',
+              type: 'Collection',
+              via: 'Membership[workspace = @].user',
+            },
+          ],
+          name: 'Workspace',
+        },
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Item' },
+      ],
+      relationships: [
+        {
+          between: [
+            { field: 'workspace', target: 'Workspace' },
+            { field: 'user', target: 'User' },
+          ],
+          fields: [{ field: 'role', type: 'String' }],
+          name: 'Membership',
+        },
+        {
+          between: [
+            { field: 'workspace', target: 'Workspace' },
+            { field: 'item', target: 'Item' },
+          ],
+          fields: [],
+          name: 'ItemAccess',
+        },
+      ],
+      security: {
+        ItemAccess: {
+          [Action.Read]: { where: 'workspace.members $contains (id = $me)' },
+        },
+      },
+    })
+    const helper = relationshipGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('policy_') && fn.sql.includes('ItemAccess'))
+    expect(helper?.signature).toBe('workspaceId text, itemId text')
+    expect(helper?.sql).toContain('"__row"."workspace.id" = workspaceId')
+    expect(helper?.sql).toContain('"__row"."item.id" = itemId')
+    expect(helper?.sql).not.toMatch(/"__row"\."id"/u)
+  })
+
+  test('uses a body-safe dollar delimiter for generated helpers', () => {
+    const payload = 'Safe $$ \' OR TRUE; DROP TABLE "Workspace"; --'
+    const quoted = payload.replaceAll("'", "\\'")
+    const delimiterGraph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'Title excludes the reserved payload.',
+          name: 'reservedTitle',
+          type: Constraint.Validation,
+          where: `title != '${quoted}'`,
+        }],
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'Workspace',
+        security: {
+          [Action.Create]: { where: `title = '${quoted}'` },
+          [Action.Read]: { where: `title = '${quoted}'` },
+        },
+      }],
+    })
+    const functions = delimiterGraph.physicalSchema('basis_app', true).functions
+    const generated = functions.filter(fn => fn.securityDefiner)
+    expect(generated.length).toBeGreaterThanOrEqual(2)
+    for (const fn of generated) {
+      expect(fn.sql).not.toMatch(/\bAS \$\$/u)
+      expect(fn.sql).toMatch(/AS \$basis(?:_\d+)?\$/u)
+      expect(fn.body).toContain('$$')
+    }
   })
 
 })
