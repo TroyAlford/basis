@@ -116,7 +116,7 @@ const toyTwo = '00000000-0000-4000-8000-000000000032'
 async function seed(database: LifecycleDatabase): Promise<void> {
   await database.use(definitions)
   await database.sql`
-    INSERT INTO "Entity" ("id", "name", "entity")
+    INSERT INTO "Entity" (id, name, entity)
     VALUES
       (${ada}, 'Ada', 'SystemUser'),
       (${grace}, 'Grace', 'Client'),
@@ -131,46 +131,60 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${campaignThree}, 'Campaign Three', 'Campaign')
   `
   await database.sql`
-    INSERT INTO "Person" ("id", "title", "manager.id", "scores", "tags", "payload")
+    INSERT INTO "Person" (id, title, "manager.id", scores, tags, payload)
     VALUES
-      (${ada}, 'Ada', ${null}, ARRAY [1, 2, 2], ARRAY ['urgent', 'important'],
-        '{"kind":"note","meta":{"active":true}}'::jsonb),
-      (${grace}, 'Grace', ${ada}, ARRAY [3], ARRAY ['urgent'], '{"kind":"other"}'::jsonb),
-      (${linus}, 'Linus', ${ada}, ARRAY []::double PRECISION[], ARRAY []::text[], '{}'::jsonb)
+      (${ada},
+        'Ada',
+        ${null},
+        ARRAY[1, 2, 2],
+        ARRAY['urgent', 'important'],
+        '{"kind":"note","meta":{"active":true}}'::JSONB),
+      (${grace},
+        'Grace',
+        ${ada},
+        ARRAY[3],
+        ARRAY['urgent'],
+        '{"kind":"other"}'::JSONB),
+      (${linus},
+        'Linus',
+        ${ada},
+        ARRAY[]::DOUBLE PRECISION[],
+        ARRAY[]::TEXT[],
+        '{}'::JSONB)
   `
   await database.sql`
-    INSERT INTO "SystemUser" ("id", "permissions")
+    INSERT INTO "SystemUser" (id, permissions)
     VALUES
       (${ada}, 'admin'),
       (${linus}, 'user')
   `
   await database.sql`
-    INSERT INTO "Client" ("id", "company")
+    INSERT INTO "Client" (id, company)
     VALUES
       (${grace}, 'Acme')
   `
   await database.sql`
-    INSERT INTO "Pet" ("id", "age", "vaccinated", "owner.id")
+    INSERT INTO "Pet" (id, age, vaccinated, "owner.id")
     VALUES
       (${petOne}, 3, TRUE, ${ada}),
       (${petTwo}, 8, TRUE, ${ada}),
       (${petThree}, 12, FALSE, ${grace})
   `
   await database.sql`
-    INSERT INTO "Toy" ("id", "title", "pet.id")
+    INSERT INTO "Toy" (id, title, "pet.id")
     VALUES
       (${toyOne}, 'ball', ${petOne}),
       (${toyTwo}, 'bone', ${petTwo})
   `
   await database.sql`
-    INSERT INTO "Campaign" ("id", "title")
+    INSERT INTO "Campaign" (id, title)
     VALUES
       (${campaignOne}, 'Campaign One'),
       (${campaignTwo}, 'Campaign Two'),
       (${campaignThree}, 'Campaign Three')
   `
   await database.sql`
-    INSERT INTO "Membership" ("person.id", "campaign.id", "role")
+    INSERT INTO "Membership" ("person.id", "campaign.id", role)
     VALUES
       (${ada}, ${campaignOne}, 'GM'),
       (${grace}, ${campaignOne}, 'Player'),

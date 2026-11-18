@@ -604,7 +604,7 @@ describe('DDL schema planning', () => {
       const otherCampaignId = randomUUID()
       const insertEntity = async (id: string, name: string, entity: string) => {
         await database.sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
+          INSERT INTO "Entity" (id, name, entity)
           VALUES
             (${id}, ${name}, ${entity})
         `
@@ -614,64 +614,64 @@ describe('DDL schema planning', () => {
       await insertEntity(campaignId, 'Campaign', 'Campaign')
       await insertEntity(otherCampaignId, 'Other Campaign', 'Campaign')
       await database.sql`
-        INSERT INTO "User" ("id", "email")
+        INSERT INTO "User" (id, email)
         VALUES
           (${userId}, 'user@example.com')
       `
       await database.sql`
-        INSERT INTO "User" ("id", "email")
+        INSERT INTO "User" (id, email)
         VALUES
           (${otherUserId}, NULL)
       `
       const nullEmailId = randomUUID()
       await insertEntity(nullEmailId, 'null@example.com', 'User')
       await database.sql`
-        INSERT INTO "User" ("id", "email")
+        INSERT INTO "User" (id, email)
         VALUES
           (${nullEmailId}, NULL)
       `
       await database.sql`
-        INSERT INTO "Campaign" ("id", "title")
+        INSERT INTO "Campaign" (id, title)
         VALUES
           (${campaignId}, 'Campaign')
       `
       await database.sql`
-        INSERT INTO "Campaign" ("id", "title")
+        INSERT INTO "Campaign" (id, title)
         VALUES
           (${otherCampaignId}, 'Other Campaign')
       `
       const membership = randomUUID()
       await insertEntity(membership, 'Membership', 'Membership')
       await database.sql`
-        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        INSERT INTO "Membership" (id, "userId.id", "campaignId.id")
         VALUES
           (${membership}, ${userId}, ${campaignId})
       `
       const duplicateId = randomUUID()
       await insertEntity(duplicateId, 'Duplicate Membership', 'Membership')
       await expect(database.captureError(async () => database.sql`
-        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        INSERT INTO "Membership" (id, "userId.id", "campaignId.id")
         VALUES
           (${duplicateId}, ${userId}, ${campaignId})
       `)).resolves.toBeInstanceOf(Error)
       const distinctId = randomUUID()
       await insertEntity(distinctId, 'Distinct Membership', 'Membership')
       await database.sql`
-        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        INSERT INTO "Membership" (id, "userId.id", "campaignId.id")
         VALUES
           (${distinctId}, ${otherUserId}, ${campaignId})
       `
       const nullRightId = randomUUID()
       await insertEntity(nullRightId, 'Null Right Membership', 'Membership')
       await expect(database.sql`
-        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        INSERT INTO "Membership" (id, "userId.id", "campaignId.id")
         VALUES
           (${nullRightId}, ${otherUserId}, NULL)
       `).resolves.toBeDefined()
       const nullLeftId = randomUUID()
       await insertEntity(nullLeftId, 'Null Left Membership', 'Membership')
       await expect(database.sql`
-        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        INSERT INTO "Membership" (id, "userId.id", "campaignId.id")
         VALUES
           (${nullLeftId}, ${userId}, NULL)
       `).resolves.toBeDefined()
@@ -802,7 +802,7 @@ describe('DDL schema planning', () => {
       await installSchema(database.sql, model)
       await database.sql`
         CREATE TABLE "Unexpected" (
-          "id" TEXT PRIMARY KEY
+          id TEXT PRIMARY KEY
         )
       `
       const actual = await DDL.introspect(database.sql)
@@ -1273,7 +1273,7 @@ describe('DDL schema planning', () => {
         DROP INDEX "Entity_name_id_idx"
       `
       await database.sql`
-        CREATE INDEX "Entity_name_id_idx" ON "Entity" USING btree("name" text_pattern_ops, "id")
+        CREATE INDEX "Entity_name_id_idx" ON "Entity" USING btree (name text_pattern_ops, id)
       `
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired: model })
@@ -1289,7 +1289,7 @@ describe('DDL schema planning', () => {
         DROP INDEX "Entity_name_trgm_idx"
       `
       await database.sql`
-        CREATE INDEX "Entity_name_trgm_idx" ON "Entity" USING btree("name")
+        CREATE INDEX "Entity_name_trgm_idx" ON "Entity" USING btree (name)
       `
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired: model })

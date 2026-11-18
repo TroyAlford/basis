@@ -185,23 +185,23 @@ async function enroll(
   roles: readonly string[],
 ): Promise<string> {
   await sql`
-    INSERT INTO "Entity" ("id", "name", "entity")
+    INSERT INTO "Entity" (id, name, entity)
     VALUES
       (${user}, ${subject}, 'User')
   `
   await sql`
-    INSERT INTO "User" ("id", "email")
+    INSERT INTO "User" (id, email)
     VALUES
       (${user}, ${email})
   `
   const identity = randomUUID()
   await sql`
-    INSERT INTO "Entity" ("id", "name", "entity")
+    INSERT INTO "Entity" (id, name, entity)
     VALUES
       (${identity}, ${`${provider}:${subject}`}, 'ExternalIdentity')
   `
   await sql`
-    INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
+    INSERT INTO "ExternalIdentity" (id, provider, subject, revoked, "user.id")
     VALUES
       (${identity}, ${provider}, ${subject}, FALSE, ${user})
   `
@@ -480,7 +480,7 @@ describe('Graph mutation authorization', () => {
       if (!memberProject || !otherProject) throw new Error('Projects were not created')
       await asActor(administrator, () => server.db.tx(async sql => {
         await sql`
-          INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+          INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", role)
           VALUES
             (${memberProject.id}, ${worker}, ${MembershipRole.Owner})
         `

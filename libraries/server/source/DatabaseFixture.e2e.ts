@@ -40,7 +40,7 @@ const options = {
     await database.create('User', { id: viewer, name: 'Viewer' })
     await database.create('Workspace', { id: workspace, name: 'Workspace' })
     await database.sql`
-      INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+      INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", role)
       VALUES
         (${workspace}, ${owner}, 'owner'),
         (${workspace}, ${viewer}, 'viewer')
@@ -62,7 +62,7 @@ test('custom Graph fixtures install app-role RLS and select an actor', async () 
 test('asOwner swaps role and exposes the same fixture context', async () => {
   await withInternalDatabase('custom-graph-owner-api', owner, async database => {
     const appRole = await database.sql<{ role: string }[]>`
-      SELECT current_role AS role
+      SELECT CURRENT_ROLE AS role
     `
     expect(appRole[0]?.role).toBe('basis_app')
     const schema = database.schema
@@ -84,7 +84,7 @@ test('asOwner swaps role and exposes the same fixture context', async () => {
     })
 
     const restored = await database.sql<{ role: string }[]>`
-      SELECT current_role AS role
+      SELECT CURRENT_ROLE AS role
     `
     expect(restored[0]?.role).toBe('basis_app')
   }, options)
@@ -107,13 +107,13 @@ describe('Public database fixture isolation', () => {
   test('runs both public overloads as the restricted application role', async () => {
     await withDatabase('public-overload-callback', async database => {
       const [role] = await database.sql<{ role: string }[]>`
-        SELECT current_role AS role
+        SELECT CURRENT_ROLE AS role
       `
       expect(role?.role).toBe('basis_app')
     })
     await withDatabase('public-overload-actor', null, async database => {
       const [role] = await database.sql<{ role: string }[]>`
-        SELECT current_role AS role
+        SELECT CURRENT_ROLE AS role
       `
       expect(role?.role).toBe('basis_app')
     })
@@ -184,8 +184,8 @@ describe('Basis substrate installation', () => {
     await withLifecycleDatabase('substrate-preserve-trigger', async database => {
       await database.sql`
         CREATE TABLE "Invoice" (
-          "id" TEXT PRIMARY KEY,
-          "status" TEXT
+          id TEXT PRIMARY KEY,
+          status TEXT
         )
       `
       await database.sql.unsafe(`
@@ -196,12 +196,14 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
-          FUNCTION "resolve_invoice_status"()
+        CREATE TRIGGER resolve_invoice_status
+        BEFORE INSERT ON "Invoice"
+        FOR EACH ROW
+        EXECUTE FUNCTION resolve_invoice_status()
       `
       await installBasis(database.sql)
       await database.sql`
-        INSERT INTO "Invoice" ("id")
+        INSERT INTO "Invoice" (id)
         VALUES
           ('invoice-1')
       `
@@ -211,11 +213,16 @@ describe('Basis substrate installation', () => {
       `)
         .toEqual([{ status: 'resolved' }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
-) AS present
+        SELECT
+          EXISTS (
+            SELECT 1
+            FROM pg_trigger trigger
+            JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid
+            JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = current_schema()
+              AND relation.relname = 'Invoice'
+              AND TRIGGER.tgname = 'resolve_invoice_status'
+          ) AS present
       `).toEqual([{ present: true }])
     })
   })
@@ -224,8 +231,8 @@ describe('Basis substrate installation', () => {
     await withLifecycleDatabase('substrate-remove-legacy', async database => {
       await database.sql`
         CREATE TABLE "Invoice" (
-          "id" TEXT PRIMARY KEY,
-          "status" TEXT
+          id TEXT PRIMARY KEY,
+          status TEXT
         )
       `
       await database.sql.unsafe(`
@@ -236,8 +243,10 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
-          FUNCTION "resolve_invoice_status"()
+        CREATE TRIGGER resolve_invoice_status
+        BEFORE INSERT ON "Invoice"
+        FOR EACH ROW
+        EXECUTE FUNCTION resolve_invoice_status()
       `
       await database.sql.unsafe(`
         CREATE OR REPLACE FUNCTION basis.enroll_identity(
@@ -263,20 +272,25 @@ describe('Basis substrate installation', () => {
         triggerFunction: boolean,
       }[]>`
         SELECT
-          TO_REGPROCEDURE('basis.enroll_identity(text,text,text,text)') IS NULL AS "enroll",
-          TO_REGPROCEDURE('basis.resolve_identity(text)') IS NULL AS "resolve",
-          TO_REGPROCEDURE('basis.has_role(text)') IS NULL AS "role",
+          TO_REGPROCEDURE('basis.enroll_identity(text,text,text,text)') IS NULL AS enroll,
+          TO_REGPROCEDURE('basis.resolve_identity(text)') IS NULL AS resolve,
+          TO_REGPROCEDURE('basis.has_role(text)') IS NULL AS role,
           TO_REGPROCEDURE('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
       `).toEqual([{ enroll: true, resolve: true, role: true, triggerFunction: true }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
-    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
-    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
-) AS present
+        SELECT
+          EXISTS (
+            SELECT 1
+            FROM pg_trigger trigger
+            JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid
+            JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = current_schema()
+              AND relation.relname = 'Invoice'
+              AND TRIGGER.tgname = 'resolve_invoice_status'
+          ) AS present
       `).toEqual([{ present: true }])
       await database.sql`
-        INSERT INTO "Invoice" ("id")
+        INSERT INTO "Invoice" (id)
         VALUES
           ('invoice-2')
       `
