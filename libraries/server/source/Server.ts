@@ -3,8 +3,11 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
+import { pathToFileURL } from 'node:url'
 import type { Identity } from '../../oauth'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
+import { HeadProvider } from '../../react/components/Head/Head'
+import type { HeadCollector } from '../../react/components/Head/Head'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
@@ -16,10 +19,9 @@ import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { runAsActor } from './ActorContext'
 import { Authorization } from './Authorization'
-import { Builder } from './Builder'
 import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
 import { createDatabase, NullDatabase, openAdmin } from './Database'
-import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
+import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell, writeHydrationEntry } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
 import type { Graph } from './Graph'
@@ -35,15 +37,6 @@ import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
-  /**
-   * Run the live-development workflow. Development delegates to Bun's dev
-   * server, which compiles from source, watches the module graph, and hot
-   * replaces changed modules (React Fast Refresh included); dependencies are
-   * bundled, so no CDN is required. When `false`, the server builds once,
-   * serves the classic-script bundle, and does not watch or hot update.
-   * Defaults to `NODE_ENV !== 'production'`.
-   */
-  development?: boolean,
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
   /**
@@ -74,39 +67,36 @@ export interface ServerOptions {
  * A server for building, serving, and (in development) hot reloading React
  * applications.
  *
- * One server supports two explicit modes. Development delegates to Bun's dev
- * server: the SPA shell is generated and served through an HTML route, so Bun
- * owns live compilation, file watching, hot module replacement, and React Fast
- * Refresh. A changed module is replaced in place — no document reload — and
- * only falls back to a reload when nothing accepts the update.
- * Production builds once, bundles the installed dependency graph, serves the
- * SPA and its assets, reports the release version on `/api/health`, and shuts down
- * gracefully on SIGINT/SIGTERM.
+ * The server always delegates to Bun's dev server: the SPA shell is generated
+ * and served through an HTML route, so Bun owns live compilation, file
+ * watching, hot module replacement, and React Fast Refresh. A changed module is
+ * replaced in place — no document reload — and only falls back to a reload when
+ * nothing accepts the update.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities.
  */
-export class Server {
+export class Server<AppContext extends object = Record<string, never>> {
   static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
   static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
 
-  #apis = new Map<string, APIRoute>()
+  #apis = new Map<string, APIRoute<object, AppContext>>()
   #assets: string | null = null
   #authorization: Authorization | null = null
   #graph: Graph | null = null
-  #builder: Builder | null = null
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
   #databaseOptions: DatabaseOptions | null = null
-  #development = true
-  #entrypoints: [string, string][] = []
+  #contextCache = new WeakMap<Request, Promise<AppContext>>()
+  #contextLoader: ((request: Request) => AppContext | Promise<AppContext>) | null = null
+  #mainComponent: React.ComponentType<AppContext> | null = null
+  #mainPath: string | null = null
   #favIcon: ResolvedFavIcon | null = null
   #favIconInput: FavIconInput | null = null
   #favIconOptions: IconOptions = {}
   #icons: IconRegistry = {}
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
-  #modules = new Map<string, string>()
   #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
@@ -122,14 +112,6 @@ export class Server {
   constructor() {
     this.api([HttpVerb.Get], 'health', () => this.#health())
     this.api([HttpVerb.Get], 'ping', ping)
-  }
-
-  /**
-   * Whether the server is running the development workflow.
-   * @returns `true` when the server is in development mode.
-   */
-  get development(): boolean {
-    return this.#development
   }
 
   /**
@@ -205,6 +187,37 @@ export class Server {
   }
 
   /**
+   * Sets the application context loader for this server.
+   *
+   * The loader runs once per request and its result is available to API
+   * handlers and the server-rendered application.
+   * @param loader - Request-scoped context resolver.
+   * @returns The server, typed with the resolved context.
+   */
+  context<C extends object>(loader: (request: Request) => C | Promise<C>): Server<C> {
+    const typed = this as unknown as Server<C>
+    typed.#contextLoader = loader as (request: Request) => C | Promise<C>
+    return typed
+  }
+
+  /**
+   * Resolves the application context once for a request.
+   * @param request - The incoming request.
+   * @returns The cached context promise.
+   */
+  #resolveContext(request: Request): Promise<AppContext> {
+    const cached = this.#contextCache.get(request)
+    if (cached) return cached
+
+    const loader = this.#contextLoader
+    const resolved = loader
+      ? Promise.resolve(loader(request))
+      : Promise.resolve({} as AppContext)
+    this.#contextCache.set(request, resolved)
+    return resolved
+  }
+
+  /**
    * Processes an API request.
    *
    * API templates match only under `/api`. Root paths are the application's
@@ -219,7 +232,8 @@ export class Server {
     const identity = this.#authorization
       ? await this.#authorization.resolve(verified)
       : verified
-    const context: RouteContext = {
+    const context: RouteContext<AppContext> = {
+      context: await this.#resolveContext(request),
       db: this.#database,
       identity,
       logger: this.#logger,
@@ -282,12 +296,13 @@ export class Server {
         const identity = this.#authorization
           ? await this.#authorization.resolve(verified)
           : verified
-        const context: RouteContext = {
+        const context = {
+          context: await this.#resolveContext(request),
           db: this.#database,
           identity,
           logger: this.#logger,
           request,
-        }
+        } as RouteContext
         if (this.#authorization) {
           return runAsActor({ id: identity }, () => sseResponse(params, context, handler))
         }
@@ -335,59 +350,6 @@ export class Server {
   }
 
   /**
-   * Handles a module request.
-   *
-   * Module proxying exists only to back the browser-globals development build;
-   * production never reaches a CDN.
-   * @param uri - The URI to handle.
-   * @returns The module response.
-   */
-  async handleModule(uri: URI): Promise<Response> {
-    if (!this.#development) return Server.NotFound
-
-    if (!this.#modules.has(uri.route)) {
-      const response = await fetch(`https://unpkg.com/${uri.route}`)
-      if (!response.ok) return Server.NotFound
-
-      const text = await response.text()
-      this.#modules.set(uri.route, text)
-    }
-
-    return new Response(this.#modules.get(uri.route), {
-      headers: {
-        'Content-Length': this.#modules.get(uri.route).length.toString(),
-        'Content-Type': 'application/javascript',
-        'Via': '@basis/server; proxying unpkg.com',
-      },
-    })
-  }
-
-  /**
-   * Handles a request for a compiled build output.
-   *
-   * The route serves every output the builder produces, not only entrypoints:
-   * bundler-emitted assets (images, fonts) and sourcemaps are addressed by the
-   * same `/scripts/<file>` base the bundle embeds (see `Builder`'s `publicPath`).
-   * Byte output is returned as-is, so binary assets are not corrupted.
-   * @param uri - The URI to handle.
-   * @returns The output response.
-   */
-  async handleScripts(uri: URI): Promise<Response> {
-    if (!this.#builder) return Server.NotFound
-
-    // A failed build rejects the output promise; serve nothing rather than 500.
-    const built = await this.#builder.getOutputs().catch(() => [])
-    const output = built.find(s => s.name === uri.route)
-    if (!output) return Server.NotFound
-
-    return new Response(await output.output.arrayBuffer(), {
-      headers: { 'Content-Type': output.output.type },
-      status: 200,
-      statusText: 'OK',
-    })
-  }
-
-  /**
    * Handles a UI request.
    *
    * When an {@link Server.identity} capability is configured, the request is
@@ -400,37 +362,65 @@ export class Server {
     const verified = request && this.#identity ? this.#identity.get(request) : null
     const identity = this.#authorization ? await this.#authorization.resolve(verified) : verified
     const runtime: BasisRuntime = { ...this.runtime, identity }
+    const context = request ? await this.#resolveContext(request) : {} as AppContext
+    const component = await this.#loadMain()
+    const head: HeadCollector = {}
+    const application = component
+      ? renderToString(React.createElement(
+        HeadProvider,
+        { collector: head },
+        React.createElement(component, context),
+      ))
+      : ''
+    const title = escapeHtml(head.title || this.#title)
+    const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
+    const runtimeScript = `<script id="basis-runtime" type="application/json">${serializeBasisRuntime(runtime)}</script>`
+    const bootstrapScript = `<script id="basis-bootstrap" type="application/json">${serializeBootstrap(context)}</script>`
 
-    /*
-     * Development delegates module bundling, watching, and hot updates to Bun's
-     * dev server. Bun only enables HMR for HTML routes it bundles, so the shell
-     * is generated and registered at {@link DEV_SHELL_ROUTE}; every UI request
-     * proxies that shell and injects the per-request runtime facts.
-     */
-    if (this.#development && this.#server) {
-      const response = await fetch(this.#devShellURL())
-      const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
-      const runtimeScript = [
-        '<script id="basis-runtime" type="application/json">',
-        serializeBasisRuntime(runtime),
-        '</script>',
-      ].join('')
-      const element = `${favicon}${runtimeScript}`
-      return new HTMLRewriter()
-        .on('head', {
-          element: target => {
-            target.append(element, { html: true })
-          },
-        })
-        .transform(response)
+    if (!this.#server) {
+      const fallback = renderToString(React.createElement(IndexHTML, {
+        favicon: false,
+        runtime,
+        scripts: [],
+        title,
+      }))
+      return new Response(fallback.replace('<div id="root"></div>', `<div id="root">${application}</div>`), {
+        headers: { 'Content-Type': 'text/html' },
+      })
     }
 
-    const html = await renderToString(React.createElement(IndexHTML, {
-      runtime,
-      scripts: this.#scriptNames(),
-      title: this.#title,
-    }))
-    return new Response(html, { headers: { 'Content-Type': 'text/html' } })
+    const response = await Bun.fetch(this.#devShellURL())
+    return new HTMLRewriter()
+      .on('title', {
+        element: element => { element.setInnerContent(title) },
+      })
+      .on('head', {
+        element: element => { element.append(`${favicon}${runtimeScript}${bootstrapScript}`, { html: true }) },
+      })
+      .on('#root', {
+        element: element => { element.setInnerContent(application, { html: true }) },
+      })
+      .transform(response)
+  }
+
+  /**
+   * Loads the application component from the configured main module.
+   * @returns The component, or null when no main was configured.
+   */
+  async #loadMain(): Promise<React.ComponentType<AppContext> | null> {
+    if (!this.#mainPath) return null
+    if (this.#mainComponent) return this.#mainComponent
+
+    const module = await import(pathToFileURL(this.#mainPath).href) as {
+      Application?: React.ComponentType<AppContext>,
+      default?: React.ComponentType<AppContext>,
+    }
+    const component = module.Application ?? module.default
+    if (typeof component !== 'function') {
+      throw new Error(`Basis: main module "${this.#mainPath}" must export Application or a default component`)
+    }
+    this.#mainComponent = component
+    return component
   }
 
   /**
@@ -469,8 +459,7 @@ export class Server {
    * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
    * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
-   * @param options.development - Whether to run the development workflow.
-   * @param options.hostname - The interface to bind.
+     * @param options.hostname - The interface to bind.
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
@@ -478,15 +467,13 @@ export class Server {
    * @returns The server.
    */
   start = ({
-    development = Bun.env.NODE_ENV !== 'production',
     hostname = Bun.env.HOST ?? '127.0.0.1',
     idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
     version = Bun.env.VERSION ?? 'development',
-  }: ServerOptions = {}): Server => {
+  }: ServerOptions = {}): this => {
     if (logger) this.#logger = logger
-    this.#development = development
     this.#version = version
     this.#favIcon = resolveFavIcon(
       this.#favIconInput,
@@ -515,47 +502,21 @@ export class Server {
     }
     const databaseReady = this.#databaseReady()
 
-    let routes: Bun.Serve.Routes<SocketData, string> | undefined
+    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath]))
+    const entrypoints = this.#mainPath
+      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
+      : []
+    const shell = writeDevShell({ directory, entrypoints, title: this.#title })
+    const routes = {
+      [DEV_SHELL_ROUTE]: import.meta.require(shell),
+    } as Bun.Serve.Routes<SocketData, string>
 
-    if (development) {
-      /*
-       * Development is Bun's dev server: it owns the module graph, watching,
-       * and React Fast Refresh. The shell is generated beside a computed
-       * directory and registered as an HTML route, which is the only shape Bun
-       * enables HMR for.
-       */
-      const entrypoints = this.#entrypoints.map(([, file]) => file)
-      if (entrypoints.length > 0) {
-        const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, ...entrypoints]))
-        const shell = writeDevShell({ directory, entrypoints, title: this.#title })
-        routes = { [DEV_SHELL_ROUTE]: import.meta.require(shell) } as Bun.Serve.Routes<SocketData, string>
-      }
-
-      this.#readyError = null
-      this.#status = 'starting'
-      this.#ready = databaseReady
-    } else {
-      const builder = new Builder({
-        development,
-        logger: this.#logger,
-        root: this.#root,
-        watch: false,
-      })
-
-      for (const [name, file] of this.#entrypoints) {
-        void builder.add(name, file)
-      }
-
-      this.#builder = builder
-      this.#readyError = null
-      this.#status = 'starting'
-      this.#ready = this.#trackReady(
-        Promise.all([builder.initialBuild(), databaseReady]).then(() => undefined),
-      )
-    }
+    this.#readyError = null
+    this.#status = 'starting'
+    this.#ready = this.#trackReady(databaseReady)
 
     this.#server = Bun.serve({
-      development: development ? { hmr: true } : false,
+      development: { hmr: true },
       fetch: this.handle,
       hostname,
       ...(idleTimeout === undefined ? {} : { idleTimeout }),
@@ -579,11 +540,8 @@ export class Server {
     process.on('SIGINT', this.#handleSignal)
     process.on('SIGTERM', this.#handleSignal)
 
-    // Development builds lazily; prove one build before reporting healthy.
-    if (development) {
-      if (routes) this.#warmDevelopment(databaseReady)
-      else this.#ready = this.#trackReady(databaseReady)
-    }
+    // The Bun dev shell builds lazily; prove one build before reporting healthy.
+    this.#warmShell(databaseReady)
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -597,14 +555,11 @@ export class Server {
    * keeps its synchronous contract for existing callers.
    * @returns The server.
    */
-  stop = (): Server => {
+  stop = (): this => {
     process.off('SIGINT', this.#handleSignal)
     process.off('SIGTERM', this.#handleSignal)
 
     this.#logger.info('stopping')
-
-    void this.#builder?.stop()
-    this.#builder = null
 
     this.#server?.stop()
     this.#server = null
@@ -641,7 +596,7 @@ export class Server {
    * @param identity - The shared identity capability.
    * @returns The server.
    */
-  identity(identity: Identity): Server {
+  identity(identity: Identity): this {
     this.#identity = identity
     return this
   }
@@ -656,7 +611,7 @@ export class Server {
    * @param options - Provider seams, the session capability, and policy.
    * @returns The server.
    */
-  oauth(options: OAuthOptions): Server {
+  oauth(options: OAuthOptions): this {
     const provider = options.session.provider
     const resolve = options.identity
     const flow = new OAuth({
@@ -690,7 +645,7 @@ export class Server {
    * @param graph - The application graph.
    * @returns The server.
    */
-  graph(graph: Graph): Server {
+  graph(graph: Graph): this {
     this.#graph = graph
     return this
   }
@@ -704,7 +659,7 @@ export class Server {
    * @param artifact - Approved immutable migration artifact.
    * @returns The server.
    */
-  migration(artifact: MigrationArtifact): Server {
+  migration(artifact: MigrationArtifact): this {
     this.#schemaExpectation = artifact
     return this
   }
@@ -719,7 +674,7 @@ export class Server {
    * @param options - Optional image selection for the managed service.
    * @returns The server.
    */
-  database(options: DatabaseOptions = {}): Server {
+  database(options: DatabaseOptions = {}): this {
     const unsupported = ['adminUrl', 'appRole', 'authorization', 'entities', 'url']
       .filter(key => key in options)
     if (unsupported.length > 0) {
@@ -737,14 +692,14 @@ export class Server {
    * @param filePath - The path to the entrypoint.
    * @returns The server.
    */
-  main(filePath: string): Server {
+  main(filePath: string): this {
     const absolute = path.isAbsolute(filePath)
       ? filePath
       : path.join(this.#root, filePath)
     this.#checkPath(absolute)
 
-    this.#entrypoints.push(['index.js', absolute])
-    void this.#builder?.add('index.js', absolute)
+    this.#mainPath = absolute
+    this.#mainComponent = null
     return this
   }
 
@@ -753,7 +708,7 @@ export class Server {
    * @param absolutePath - The absolute path to the root directory.
    * @returns The server.
    */
-  root(absolutePath: string): Server {
+  root(absolutePath: string): this {
     this.#checkPath(absolutePath)
     this.#root = absolutePath
     return this
@@ -764,7 +719,7 @@ export class Server {
    * @param title - The document title.
    * @returns The server.
    */
-  title(title: string): Server {
+  title(title: string): this {
     this.#title = title
     return this
   }
@@ -785,8 +740,8 @@ export class Server {
   api<Params extends object = object>(
     verbs: HttpVerb[],
     template: string,
-    handler: (params: Params, context: RouteContext) => Response | Promise<Response>,
-  ): Server {
+    handler: (params: Params, context: RouteContext<AppContext>) => Response | Promise<Response>,
+  ): this {
     this.#apis.set(template, { handler, verbs: new Set(verbs) })
     return this
   }
@@ -800,7 +755,7 @@ export class Server {
    * @param handler - The SSE handler.
    * @returns The server.
    */
-  sse<Params extends object = object>(template: string, handler: SseHandler<Params>): Server {
+  sse<Params extends object = object>(template: string, handler: SseHandler<Params>): this {
     this.#sse.set(template, handler)
     return this
   }
@@ -811,7 +766,7 @@ export class Server {
    * @param handlers - Lifecycle handlers for connected clients.
    * @returns The server.
    */
-  socket(template: string, handlers: SocketHandlers): Server {
+  socket(template: string, handlers: SocketHandlers): this {
     this.#sockets.set(template, handlers)
     return this
   }
@@ -828,7 +783,7 @@ export class Server {
    * @param options.allow - Top-level files/folders permitted; all when omitted.
    * @returns The server.
    */
-  mount(prefix: string, folder: string, options: { allow?: readonly string[] } = {}): Server {
+  mount(prefix: string, folder: string, options: { allow?: readonly string[] } = {}): this {
     const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
     if (!fs.existsSync(absolute)) {
       throw new Error(`Mount folder "${absolute}" does not exist`)
@@ -847,7 +802,7 @@ export class Server {
    * @param folder - The folder to set as the assets folder.
    * @returns The server.
    */
-  assets(folder: string): Server {
+  assets(folder: string): this {
     const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
     if (!fs.existsSync(absolute)) {
       throw new Error(`Assets folder "${absolute}" does not exist`)
@@ -870,7 +825,7 @@ export class Server {
    * @param options - Icon options (`color`, `filled`, `size`, …), for an icon.
    * @returns The server.
    */
-  favicon(input: FavIconInput, options: IconOptions = {}): Server {
+  favicon(input: FavIconInput, options: IconOptions = {}): this {
     this.#favIconInput = input
     this.#favIconOptions = options
     return this
@@ -883,7 +838,7 @@ export class Server {
    * @param icons - Icon classes, keyed by the name used in the URL.
    * @returns The server.
    */
-  icons(icons: IconRegistry): Server {
+  icons(icons: IconRegistry): this {
     Object.assign(this.#icons, icons)
     return this
   }
@@ -928,8 +883,8 @@ export class Server {
    * build reports `error` rather than a healthy process.
    * @param databaseReady - The pending database startup.
    */
-  #warmDevelopment(databaseReady: Promise<void>): void {
-    const buildReady = fetch(this.#devShellURL()).then(response => {
+  #warmShell(databaseReady: Promise<void>): void {
+    const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
     this.#ready = this.#trackReady(
@@ -950,7 +905,7 @@ export class Server {
     }
     return this.#database.connect().then(async () => {
       if (!this.#schemaExpectation) {
-        if (this.#graph && !this.#development) {
+        if (this.#graph) {
           throw new Error(
             'Graph-backed production requires an approved migration artifact; ' +
             'install or migrate explicitly with DDL.plan -> DDL.review -> DDL.apply',
@@ -1056,8 +1011,6 @@ export class Server {
     switch (uri.type) {
       case 'api': return Server.BadRequest
       case 'assets': return this.handleAsset(uri)
-      case 'modules': return this.handleModule(uri)
-      case 'scripts': return this.handleScripts(uri)
       default: return this.handleUI(request)
     }
   }
@@ -1117,16 +1070,29 @@ export class Server {
     void this.shutdown().finally(() => process.exit(0))
   }
 
-  /**
-   * The script URIs the UI should load for the current mode.
-   *
-   * Production is the only mode that renders this shell; development proxies
-   * the Bun-generated HMR shell instead.
-   * @returns The script names to include in the rendered UI.
-   */
-  #scriptNames(): string[] {
-    return this.#entrypoints.map(([name]) => name)
-  }
+}
+
+/**
+ * Escape text for an HTML title element.
+ * @param value - The title text.
+ * @returns The escaped title.
+ */
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+/**
+ * Serialize a request context for embedding in the SPA shell.
+ * @param value - The context value.
+ * @returns Escaped JSON.
+ */
+function serializeBootstrap(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
 
 /**

@@ -8,7 +8,7 @@ import type { Database } from '../source/Database'
  * {@link ILogger}, so route output shares the same format and platform context
  * as server lifecycle output.
  */
-export interface RouteContext {
+export interface RouteContext<AppContext extends object = Record<string, unknown>> {
   /** The request-scoped database capability, using native Bun transactions. */
   readonly db?: Database,
   /** The verified canonical User id, or null for an anonymous request. */
@@ -17,4 +17,6 @@ export interface RouteContext {
   readonly logger: ILogger,
   /** The incoming request. */
   readonly request: Request,
+  /** The application context loaded for this request. */
+  readonly context: AppContext,
 }

@@ -240,7 +240,7 @@ describe('versioned database releases', () => {
       .migration(artifactB)
       .root(install)
       .main(application)
-      .start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
+      .start({ hostname: '127.0.0.1', logger: silent, port: 0 })
     process.chdir(previousCwd)
     try {
       await expect(server.ready()).resolves.toBeUndefined()

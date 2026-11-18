@@ -4,7 +4,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ILogger } from '../../utilities'
-import { Logger } from '../../utilities'
+import { HttpVerb, Logger } from '../../utilities'
 import { Builder } from './Builder'
 import { Graph } from './Graph'
 import { Server } from './Server'
@@ -46,15 +46,13 @@ const active = new Set<ServerHarness>()
  * @returns A harness exposing the bound port and an idempotent stop.
  */
 const startServer = async (
-  mode: 'development' | 'production',
   extraEnv: Record<string, string> = {},
   entry: string = fixture,
 ): Promise<ServerHarness> => {
   const application = await startApplication({
     cwd: repoRoot,
-    development: mode === 'development',
     entry,
-    env: { MODE: mode, VERSION: 'test-version', ...extraEnv },
+    env: { VERSION: 'test-version', ...extraEnv },
     readyPath: '/api/health',
     readyStatus: status => status === 200 || status === 503,
   })
@@ -98,103 +96,9 @@ afterEach(async () => {
   }
 })
 
-describe('Server production mode', () => {
-  test('serves the managed app, health, and assets without development machinery', async () => {
-    const server = await startServer('production')
-    const base = `http://127.0.0.1:${server.port}`
-
-    // Health only turns ok once the initial production build succeeded.
-    const { body, response } = await waitForHealth(base, (result, payload) => (
-      result.status === 200 && payload.status === 'ok'
-    ))
-    expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toContain('application/json')
-    expect(body).toMatchObject({ status: 'ok', version: 'test-version' })
-
-    // `/health` is a root SPA path, not an API.
-    const spaHealth = await Bun.fetch(`${base}/health`)
-    expect(spaHealth.headers.get('content-type')).toContain('text/html')
-
-    const ui = await Bun.fetch(base)
-    const html = await ui.text()
-    expect(ui.headers.get('content-type')).toContain('text/html')
-    expect(html).toContain('/scripts/index.js')
-    expect(html).not.toContain('hmr.js')
-    expect(html).not.toContain('/modules/')
-
-    // Unmatched paths fall back to the SPA shell.
-    const spa = await Bun.fetch(`${base}/decks/123`)
-    expect(spa.status).toBe(200)
-    expect(await spa.text()).toContain('/scripts/index.js')
-
-    const script = await Bun.fetch(`${base}/scripts/index.js`)
-    expect(script.status).toBe(200)
-    expect(script.headers.get('content-type')).toContain('javascript')
-
-    /*
-     * The shell loads entrypoints as classic `<script defer>` tags, and
-     * `Application.tsx` exports a binding. The served bundle must therefore be
-     * classic-script compatible: no top-level ESM statements, and it must
-     * compile as a script (an IIFE; issue #154).
-     */
-    const scriptCode = await script.text()
-    expect(scriptCode).toContain('Basis managed server')
-    expect(scriptCode).not.toMatch(/^\s*(?:export|import)\b/m)
-    expect(() => new Function(scriptCode)).not.toThrow()
-
-    expect((await Bun.fetch(`${base}/assets/favicon.svg`)).status).toBe(200)
-
-    // The development CDN proxy is not part of the production path.
-    expect((await Bun.fetch(`${base}/modules/react@19.3.0/umd/react.development.js`)).status).toBe(404)
-
-    expect(await server.stop()).toBe(0)
-  })
-
-  test('serves bundler-emitted assets referenced by the bundle', async () => {
-    const server = await startServer('production', { ENTRY: './WithAsset.tsx' })
-    const base = `http://127.0.0.1:${server.port}`
-
-    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
-
-    /*
-     * The bundle references its emitted asset by an absolute `/scripts/...` URL
-     * (Builder's `publicPath`); that same route must serve the bytes (issue #155).
-     */
-    const code = await Bun.fetch(`${base}/scripts/index.js`).then(response => response.text())
-    const assetUrl = code.match(/\/scripts\/[A-Za-z0-9._-]+\.png/)?.[0]
-    if (!assetUrl) throw new Error('the bundle did not reference an emitted asset')
-
-    const asset = await Bun.fetch(`${base}${assetUrl}`)
-    expect(asset.status).toBe(200)
-    expect(asset.headers.get('content-type')).toContain('image/png')
-    expect(new Uint8Array(await asset.arrayBuffer())).toEqual(
-      new Uint8Array(await Bun.file(join(fixtureRoot, 'pixel.png')).arrayBuffer()),
-    )
-
-    expect(await server.stop()).toBe(0)
-  })
-
-  test('never reports healthy when the initial build fails', async () => {
-    const server = await startServer('production', { ENTRY: './Broken.tsx' })
-    const base = `http://127.0.0.1:${server.port}`
-
-    const { body, response } = await waitForHealth(base, (result, payload) => (
-      result.status === 503 && payload.status === 'error'
-    ))
-    expect(response.status).toBe(503)
-    expect(body).toMatchObject({ status: 'error', version: 'test-version' })
-    expect(body.error).toBeTruthy()
-
-    // A failed build serves no entrypoint.
-    expect((await Bun.fetch(`${base}/scripts/index.js`)).status).toBe(404)
-
-    expect(await server.stop()).toBe(0)
-  })
-})
-
-describe('Server development mode', () => {
+describe('Server', () => {
   test('serves the app through Bun dev-server HMR with runtime facts and no reload shim', async () => {
-    const server = await startServer('development')
+    const server = await startServer()
     const base = `http://127.0.0.1:${server.port}`
 
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
@@ -209,9 +113,11 @@ describe('Server development mode', () => {
     expect(html).toContain('/_bun/')
     expect(html).not.toContain('/scripts/hmr.js')
 
-    // The client bootstrap still receives the embedded runtime facts.
+    // The shell carries runtime facts, the SSR payload, and the hydrated root.
     expect(html).toContain('id="basis-runtime"')
+    expect(html).toContain('id="basis-bootstrap"')
     expect(html).toContain('id="root"')
+    expect(html).toContain('Basis managed server')
 
     // Unmatched paths fall back to the same HMR-enabled SPA shell.
     const deep = await Bun.fetch(`${base}/decks/123`)
@@ -224,8 +130,31 @@ describe('Server development mode', () => {
     expect(await server.stop()).toBe(0)
   })
 
+  test('loads request context for SSR and API handlers', async () => {
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./ContextApplication.tsx')
+      .context(async () => ({ greeting: 'hello from context' }))
+      .api([HttpVerb.Get], 'context', (_params, context) => new Response(context.context.greeting))
+      .start({ hostname: '127.0.0.1', port: 0 })
+
+    try {
+      await server.ready()
+      const base = `http://127.0.0.1:${server.port}`
+
+      const html = await Bun.fetch(base).then(response => response.text())
+      expect(html).toContain('hello from context')
+      expect(html).toContain('id="basis-bootstrap"')
+
+      const api = await server.handle(new Request(`${base}/api/context`))
+      expect(await api?.text()).toBe('hello from context')
+    } finally {
+      server.stop()
+    }
+  })
+
   test('never reports healthy when a development build fails', async () => {
-    const server = await startServer('development', { ENTRY: './Broken.tsx' })
+    const server = await startServer({ ENTRY: './Broken.tsx' })
     const base = `http://127.0.0.1:${server.port}`
 
     const { body, response } = await waitForHealth(base, (result, payload) => (
@@ -247,10 +176,10 @@ describe('Server development HMR', () => {
       await Bun.write(valueFile, "export const value = 'one'\n")
       await Bun.write(
         join(dir, 'entry.ts'),
-        "import { value } from './value'\n;(globalThis as { __value?: string }).__value = value\n",
+        "import { value } from './value'\n;(globalThis as { __value?: string }).__value = value\nexport const Application = () => null\n",
       )
 
-      const server = await startServer('development', { ENTRY: join(dir, 'entry.ts') })
+      const server = await startServer({ ENTRY: join(dir, 'entry.ts') })
       const base = `http://127.0.0.1:${server.port}`
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -325,7 +254,7 @@ describe('Server SSE idle streams', () => {
      * not closed by idleTimeout, so this does not by itself demonstrate the
      * timeout contract; the per-request opt-out test above does.
      */
-    const server = await startServer('production', { IDLE_TIMEOUT: '1' })
+    const server = await startServer({ IDLE_TIMEOUT: '1' })
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -360,7 +289,7 @@ describe('Server readiness', () => {
     const server = new Server()
       .root(fixtureRoot)
       .main('./Application.tsx')
-      .start({ development: false, hostname: '127.0.0.1', port: 0, version: 'test-version' })
+      .start({ hostname: '127.0.0.1', port: 0, version: 'test-version' })
 
     try {
       await expect(server.ready()).resolves.toBeUndefined()
@@ -373,7 +302,7 @@ describe('Server readiness', () => {
     const server = new Server()
       .root(fixtureRoot)
       .main('./Broken.tsx')
-      .start({ development: false, hostname: '127.0.0.1', port: 0, version: 'test-version' })
+      .start({ hostname: '127.0.0.1', port: 0, version: 'test-version' })
 
     try {
       await expect(server.ready()).rejects.toThrow()
@@ -385,7 +314,7 @@ describe('Server readiness', () => {
 
 describe('Builder', () => {
   test('does not establish a watcher when watching is disabled', async () => {
-    const builder = new Builder({ development: false, root: fixtureRoot, watch: false })
+    const builder = new Builder({ root: fixtureRoot, watch: false })
     await builder.add('index.js', './Application.tsx')
 
     const outputs = await builder.initialBuild()
@@ -400,7 +329,7 @@ describe('Builder', () => {
   })
 
   test('establishes a watcher in development', async () => {
-    const builder = new Builder({ development: true, root: fixtureRoot, watch: true })
+    const builder = new Builder({ root: fixtureRoot, watch: true })
     await builder.add('index.js', './Application.tsx')
     await builder.initialBuild()
 
@@ -516,7 +445,7 @@ describe('Server graph configuration', () => {
 
   test('uses a null capability when no database is configured', async () => {
     const server = new Server()
-      .start({ development: true, hostname: '127.0.0.1', logger: new Logger({ silent: true }), port: 0 })
+      .start({ hostname: '127.0.0.1', logger: new Logger({ silent: true }), port: 0 })
 
     try {
       await expect(server.db.connect()).rejects.toThrow('No database is configured for this server')
@@ -542,7 +471,7 @@ describe('Server logging', () => {
     const server = new Server()
       .root(fixtureRoot)
       .main('./Application.tsx')
-      .start({ development: false, hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
+      .start({ hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
 
     try {
       expect(messages.some(message => message.includes('listening http://'))).toBe(true)
@@ -559,7 +488,7 @@ describe('Server logging', () => {
     const server = new Server()
       .root(fixtureRoot)
       .main('./Application.tsx')
-      .start({ development: false, hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
+      .start({ hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
 
     try {
       expect(logged).not.toHaveBeenCalled()
@@ -598,7 +527,7 @@ describe('Server logging', () => {
 
 describe('Server WebSocket routes', () => {
   test('accepts upgrades on a registered route', async () => {
-    const server = await startServer('production')
+    const server = await startServer()
 
     /*
      * Connect from a native child process: the happy-dom test preload replaces
@@ -630,7 +559,7 @@ describe('Server favicon', () => {
       const bytes = new Uint8Array([1, 2, 3, 4])
       await Bun.write(join(dir, 'favicon.png'), bytes)
 
-      const server = await startServer('production', { ROOT: dir }, favIconFixture)
+      const server = await startServer({ ROOT: dir }, favIconFixture)
       const base = `http://127.0.0.1:${server.port}`
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -650,7 +579,7 @@ describe('Server favicon', () => {
   })
 
   test('serves an IconBase favicon at the standard URL', async () => {
-    const server = await startServer('production', { COLOR: 'ff0000', FAVICON: 'icon', FILLED: 'true' }, favIconFixture)
+    const server = await startServer({ COLOR: 'ff0000', FAVICON: 'icon', FILLED: 'true' }, favIconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -665,7 +594,7 @@ describe('Server favicon', () => {
   })
 
   test('renders Basis and app icons at /icons/{Name}.svg with query options', async () => {
-    const server = await startServer('production', {}, favIconFixture)
+    const server = await startServer({}, favIconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -681,7 +610,7 @@ describe('Server favicon', () => {
   })
 
   test('injects the favicon link into the development shell', async () => {
-    const server = await startServer('development', { COLOR: '0000ff', FAVICON: 'icon' }, favIconFixture)
+    const server = await startServer({ COLOR: '0000ff', FAVICON: 'icon' }, favIconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -696,7 +625,7 @@ describe('Server favicon', () => {
     const dir = tempDirectory('basis-nofavicon')
 
     try {
-      const server = await startServer('production', { ROOT: dir }, favIconFixture)
+      const server = await startServer({ ROOT: dir }, favIconFixture)
       const base = `http://127.0.0.1:${server.port}`
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 

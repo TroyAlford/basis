@@ -117,7 +117,7 @@ async function start(install: string, applicationGraph: Graph = graph): Promise<
     .graph(applicationGraph)
     .database()
     .root(install)
-  server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
+  server.start({ hostname: '127.0.0.1', logger: silent, port: 0 })
   try {
     await server.ready()
   } finally {

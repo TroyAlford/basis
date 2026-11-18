@@ -11,3 +11,6 @@ tmp/
 
 # Conventional Basis emitter output
 generated/
+
+# Generated server hydration entry
+**/.basis/

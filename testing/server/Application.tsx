@@ -1,8 +1,7 @@
 import { ApplicationBase } from 'basis/react'
 import * as React from 'react'
-import { createRoot } from 'react-dom/client'
 
-/** A minimal managed application used to exercise the server modes. */
+/** A minimal managed application used to exercise the server lifecycle. */
 export class Application extends ApplicationBase {
   layout(content: React.ReactNode): React.ReactNode {
     return (
@@ -10,6 +9,3 @@ export class Application extends ApplicationBase {
     )
   }
 }
-
-const root = document.getElementById('root')
-if (root) createRoot(root).render(<Application />)

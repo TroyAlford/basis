@@ -81,3 +81,39 @@ export function writeDevShell(options: DevShellOptions): string {
   fs.writeFileSync(file, renderDevShell(options))
   return file
 }
+
+/** Options for generating the browser hydration entry. */
+export interface HydrationEntryOptions {
+  /** Directory the generated entry is written to. */
+  directory: string,
+  /** Absolute path to the application module. */
+  mainPath: string,
+}
+
+/**
+ * Write the generated browser entry that hydrates the server-rendered root.
+ * @param options - The output directory and application module.
+ * @returns The absolute path to the generated entry.
+ */
+export function writeHydrationEntry({ directory, mainPath }: HydrationEntryOptions): string {
+  fs.mkdirSync(directory, { recursive: true })
+  const relative = path.relative(directory, mainPath).split(path.sep).join('/')
+  const source = `import * as React from 'react'
+import { createRoot, hydrateRoot } from 'react-dom/client'
+import { HeadProvider } from 'basis/react'
+import * as Main from '${relative.startsWith('.') ? relative : `./${relative}`}'
+
+const Component = Main.Application ?? Main.default
+const root = document.getElementById('root')
+const payload = document.getElementById('basis-bootstrap')?.textContent
+const props = payload ? JSON.parse(payload) : {}
+const application = React.createElement(HeadProvider, null, React.createElement(Component, props))
+
+if (!root) throw new Error('Basis: missing #root')
+if (root.hasChildNodes()) hydrateRoot(root, application)
+else createRoot(root).render(application)
+`
+  const file = path.join(directory, 'hydrate.tsx')
+  fs.writeFileSync(file, source)
+  return file
+}
