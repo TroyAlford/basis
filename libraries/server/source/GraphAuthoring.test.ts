@@ -34,6 +34,36 @@ describe('Graph authoring types', () => {
     expect(graph.definitions.entity('Note')?.fields.find(field => field.name === 'title')?.type).toBe(FieldType.String)
   })
 
+  test('accepts Entity-owned Collection authoring', () => {
+    const graph = new Graph({
+      entities: [
+        {
+          fields: [{
+            field: 'entries',
+            target: 'DeckCardPrinting',
+            type: FieldType.Collection,
+            via: 'DeckCardPrinting[deck = @]',
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [{ field: 'quantity', type: FieldType.Number }],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(graph.definitions.entity('Deck')?.collections).toContainEqual(
+      expect.objectContaining({ kind: 'explicit', name: 'entries' }),
+    )
+  })
+
   test('accepts default field authoring', () => {
     const graph = new Graph({
       entities: [{

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
 import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
@@ -734,11 +735,11 @@ export class Graph {
       resolve: value => this.#policyEntity(value),
     })
     const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-    const prefix = collection.kind === 'relationship'
+    const prefix = 'relationship' in collection
       ? `${lowerFirst(collection.relationship.name)}.`
       : ''
     if ('kind' in resolved) {
-      if (collection.kind === 'relationship' && normalized.startsWith(prefix)) {
+      if ('relationship' in collection && normalized.startsWith(prefix)) {
         throw new Error(
           'Graph: unknown relationship field ' +
           `"${collection.relationship.name}.${normalized.slice(prefix.length)}"`,
@@ -900,6 +901,7 @@ export class Graph {
       return undefined
     }
     const collection = resolved.collection
+    const record = collection.kind === 'explicit' && collection.targetEndpoint === undefined
     const target = this.#collectionTarget(collection)
     const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
     const relationshipAlias = `__policy_${suffix}_rel`
@@ -910,13 +912,27 @@ export class Graph {
     const parentId = prefix === ''
       ? `${parentAlias}.${quoteIdentifier('id')}`
       : row(prefix).expression
-    const sql = collectionSqlRelation(collection, parentId, {
+    const relation = resolveCollectionRelation(collection, value => this.#policyEntity(value))
+    const sql = collectionSqlRelation(this.definitions, relation, parentId, {
       relationship: relationshipAlias,
       root: rootAliasName,
       target: targetAlias,
     })
-    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
-    const resolver = this.#policyResolver(target, quoteIdentifier(targetAlias), quoteIdentifier(rootAliasName), true)
+    const rootAliasValue = sql.rootAlias
+    const rowAlias = record ? sql.relationshipAlias : sql.targetAlias ?? rootAliasValue
+    if (rowAlias === undefined) {
+      throw new Error(`Graph: collection "${name}" has no row alias`)
+    }
+    const relationship = 'relationship' in collection ? collection.relationship : undefined
+    const resolver = this.#policyResolver(
+      target,
+      quoteIdentifier(rowAlias),
+      quoteIdentifier(record ? rowAlias : rootAliasValue as string),
+      true,
+    )
+    const recordIdentities = record
+      ? new Set(collection.relationship.between.map(endpoint => endpoint.field))
+      : new Set<string>()
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
     const resolve = (path: string): QueryFieldDefinition => {
@@ -936,18 +952,37 @@ export class Graph {
           throw new Error(`Graph: relationship field "${normalized}" is not policy-safe`)
         }
         if (!sql.relationshipAlias) throw new Error(`Graph: unresolved relationship "${normalized}"`)
+        const endpoint = relationship?.between.find(candidate => candidate.field === property)
+        const column = endpoint === undefined ? property : `${endpoint.field}.id`
         expressions.set(
           normalized,
-          `${quoteIdentifier(sql.relationshipAlias)}.${quoteIdentifier(property)}`,
+          `${quoteIdentifier(sql.relationshipAlias)}.${quoteIdentifier(column)}`,
         )
         return member.field
       }
       const result = resolver(normalized)
       expressions.set(result.field.name, result.expression)
-      if (result.field.name.endsWith('.id') || normalized === 'id' || normalized.endsWith('.id')) {
+      if (
+        recordIdentities.has(normalized)
+        || result.field.name.endsWith('.id')
+        || normalized === 'id'
+        || normalized.endsWith('.id')
+      ) {
         identities.add(result.field.name)
       }
       return result.field
+    }
+    let nestedCollection: (nested: string) => CollectionScope | undefined = () => undefined
+    if (!record) {
+      nestedCollection = (nested: string) => this.#collectionSqlScope(
+        target,
+        nested,
+        quoteIdentifier(sql.targetAlias ?? rowAlias),
+        quoteIdentifier(sql.targetAlias ?? rowAlias),
+        quoteIdentifier(rootAliasValue as string),
+        true,
+        depth + 1,
+      )
     }
     return {
       array: nested => {
@@ -967,15 +1002,7 @@ export class Graph {
           return undefined
         }
       },
-      collection: nested => this.#collectionSqlScope(
-        target,
-        nested,
-        quoteIdentifier(sql.targetAlias ?? sql.rootAlias),
-        quoteIdentifier(sql.targetAlias ?? sql.rootAlias),
-        quoteIdentifier(sql.rootAlias),
-        true,
-        depth + 1,
-      ),
+      collection: nestedCollection,
       condition: sql.condition,
       definition: target,
       expression: field => {
@@ -985,6 +1012,7 @@ export class Graph {
       },
       field: resolve,
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
+      predicate: sql.predicate,
       relation: sql.relation,
     }
   }
@@ -1038,21 +1066,21 @@ export class Graph {
         WHERE ((${read.join(' OR ')}) AND (${create.join(' OR ')}))
       )
     `
-    return {
+    const generated = securityDefinerFunction({
       body: body.trim(),
+      qualified,
+      searchPath: this.#searchPath(),
+      signature: 'root_id text, proposed jsonb',
+    })
+    return {
+      body: generated.body,
       lifecycle: false,
       name,
       required: [name],
       searchPath: this.#searchPath(),
       securityDefiner: true,
       signature: 'root_id text, proposed jsonb',
-      sql: `
-        CREATE OR REPLACE FUNCTION ${qualified}(root_id text, proposed jsonb)
-        RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-          ${body}
-        $$;
-      `,
+      sql: generated.sql,
     }
   }
 
@@ -1261,7 +1289,14 @@ export class Graph {
       return this.#compileDirectPredicate(grant, alias, table, true)
     }
     if (this.#requiresHelper(grant, table)) {
-      return `${this.#qualified(this.#helperName(grant))}(${alias}.${quoteIdentifier('id')})`
+      const relationship = this.definitions.relationship(table)
+      let args = `${alias}.${quoteIdentifier('id')}`
+      if (relationship) {
+        args = relationship.between
+          .map(endpoint => `${alias}.${quoteIdentifier(`${endpoint.field}.id`)}`)
+          .join(', ')
+      }
+      return `${this.#qualified(this.#helperName(grant))}(${args})`
     }
     return this.#compileDirectPredicate(grant, alias, table, false)
   }
@@ -1363,27 +1398,40 @@ export class Graph {
       seen.add(name)
       const qualified = this.#qualified(name)
       const predicate = this.#compileDirectPredicate(grant, '__row', grant.target, true)
-      const sql = `
-        CREATE OR REPLACE FUNCTION ${qualified}(root_id text)
-        RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-          SELECT EXISTS (
-            SELECT 1
-            FROM ${quoteIdentifier(grant.target)} AS "__row"
-            WHERE "__row".${quoteIdentifier('id')} = root_id
-              AND ${predicate}
-          )
-        $$;
-      `
+      const relationship = this.definitions.relationship(grant.target)
+      let signature = 'root_id text'
+      let identity = `"__row".${quoteIdentifier('id')} = root_id`
+      if (relationship) {
+        signature = relationship.between
+          .map(endpoint => `${endpoint.field}Id text`)
+          .join(', ')
+        identity = relationship.between
+          .map(endpoint => `"__row".${quoteIdentifier(`${endpoint.field}.id`)} = ${endpoint.field}Id`)
+          .join(' AND ')
+      }
+      const body = `
+        SELECT EXISTS (
+          SELECT 1
+          FROM ${quoteIdentifier(grant.target)} AS "__row"
+          WHERE ${identity}
+            AND ${predicate}
+        )
+      `.trim()
+      const generated = securityDefinerFunction({
+        body,
+        qualified,
+        searchPath: this.#searchPath(),
+        signature,
+      })
       functions.push({
-        body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+        body: generated.body,
         lifecycle: false,
         name,
         required: [name],
         searchPath: this.#searchPath(),
         securityDefiner: true,
-        signature: 'root_id text',
-        sql,
+        signature,
+        sql: generated.sql,
       })
     }
     return functions
@@ -1418,33 +1466,35 @@ export class Graph {
       const predicate = this.#compileDirectPredicate(grant, '__row', constraint.owner, true)
       const name = constraint.validator.replace(/^basis\./u, '')
       const qualified = this.#qualified(name)
-      const sql = `
-        CREATE OR REPLACE FUNCTION ${qualified}(root_id text)
-        RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-          SELECT EXISTS (
-            SELECT 1
-            FROM ${quoteIdentifier(constraint.owner)} AS "__row"
-            JOIN "Entity" AS "__written"
-              ON "__written".${quoteIdentifier('id')} = "__row".${quoteIdentifier('id')}
-            WHERE "__row".${quoteIdentifier('id')} = root_id
-              AND (
-                "__written".xmin = pg_current_xact_id()::xid
-                OR pg_xact_status("__written".xmin::text::xid8) = 'in progress'
-              )
-              AND ${predicate}
-          )
-        $$;
-      `
+      const body = `
+        SELECT EXISTS (
+          SELECT 1
+          FROM ${quoteIdentifier(constraint.owner)} AS "__row"
+          JOIN "Entity" AS "__written"
+            ON "__written".${quoteIdentifier('id')} = "__row".${quoteIdentifier('id')}
+          WHERE "__row".${quoteIdentifier('id')} = root_id
+            AND (
+              "__written".xmin = pg_current_xact_id()::xid
+              OR pg_xact_status("__written".xmin::text::xid8) = 'in progress'
+            )
+            AND ${predicate}
+        )
+      `.trim()
+      const generated = securityDefinerFunction({
+        body,
+        qualified,
+        searchPath: this.#searchPath(),
+        signature: 'root_id text',
+      })
       functions.push({
-        body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+        body: generated.body,
         lifecycle: false,
         name,
         required: [name],
         searchPath: this.#searchPath(),
         securityDefiner: true,
         signature: 'root_id text',
-        sql,
+        sql: generated.sql,
       })
     }
     return functions
@@ -1894,6 +1944,49 @@ function roleCondition(role: string, schema: string): string {
  */
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`
+}
+
+/**
+ * Build one SECURITY DEFINER SQL function with a body-safe dollar delimiter.
+ * @param options - Function name, signature, search path and body.
+ * @param options.body - Complete SQL function body.
+ * @param options.qualified - Schema-qualified function name.
+ * @param options.searchPath - Function search path.
+ * @param options.signature - Function argument signature.
+ * @returns The function body and DDL.
+ */
+function securityDefinerFunction(options: {
+  readonly body: string,
+  readonly qualified: string,
+  readonly searchPath: string,
+  readonly signature: string,
+}): { readonly body: string, readonly sql: string } {
+  const delimiter = dollarDelimiter(options.body)
+  return {
+    body: options.body,
+    sql: `
+      CREATE OR REPLACE FUNCTION ${options.qualified}(${options.signature})
+      RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${options.searchPath} AS ${delimiter}
+        ${options.body}
+      ${delimiter};
+    `,
+  }
+}
+
+/**
+ * Choose a dollar-quote delimiter absent from one function body.
+ * @param body - Complete SQL function body.
+ * @returns A delimiter that does not occur in the body.
+ */
+function dollarDelimiter(body: string): string {
+  let index = 0
+  let delimiter = '$basis$'
+  while (body.includes(delimiter)) {
+    delimiter = `$basis_${index}$`
+    index += 1
+  }
+  return delimiter
 }
 
 /**

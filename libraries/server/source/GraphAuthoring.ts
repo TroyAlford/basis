@@ -125,6 +125,18 @@ export interface AuthoredReferenceField {
   readonly unique?: true,
 }
 
+/** One authored derived Collection navigation. */
+export interface AuthoredCollectionField {
+  /** Field name, in camelCase. */
+  readonly field: string,
+  /** Entity or relationship record type returned by the collection. */
+  readonly target: string,
+  /** Collection field type. */
+  readonly type: Authored<FieldType.Collection>,
+  /** Owner-relative Graph path used to resolve the collection. */
+  readonly via: string,
+}
+
 /** One authored reciprocal inverse navigation. */
 export interface AuthoredInverseField {
   /** Inverse cardinality. */
@@ -142,6 +154,7 @@ export interface AuthoredInverseField {
 /** Any authored entity field. */
 export type AuthoredField =
   | AuthoredArrayField
+  | AuthoredCollectionField
   | AuthoredEnumField
   | AuthoredIdentityField
   | AuthoredInverseField
@@ -210,16 +223,16 @@ export interface AuthoredEntity {
 export interface AuthoredRelationshipEndpoint {
   /** Endpoint field name, in camelCase. */
   readonly field: string,
-  /** Inverse navigation name on the target. */
-  readonly inverse: string,
+  /** Optional legacy inverse navigation name on the target. */
+  readonly inverse?: string,
   /** Referenced entity name. */
   readonly target: string,
 }
 
 /** One authored named relationship. */
 export interface AuthoredRelationship {
-  /** The two relationship endpoints. */
-  readonly between: readonly [AuthoredRelationshipEndpoint, AuthoredRelationshipEndpoint],
+  /** The relationship endpoints in authored order. */
+  readonly between: readonly AuthoredRelationshipEndpoint[],
   /** Declarative constraints owned by this relationship. */
   readonly constraints?: readonly GraphConstraint[],
   /** Relationship-owned fields. */
