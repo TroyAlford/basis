@@ -71,7 +71,11 @@ function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']
   const members = [
     { line: `readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
     ...entity.fields
-      .filter(field => field.name !== 'id' && field.type !== FieldType.Inverse)
+      .filter(field => (
+        field.name !== 'id'
+        && field.type !== FieldType.Collection
+        && field.type !== FieldType.Inverse
+      ))
       .map(field => ({
         line: `readonly ${field.name}: ${fieldType(field)},`,
         name: field.name,
@@ -102,6 +106,7 @@ function discriminatorType(
  * @returns TypeScript type expression.
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
+  if (field.type === FieldType.Collection) return 'unknown'
   if (field.type === FieldType.Entity) {
     return field.nullable === false ? 'Reference' : 'Reference | null'
   }

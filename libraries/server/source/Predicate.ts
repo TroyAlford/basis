@@ -176,6 +176,12 @@ export const Predicate = {
     if (field.type === FieldType.Entity) {
       return { name: field.column, type: FieldType.ID }
     }
+    if (field.type === FieldType.Collection) {
+      throw new Error(
+        `Query field "${entity.name}.${name}" is a collection navigation; ` +
+        'navigation fields cannot be used in predicates or ordering',
+      )
+    }
     if (field.type === FieldType.Inverse) {
       throw new Error(
         `Query field "${entity.name}.${name}" is an inverse navigation; ` +

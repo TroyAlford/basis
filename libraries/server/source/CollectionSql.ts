@@ -40,6 +40,9 @@ export function collectionSqlRelation(
   aliases: CollectionSqlAliases,
 ): CollectionSqlRelation {
   const targetName = collection.target
+  if (collection.kind === 'explicit') {
+    throw new Error('Explicit Collections are not supported by the query compiler yet')
+  }
   if (collection.kind === 'inverse') {
     if (targetName === 'Entity') {
       return {
