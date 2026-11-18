@@ -1,6 +1,6 @@
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
-import { formatSQL, formatSQLResult } from './sql/format'
+import { formatSQL } from './sql/format'
 
 /**
  * Whether a tag expression is a recognized SQL tag.
@@ -47,7 +47,7 @@ export const sqlTemplateFormat: Rule.RuleModule = {
         const lineStart = context.sourceCode.getText().lastIndexOf('\n', node.range[0]) + 1
         const baseIndent = context.sourceCode.text.slice(lineStart).match(/^\s*/u)?.[0] ?? ''
         const dedented = dedent(raw)
-        const result = formatSQLResult(dedented)
+        const result = formatSQL(dedented)
 
         if (result.status === 'unsupported') {
           context.report({
@@ -117,5 +117,5 @@ function dedent(raw: string): string {
   }).join('\n')
 }
 
-export { formatSQL, formatSQLResult }
+export { formatSQL }
 export type { SqlFormatResult } from './sql/format'

@@ -1,6 +1,6 @@
 /* eslint-disable @stylistic/max-len -- SQL fixtures and protocol field names need long lines. */
 import { describe, expect, test } from 'bun:test'
-import { formatSQL, formatSQLResult } from './format'
+import { formatSQL } from './format'
 import { sqlSemanticTree, verifySqlSemantics } from './verify'
 
 const FIXTURES = [
@@ -34,7 +34,7 @@ const FIXTURES = [
 describe('formatter semantics', () => {
   for (const sql of FIXTURES) {
     test(`preserves meaning: ${sql.slice(0, 48)}`, () => {
-      const result = formatSQLResult(sql)
+      const result = formatSQL(sql)
       expect(result.status).toBe('formatted')
       if (result.status !== 'formatted') return
       expect(sqlSemanticTree(result.sql)).toEqual(sqlSemanticTree(sql))
@@ -43,22 +43,22 @@ describe('formatter semantics', () => {
 
   test('is idempotent for every fixture', () => {
     for (const sql of FIXTURES) {
-      const once = formatSQLResult(sql)
+      const once = formatSQL(sql)
       expect(once.status).toBe('formatted')
       if (once.status !== 'formatted') continue
-      const twice = formatSQLResult(once.sql)
+      const twice = formatSQL(once.sql)
       expect(twice).toEqual(once)
     }
   })
 
   test('omits the trailing semicolon for one statement and separates multiple statements', () => {
-    expect(formatSQL('select 1;')).toBe('SELECT 1')
-    expect(formatSQL('select 1; select 2')).toBe('SELECT 1;\n\nSELECT 2')
+    expect(formatSQL('select 1;')).toEqual({ sql: 'SELECT 1', status: 'formatted' })
+    expect(formatSQL('select 1; select 2')).toEqual({ sql: 'SELECT 1;\n\nSELECT 2', status: 'formatted' })
   })
 
   test('preserves quoted identifiers, literals, and comments', () => {
     const sql = 'select "Name", \'It\'\'s\', $$dollar$$ -- keep\nfrom "Entity"'
-    const result = formatSQLResult(sql)
+    const result = formatSQL(sql)
     expect(result.status).toBe('formatted')
     if (result.status !== 'formatted') return
     expect(result.sql).toContain('"Name"')
@@ -70,22 +70,22 @@ describe('formatter semantics', () => {
 
 describe('failure safety', () => {
   test('malformed SQL is invalid', () => {
-    const result = formatSQLResult('select from')
+    const result = formatSQL('select from')
     expect(result.status).toBe('invalid')
   })
 
   test('unsupported top-level SQL names the construct', () => {
-    const result = formatSQLResult('create operator ^ (leftarg = int, rightarg = int, procedure = int4eq)')
+    const result = formatSQL('create operator ^ (leftarg = int, rightarg = int, procedure = int4eq)')
     expect(result).toEqual({ construct: 'DefineStmt', status: 'unsupported' })
   })
 
   test('unsupported nested SQL names the construct', () => {
-    const result = formatSQLResult('select * from t where data is json')
+    const result = formatSQL('select * from t where data is json')
     expect(result).toEqual({ construct: 'JsonIsPredicate', status: 'unsupported' })
   })
 
   test('a supported parent cannot hide an unsupported child', () => {
-    const result = formatSQLResult('select (select data is json from t) from u')
+    const result = formatSQL('select (select data is json from t) from u')
     expect(result).toEqual({ construct: 'JsonIsPredicate', status: 'unsupported' })
   })
 

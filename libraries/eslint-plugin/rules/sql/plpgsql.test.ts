@@ -1,6 +1,6 @@
 /* eslint-disable @stylistic/max-len -- SQL fixtures and protocol field names need long lines. */
 import { describe, expect, test } from 'bun:test'
-import { formatSQLResult } from './format'
+import { formatSQL } from './format'
 import { plSemanticTree, verifyPlSemantics, verifySqlSemantics } from './verify'
 
 const FUNCTION = `
@@ -19,7 +19,7 @@ end $$ language plpgsql;
 
 describe('PL/pgSQL formatting', () => {
   test('formats declarations, IF/ELSIF/ELSE, assignments, RETURN, and EXCEPTION', () => {
-    const result = formatSQLResult(FUNCTION)
+    const result = formatSQL(FUNCTION)
     expect(result.status).toBe('formatted')
     if (result.status !== 'formatted') return
     expect(result.sql).toMatchIndented(`
@@ -46,14 +46,14 @@ describe('PL/pgSQL formatting', () => {
   })
 
   test('preserves PL/pgSQL meaning', () => {
-    const result = formatSQLResult(FUNCTION)
+    const result = formatSQL(FUNCTION)
     expect(result.status).toBe('formatted')
     if (result.status !== 'formatted') return
     expect(plSemanticTree(result.sql)).toEqual(plSemanticTree(FUNCTION))
   })
 
   test('formats a DO block and its comments', () => {
-    const result = formatSQLResult(`
+    const result = formatSQL(`
       do $$ begin
         if exists (select 1 from widgets where active = true) then
           -- disable
@@ -81,7 +81,7 @@ describe('PL/pgSQL formatting', () => {
   })
 
   test('formats loops, CASE statements, and dynamic SQL', () => {
-    const result = formatSQLResult(`
+    const result = formatSQL(`
       create function f() returns int as $$ begin
         for i in 1..10 loop continue when i=2; exit when i=5; end loop;
         case x when 1 then return 1; else return 2; end case;
@@ -97,7 +97,7 @@ describe('PL/pgSQL formatting', () => {
   })
 
   test('rejects an unsupported PL/pgSQL construct', () => {
-    const result = formatSQLResult(`
+    const result = formatSQL(`
       create function f() returns void as $$
       declare c refcursor;
       begin

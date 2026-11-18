@@ -16,6 +16,8 @@ export interface PrintContext {
   readonly print: (node: Node) => SqlDoc,
   /** The source text the current AST was parsed from. */
   readonly source: SourceText,
+  /** A statement printer must not consume comments beyond this source offset. */
+  statementEnd: number,
   /** Consume the next PL/pgSQL function in source order. */
   readonly takePlFunction: () => PlFunction | undefined,
 }
@@ -31,6 +33,7 @@ export function createPrinter(source: SourceText, plFunctions: readonly PlFuncti
     child: childSource => createPrinter(childSource),
     print: node => printNode(node, context),
     source,
+    statementEnd: Number.POSITIVE_INFINITY,
     takePlFunction: () => {
       const fn = plFunctions[plIndex]
       plIndex += 1

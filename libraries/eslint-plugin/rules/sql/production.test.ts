@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type * as TypeScript from 'typescript'
-import { formatSQLResult } from './format'
+import { formatSQL } from './format'
 import { sqlSemanticTree } from './verify'
 
 const require = createRequire(import.meta.url)
@@ -70,7 +70,7 @@ describe('repository SQL templates', () => {
     expect(templates.length).toBeGreaterThan(0)
     const failures: string[] = []
     for (const template of templates) {
-      const result = formatSQLResult(template.sql)
+      const result = formatSQL(template.sql)
       if (result.status !== 'formatted') {
         failures.push(`${template.file}: ${result.status} ${JSON.stringify(result)}`)
         continue
@@ -80,7 +80,7 @@ describe('repository SQL templates', () => {
       } catch {
         failures.push(`${template.file}: meaning changed`)
       }
-      const twice = formatSQLResult(result.sql)
+      const twice = formatSQL(result.sql)
       if (twice.status !== 'formatted' || twice.sql !== result.sql) {
         failures.push(`${template.file}: not idempotent`)
       }

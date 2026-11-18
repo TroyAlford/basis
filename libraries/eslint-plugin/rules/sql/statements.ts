@@ -67,7 +67,7 @@ export function printSelect(node: ValueOf<'SelectStmt'>, ctx: PrintContext, opti
     node.whereClause ? [node.whereClause] : undefined,
     node.groupClause,
     node.sortClause,
-  ], ctx)
+  ], ctx) ?? ctx.statementEnd
   const targets = group(concat(
     text('SELECT'),
     distinct,
@@ -981,7 +981,7 @@ function pushClause(
  * @param clauses
  * @param ctx
  */
-function firstClauseStart(clauses: readonly (readonly Node[] | undefined)[], ctx: PrintContext): number {
+function firstClauseStart(clauses: readonly (readonly Node[] | undefined)[], ctx: PrintContext): number | undefined {
   for (const nodes of clauses) {
     const first = nodes?.[0]
     if (first) {
@@ -989,7 +989,7 @@ function firstClauseStart(clauses: readonly (readonly Node[] | undefined)[], ctx
       if (start !== undefined) return start
     }
   }
-  return Number.POSITIVE_INFINITY
+  return undefined
 }
 
 /**

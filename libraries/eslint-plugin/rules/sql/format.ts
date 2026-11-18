@@ -1,7 +1,8 @@
 /* eslint-disable camelcase */
 import type { Node } from 'libpg-query'
 import { loadModule, parsePlPgSQLSync, parseSync, scanSync } from 'libpg-query'
-import { render } from './doc'
+import type { SqlDoc } from './doc'
+import { concat, hardline, join, render, text } from './doc'
 import type { PlFunction } from './plpgsql'
 import { createPrinter } from './printer'
 import { SourceText } from './source'
@@ -30,7 +31,7 @@ interface Placeholder {
  * outcomes; no partial SQL is ever returned as formatted.
  * @param sql
  */
-export function formatSQLResult(sql: string): SqlFormatResult {
+export function formatSQL(sql: string): SqlFormatResult {
   let encoded: { placeholders: Placeholder[], safeSql: string }
   try {
     encoded = encodePlaceholders(sql)
@@ -67,28 +68,34 @@ export function formatSQLResult(sql: string): SqlFormatResult {
   const context = createPrinter(source, plFunctions)
   let rendered: string
   try {
+    const documents: SqlDoc[] = []
     let previousEnd = 0
-    rendered = parsed.stmts
-      .map((statement, index) => {
-        const start = statement.stmt_location ?? 0
-        const end = statement.stmt_len === undefined ? safeSql.length : start + statement.stmt_len
-        const leading = source.takeComments(previousEnd, start)
-        let body = render(context.print(statement.stmt as Node))
-        const statementEnd = source.span(statement.stmt as Node)?.end ?? start
-        const trailing = source.takeComments(statementEnd, end)
-        if (leading.length > 0) {
-          body = `${leading.map(comment => comment.text).join('\n')}\n${body}`
-        }
-        if (trailing.length > 0) {
-          const inline = source.lineAt(statementEnd) === trailing[0]?.line
-          if (inline) body += ` ${trailing[0]?.text}`
-          const rest = inline ? trailing.slice(1) : trailing
-          if (rest.length > 0) body += `\n${rest.map(comment => comment.text).join('\n')}`
-        }
-        previousEnd = end
-        return index < parsed.stmts.length - 1 ? `${body};` : body
-      })
-      .join('\n\n')
+    parsed.stmts.forEach((statement, index) => {
+      const start = statement.stmt_location ?? 0
+      const end = statement.stmt_len === undefined ? safeSql.length : start + statement.stmt_len
+      const nextStart = parsed.stmts[index + 1]?.stmt_location ?? safeSql.length
+      const leading = source.takeComments(previousEnd, start)
+      const nodeEnd = source.span(statement.stmt as Node)?.end ?? start
+      context.statementEnd = nodeEnd
+      const body = context.print(statement.stmt as Node)
+      if (index > 0) documents.push(hardline(), hardline())
+      if (leading.length > 0) {
+        documents.push(join(hardline(), leading.map(comment => text(comment.text))), hardline())
+      }
+      documents.push(body)
+      if (index < parsed.stmts.length - 1) documents.push(text(';'))
+      const inline = source.takeInlineComments(source.lineAt(nodeEnd), nodeEnd, nextStart)
+      if (inline.length > 0) documents.push(text(` ${inline[0]?.text}`))
+      if (inline.length > 1) {
+        documents.push(hardline(), join(hardline(), inline.slice(1).map(comment => text(comment.text))))
+      }
+      previousEnd = end
+    })
+    const remaining = source.takeComments(0, safeSql.length)
+    if (remaining.length > 0) {
+      documents.push(hardline(), join(hardline(), remaining.map(comment => text(comment.text))))
+    }
+    rendered = render(concat(...documents))
   } catch (error) {
     if (error instanceof UnsupportedNodeError) {
       return { construct: error.nodeKind, status: 'unsupported' }
@@ -115,15 +122,6 @@ export function formatSQLResult(sql: string): SqlFormatResult {
     restored = restored.replace(placeholder.safe, placeholder.original)
   }
   return { sql: restored, status: 'formatted' }
-}
-
-/**
- * Format one SQL string, returning the original text on any failure.
- * @param sql
- */
-export function formatSQL(sql: string): string {
-  const result = formatSQLResult(sql)
-  return result.status === 'formatted' ? result.sql : sql.trim()
 }
 
 /**
