@@ -1631,21 +1631,33 @@ class QueryProjection {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)
-    const limit = spec.limit === undefined ? 3 : spec.limit
+    const authored = plan.collection.kind === 'explicit' ? plan.collection : undefined
+    const limit = spec.limit !== undefined
+      ? spec.limit
+      : authored?.viaLimit !== undefined ? authored.viaLimit : 3
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
     }
-    const offset = spec.offset ?? 0
+    const offset = spec.offset !== undefined
+      ? spec.offset
+      : authored?.viaOffset !== undefined ? authored.viaOffset : 0
     if (!Number.isInteger(offset) || offset < 0) {
       throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
+    }
+    const orderBy = spec.orderBy ?? authored?.viaOrderBy
+    const effective: ProjectedCollectionSpec = {
+      ...spec,
+      limit,
+      offset,
+      ...(orderBy === undefined ? {} : { orderBy }),
     }
     const filter = spec.filters.size === 0
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const adapter = plan.resultType === 'record'
-      ? this.#recordMember(plan, spec)
-      : this.#entityMember(plan, spec, key)
-    const orderings = collectionOrderings(plan, spec.orderBy, adapter)
+      ? this.#recordMember(plan, effective)
+      : this.#entityMember(plan, effective, key)
+    const orderings = collectionOrderings(plan, effective.orderBy, adapter)
     const matched = adapter.compile(filter)
     const total = filter === undefined ? undefined : adapter.compile(undefined)
     const matchedCount = collectionIdentityCount(matched, adapter.identity)

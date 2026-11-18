@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { LifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
-import { queryEntity } from './Database'
+import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 
 const definitions = EntityDefinitions.load(JSON.stringify({
@@ -27,6 +27,18 @@ const definitions = EntityDefinitions.load(JSON.stringify({
           target: 'Card',
           type: 'Collection',
           via: 'DeckCardPrinting[deck = @].card',
+        },
+        {
+          field: 'pagedEntries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @]{$limit:1,$offset:1,$orderBy:-quantity}',
+        },
+        {
+          field: 'pagedCards',
+          target: 'Card',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @]{$limit:1,$offset:1,$orderBy:-title}.card',
         },
       ],
       name: 'Deck',
@@ -374,6 +386,55 @@ describe('Explicit collections', () => {
       )
       expect(mixedNegative?.$matched).toBe(0)
       expect(mixedNegative?.$total).toBe(2)
+    })
+  })
+
+  test('applies authored ordering and paging with query-time overrides', async () => {
+    await withLifecycleDatabase('explicit-collections', async database => {
+      await seed(database)
+      const records = await queryEntity<{
+        readonly id: string,
+        readonly pagedEntries: Envelope<RecordItem>,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'pagedEntries'],
+        where: { id: deckA },
+      })
+      expect(records[0]?.pagedEntries.$total).toBe(3)
+      expect(records[0]?.pagedEntries.items.map(item => item.quantity)).toEqual([2])
+
+      const recordOverride = await queryEntity<{
+        readonly id: string,
+        readonly pagedEntries: Envelope<RecordItem>,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'pagedEntries{$limit:2,$offset:0,$orderBy:quantity}'],
+        where: { id: deckA },
+      })
+      expect(recordOverride[0]?.pagedEntries.$total).toBe(3)
+      expect(recordOverride[0]?.pagedEntries.items.map(item => item.quantity)).toEqual([1, 2])
+
+      const cards = await queryEntity<{
+        readonly id: string,
+        readonly pagedCards: Envelope<{ readonly title: string }>,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'pagedCards.title'],
+        where: { id: deckA },
+      })
+      expect(cards[0]?.pagedCards.$total).toBe(2)
+      expect(cards[0]?.pagedCards.items.map(item => item.title)).toEqual(['Card One'])
+
+      const cardOverride = await queryEntity<{
+        readonly id: string,
+        readonly pagedCards: Envelope<{ readonly title: string }>,
+      }>(database.sql, definitions, 'Deck', {
+        fields: ['id', 'pagedCards{$orderBy:title}', 'pagedCards.title'],
+        where: { id: deckA },
+      })
+      expect(cardOverride[0]?.pagedCards.$total).toBe(2)
+      expect(cardOverride[0]?.pagedCards.items.map(item => item.title)).toEqual(['Card Two'])
+
+      expect(() => compileEntityQuery(definitions, 'Deck', {
+        fields: ['id', 'pagedEntries{$orderBy:missing}'],
+      })).toThrow('Unknown collection record field')
     })
   })
 })
