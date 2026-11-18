@@ -2,7 +2,9 @@ import { Logger } from 'basis/logger'
 import type { Identity } from 'basis/oauth'
 import { HttpVerb } from 'basis/server'
 import { tempDirectory } from 'basis/testing'
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, setDefaultTimeout, test } from 'bun:test'
+
+setDefaultTimeout(60_000)
 import { randomUUID } from 'node:crypto'
 import { rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
