@@ -864,9 +864,9 @@ export class Server<
       },
     })
     this.identity(options.session)
-    this.api([HttpVerb.Get], 'oauth/login', (_params, { request }) => flow.login(request))
-    this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
-    this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
+    this.#api([HttpVerb.Get], 'oauth/login', (_params, { request }) => flow.login(request), false)
+    this.#api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request), false)
+    this.#api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request), false)
     return this
   }
 

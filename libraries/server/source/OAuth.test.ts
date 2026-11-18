@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Identity } from '../../oauth'
 import type { IdentityCredentials } from '../../oauth/identity'
+import { HttpVerb } from '../../utilities'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import { Server } from './Server'
@@ -413,5 +414,57 @@ describe('Server.oauth', () => {
     expect(loginResponse?.status).toBe(302)
     expect(loginResponse?.headers.get('location')).toContain('provider.test')
     expect(seenHost).toBe('app.example.com')
+  })
+
+  test('keeps OAuth routes independent of a failing application context loader', async () => {
+    const server = new Server()
+      .context(async () => {
+        throw new Error('context unavailable')
+      })
+      .oauth({
+        authorize: state => `https://provider.test/authorize?state=${state}`,
+        exchange: async () => 'access-token',
+        identity: async () => 'user-42',
+        session: new Identity(CREDENTIALS),
+      })
+      .api([HttpVerb.Get], 'app', () => new Response('application'))
+
+    const loginCookies = await (async () => {
+      const capture = captureSetCookie()
+      try {
+        const response = await server.handle(requestFor(
+          `${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent('/done')}`,
+        ))
+        expect(response?.status).toBe(302)
+        return [...capture.cookies]
+      } finally {
+        capture.restore()
+      }
+    })()
+    const stateCookie = loginCookies.find(cookie => cookie.startsWith('basis_oauth_state=')) ?? ''
+    const returnToCookie = loginCookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+
+    const callback = await (async () => {
+      const capture = captureSetCookie()
+      try {
+        return await server.handle(requestFor(
+          `${ORIGIN}/api/oauth/callback?code=abc&state=${cookieValue(stateCookie)}`,
+          `${stateCookie.split(';')[0]}; ${returnToCookie.split(';')[0]}`,
+        ))
+      } finally {
+        capture.restore()
+      }
+    })()
+    expect(callback?.status).toBe(302)
+    expect(callback?.headers.get('location')).toBe('/done')
+
+    const logout = await server.handle(requestFor(
+      `${ORIGIN}/api/oauth/logout?returnTo=${encodeURIComponent('/done')}`,
+    ))
+    expect(logout?.status).toBe(302)
+    expect(logout?.headers.get('location')).toBe('/done')
+
+    await expect(server.handle(requestFor(`${ORIGIN}/api/app`)))
+      .rejects.toThrow('context unavailable')
   })
 })
