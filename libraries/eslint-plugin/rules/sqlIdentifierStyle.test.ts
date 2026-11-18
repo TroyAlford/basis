@@ -29,4 +29,15 @@ describe('sqlIdentifierStyle', () => {
     const messages = lint('sql`select UserGroup.id from (select id from users) UserGroup`')
     expect(messages.some(message => message.message.includes('"UserGroup"'))).toBe(true)
   })
+
+  test('reports mixed-case index names and indexed columns', () => {
+    const messages = lint('sql`create index UserAccountIdx on users (userId)`')
+    const text = messages.map(message => message.message).join('\n')
+    expect(text).toContain('"UserAccountIdx"')
+    expect(text).toContain('"userId"')
+  })
+
+  test('accepts quoted index names and indexed columns', () => {
+    expect(lint('sql`create index "UserAccountIdx" on users ("userId")`')).toEqual([])
+  })
 })

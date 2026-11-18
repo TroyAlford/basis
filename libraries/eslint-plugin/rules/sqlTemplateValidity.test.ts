@@ -27,4 +27,14 @@ describe('sqlTemplateValidity', () => {
   test('accepts PL/pgSQL function bodies', () => {
     expect(lint('sql`create function f() returns trigger as $$ begin return new; end $$ language plpgsql`')).toEqual([])
   })
+
+  test('reports malformed PL/pgSQL function bodies', () => {
+    const messages = lint('sql`create function f() returns int as $$ begin return 1; $$ language plpgsql`')
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.message).toContain('SQL template is invalid')
+  })
+
+  test('does not claim PL/pgSQL validity for other function languages', () => {
+    expect(lint('sql`create function f() returns int as $$ select 1 $$ language sql`')).toEqual([])
+  })
 })

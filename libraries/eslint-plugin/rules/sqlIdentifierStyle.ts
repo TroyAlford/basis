@@ -136,6 +136,17 @@ function checkNode(
   } else if (kind === 'JoinExpr') {
     const node = bodyOf<Record<string, unknown>>(value)
     if (node.alias) checkAlias(source.aliasAfterExpression(source.span(value)?.end ?? 0), check)
+  } else if (kind === 'IndexStmt') {
+    const node = bodyOf<Record<string, unknown>>(value)
+    if (typeof node.idxname === 'string') {
+      const relation = node.relation && typeof node.relation === 'object'
+        ? Number((node.relation as { location?: unknown }).location ?? 0)
+        : 0
+      check(source.identifierBefore(relation, node.idxname))
+    }
+  } else if (kind === 'IndexElem') {
+    const node = bodyOf<Record<string, unknown>>(value)
+    if (typeof node.name === 'string') check(source.identifierNear(0, node.name))
   }
 
   const body = bodyOf<Record<string, unknown> | undefined>(value)
