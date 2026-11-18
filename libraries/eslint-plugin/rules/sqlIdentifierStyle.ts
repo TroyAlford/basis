@@ -138,15 +138,9 @@ function checkNode(
     if (node.alias) checkAlias(source.aliasAfterExpression(source.span(value)?.end ?? 0), check)
   } else if (kind === 'IndexStmt') {
     const node = bodyOf<Record<string, unknown>>(value)
-    if (typeof node.idxname === 'string') {
-      const relation = node.relation && typeof node.relation === 'object'
-        ? Number((node.relation as { location?: unknown }).location ?? 0)
-        : 0
-      check(source.identifierBefore(relation, node.idxname))
-    }
-  } else if (kind === 'IndexElem') {
-    const node = bodyOf<Record<string, unknown>>(value)
-    if (typeof node.name === 'string') check(source.identifierNear(0, node.name))
+    const relation = relationLocation(node.relation)
+    if (typeof node.idxname === 'string') check(source.identifierBefore(relation, node.idxname))
+    checkIndexParams(node.indexParams, source, check, relation)
   }
 
   const body = bodyOf<Record<string, unknown> | undefined>(value)
@@ -180,6 +174,56 @@ function checkNames(
 ): void {
   if (!Array.isArray(values)) return
   for (const value of values) check(source.identifierNear(position, String(bodyOf<{ sval?: string }>(value).sval ?? '')))
+}
+
+/** Read an index relation's source location, accepting a plain or wrapped RangeVar. */
+function relationLocation(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0
+  const direct = (value as { location?: unknown }).location
+  if (typeof direct === 'number') return direct
+  const wrapped = (value as { RangeVar?: { location?: unknown } }).RangeVar
+  return wrapped && typeof wrapped.location === 'number' ? wrapped.location : 0
+}
+
+/** Check index parameter names within the index's own parenthesized list. */
+function checkIndexParams(
+  values: unknown,
+  source: SqlSource,
+  check: (raw: string | undefined) => void,
+  relation: number,
+): void {
+  if (!Array.isArray(values)) return
+  const open = source.tokens.find(token => token.start >= relation && token.text === '(')
+  let cursor = open?.end ?? relation
+  for (const value of values) {
+    if (kindOf(value) !== 'IndexElem') continue
+    const node = bodyOf<Record<string, unknown>>(value)
+    if (typeof node.name === 'string') {
+      const token = source.tokenNear(cursor, node.name)
+      if (token) {
+        check(token.text)
+        cursor = token.end
+      } else {
+        check(node.name)
+      }
+    } else {
+      cursor = afterElement(cursor, source)
+    }
+  }
+}
+
+/** Advance past one index element expression. */
+function afterElement(position: number, source: SqlSource): number {
+  let depth = 0
+  for (const token of source.tokens) {
+    if (token.start < position) continue
+    if (token.text === '(' || token.text === '[') depth += 1
+    else if (token.text === ')' || token.text === ']') {
+      if (depth === 0) return token.end
+      depth -= 1
+    } else if (token.text === ',' && depth === 0) return token.end
+  }
+  return position
 }
 
 /** Check an expression alias and its column aliases. */

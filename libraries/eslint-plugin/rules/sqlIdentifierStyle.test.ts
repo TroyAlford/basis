@@ -39,5 +39,18 @@ describe('sqlIdentifierStyle', () => {
 
   test('accepts quoted index names and indexed columns', () => {
     expect(lint('sql`create index "UserAccountIdx" on users ("userId")`')).toEqual([])
+    expect(lint('sql`create index "UserAccountIdx" on users (userId)`').map(message => message.message))
+      .toEqual([expect.stringContaining('"userId"')])
+    expect(lint('sql`create index UserAccountIdx on users ("userId")`').map(message => message.message))
+      .toEqual([expect.stringContaining('"UserAccountIdx"')])
+  })
+
+  test('scopes index checks to each index and each key', () => {
+    const messages = lint('sql`create index "UserAccountIdx" on users ("userId"); create index OtherIdx on users (otherId)`')
+    const text = messages.map(message => message.message).join('\n')
+    expect(text).toContain('"OtherIdx"')
+    expect(text).toContain('"otherId"')
+    expect(text).not.toContain('"UserAccountIdx"')
+    expect(text).not.toContain('"userId"')
   })
 })

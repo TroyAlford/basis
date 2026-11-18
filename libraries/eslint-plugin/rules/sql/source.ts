@@ -76,14 +76,19 @@ export class SqlSource {
     return this.tokenAt(position)?.text ?? fallback
   }
 
-  /** Nearest identifier matching a folded name at or after a position. */
-  identifierNear(position: number, name: string): string {
+  /** Nearest identifier token matching a folded name at or after a position. */
+  tokenNear(position: number, name: string): SqlSourceToken | undefined {
     const target = name.toLowerCase()
     for (const token of this.tokens) {
       if (token.start < position || !isName(token)) continue
-      if (unquote(token.text).toLowerCase() === target) return token.text
+      if (unquote(token.text).toLowerCase() === target) return token
     }
-    return name
+    return undefined
+  }
+
+  /** Nearest identifier matching a folded name at or after a position. */
+  identifierNear(position: number, name: string): string {
+    return this.tokenNear(position, name)?.text ?? name
   }
 
   /** Nearest identifier matching a folded name at or before a position. */
