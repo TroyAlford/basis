@@ -577,6 +577,26 @@ const cases: readonly ParityCase[] = [
       value: ['SystemUser', 'Pet'],
     },
   },
+  {
+    entity: 'Pet',
+    expected: [petOne, petTwo],
+    source: 'age $in [3, 8]',
+    structured: {
+      field: 'age',
+      operator: Operator.Comparison.In,
+      value: [3, 8],
+    },
+  },
+  {
+    entity: 'Pet',
+    expected: [petOne, petTwo],
+    source: 'vaccinated $in [true]',
+    structured: {
+      field: 'vaccinated',
+      operator: Operator.Comparison.In,
+      value: [true],
+    },
+  },
 ]
 
 describe('Query parity gate', () => {

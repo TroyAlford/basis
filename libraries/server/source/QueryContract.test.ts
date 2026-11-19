@@ -356,7 +356,7 @@ describe('Query contract', () => {
     expect(() => compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
       where: { field: 'owner', operator: Operator.Comparison.Contains, value: 'Ada' },
-    })).toThrow('reference identity')
+    })).toThrow('not valid for field')
   })
 
   test('keys terminal reference identities independently', () => {
@@ -615,7 +615,7 @@ describe('Query contract', () => {
     expect(() => compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
       where: { field: 'payload', operator: Operator.Comparison.Equal, value: {} },
-    })).toThrow('not valid for JSON')
+    })).toThrow('not valid for field')
     expect(() => compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
       where: { field: 'payload', operator: Operator.Comparison.Empty },

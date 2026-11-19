@@ -117,6 +117,13 @@ describe('Query parity gate', () => {
         value: ['A', 'B'],
       }),
     )
+    expect(source('Note', 'score $in [10, 20, 30]')).toEqual(
+      structured('Note', {
+        field: 'score',
+        operator: Operator.Comparison.In,
+        value: [10, 20, 30],
+      }),
+    )
   })
 
   test('rejects malformed scalar $in predicates in both forms', () => {
@@ -140,11 +147,6 @@ describe('Query parity gate', () => {
         message: 'not a valid string value',
         source: "title $in ['A', 7]",
         structured: { field: 'title', operator: Operator.Comparison.In, value: ['A', 7] },
-      },
-      {
-        message: 'not valid for field',
-        source: 'score $in [1, 2]',
-        structured: { field: 'score', operator: Operator.Comparison.In, value: [1, 2] },
       },
       {
         message: 'not valid for field',

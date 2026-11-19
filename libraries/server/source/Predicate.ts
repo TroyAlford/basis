@@ -1,5 +1,5 @@
 import type { ArrayFieldDefinition, EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 import { Operator } from './Operator'
 import { normalizeScalar } from './ScalarNormalization'
 
@@ -114,18 +114,101 @@ const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
   Operator.Comparison.LessThanOrEqual,
 ])
 
+/** Scalar field types that support equality. */
+const SCALAR_FIELD_TYPES = new Set<FieldType>([
+  FieldType.Boolean,
+  FieldType.Date,
+  FieldType.Enum,
+  FieldType.ID,
+  FieldType.Number,
+  FieldType.String,
+  FieldType.Timestamp,
+])
+/** Scalar and native-array fields that support equality. */
+const EQUAL_FIELD_TYPES = new Set<FieldType>([...SCALAR_FIELD_TYPES, FieldType.Array])
+/** Native-array fields. */
+const ARRAY_FIELD_TYPES = new Set<FieldType>([FieldType.Array])
+/** Fields that support substring or membership containment. */
+const CONTAINS_FIELD_TYPES = new Set<FieldType>([
+  FieldType.Array,
+  FieldType.JSON,
+  FieldType.String,
+])
+/** Ordered scalar field types. */
+const RANGE_FIELD_TYPES = new Set<FieldType>([
+  FieldType.Date,
+  FieldType.ID,
+  FieldType.Number,
+  FieldType.String,
+  FieldType.Timestamp,
+])
+
+/** The canonical operand and field-type contract for one comparison operator. */
+export interface ComparisonOperatorDefinition {
+  /** Field types the operator supports. */
+  readonly allowedFieldTypes: ReadonlySet<FieldType>,
+  /** Validate and normalize one raw operand. */
+  readonly operand: (field: QueryFieldDefinition, raw: unknown) => unknown,
+}
+
 /**
- * Whether a field supports the scalar membership operator.
+ * The authoritative comparison-operator contract.
  *
- * Evaluated at call time rather than module initialization because this module
- * participates in a cycle with `EntityDefinitions`.
- * @param field - Candidate query field.
- * @returns `true` for String, Enum, and ID fields.
+ * SQL compilation supplies only the physical renderer; field-type
+ * compatibility and operand semantics live here.
  */
-export function isMembershipField(field: QueryFieldDefinition): boolean {
-  return field.type === FieldType.Enum
-    || field.type === FieldType.ID
-    || field.type === FieldType.String
+const comparisonOperators = new Map<Operator.Comparison, ComparisonOperatorDefinition>([
+  [Operator.Comparison.Equal, { allowedFieldTypes: EQUAL_FIELD_TYPES, operand: equalOperand }],
+  [Operator.Comparison.NotEqual, { allowedFieldTypes: EQUAL_FIELD_TYPES, operand: notEqualOperand }],
+  [Operator.Comparison.SequenceEqual, {
+    allowedFieldTypes: ARRAY_FIELD_TYPES,
+    operand: sequenceEqualOperand,
+  }],
+  [Operator.Comparison.Contains, {
+    allowedFieldTypes: CONTAINS_FIELD_TYPES,
+    operand: containsOperand,
+  }],
+  [Operator.Comparison.In, { allowedFieldTypes: SCALAR_FIELD_TYPES, operand: inOperand }],
+  [Operator.Comparison.Overlaps, { allowedFieldTypes: ARRAY_FIELD_TYPES, operand: overlapsOperand }],
+  [Operator.Comparison.Empty, { allowedFieldTypes: ARRAY_FIELD_TYPES, operand: emptyOperand }],
+  [Operator.Comparison.GreaterThan, {
+    allowedFieldTypes: RANGE_FIELD_TYPES,
+    operand: rangeOperand(Operator.Comparison.GreaterThan),
+  }],
+  [Operator.Comparison.GreaterThanOrEqual, {
+    allowedFieldTypes: RANGE_FIELD_TYPES,
+    operand: rangeOperand(Operator.Comparison.GreaterThanOrEqual),
+  }],
+  [Operator.Comparison.LessThan, {
+    allowedFieldTypes: RANGE_FIELD_TYPES,
+    operand: rangeOperand(Operator.Comparison.LessThan),
+  }],
+  [Operator.Comparison.LessThanOrEqual, {
+    allowedFieldTypes: RANGE_FIELD_TYPES,
+    operand: rangeOperand(Operator.Comparison.LessThanOrEqual),
+  }],
+])
+
+/** Read the authoritative comparison-operator contract. */
+export const ComparisonOperators = {
+  /**
+   * Return one operator's contract.
+   * @param operator - Comparison operator identity.
+   * @returns The contract, or undefined when unsupported.
+   */
+  definition(operator: Operator.Comparison): ComparisonOperatorDefinition | undefined {
+    return comparisonOperators.get(operator)
+  },
+
+  /**
+   * Whether a field supports one comparison operator.
+   * @param field - Candidate query field.
+   * @param operator - Comparison operator identity.
+   * @returns `true` when the operator accepts the field type.
+   */
+  supports(field: QueryFieldDefinition, operator: Operator.Comparison): boolean {
+    return comparisonOperators.get(operator)?.allowedFieldTypes.has(field.type) ?? false
+  },
 }
 
 /**
@@ -277,48 +360,12 @@ export const Predicate = {
     operator: Operator.Comparison,
     raw: unknown,
   ): unknown {
-    if (operator === Operator.Comparison.In) return inOperand(field, raw)
-    if (field.type === FieldType.Array) return arrayOperand(field, operator, raw)
-    if (field.type === FieldType.JSON) {
-      if (operator !== Operator.Comparison.Contains) {
-        throw new Error(`Query operator "${operator}" is not valid for JSON field "${field.name}"`)
-      }
-      return normalizeJSON(raw)
+    const definition = ComparisonOperators.definition(operator)
+    if (!definition) throw new Error(`Query operator "${operator}" is not supported`)
+    if (!definition.allowedFieldTypes.has(field.type)) {
+      throw new Error(`Query operator "${operator}" is not valid for field "${field.name}"`)
     }
-    if (operator === Operator.Comparison.Overlaps || operator === Operator.Comparison.SequenceEqual) {
-      throw new Error(`Query operator "${operator}" is not valid for scalar field "${field.name}"`)
-    }
-    if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
-    if (field.name === ACTOR_FIELD_NAME) {
-      if (raw === null && (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual)) {
-        return null
-      }
-      throw new Error('Query operand for "$me" must compare actor presence with null')
-    }
-    if (isFieldOperand(raw)) {
-      if (operator === Operator.Comparison.Contains
-        || operator === Operator.Comparison.Empty) {
-        throw new Error(`Query operator "${operator}" does not accept a field reference operand`)
-      }
-      assertFieldPath(raw.$field)
-      return { $field: raw.$field }
-    }
-    if (field.type === FieldType.ID && operator === Operator.Comparison.Contains) return raw
-    if (field.type === FieldType.Enum) {
-      if (typeof raw !== 'string') invalidOperand(field)
-      return raw
-    }
-    if (raw === '$me') {
-      if (field.type === FieldType.ID) return raw
-      throw new Error('Query operand "$me" is only valid for identity fields')
-    }
-    if (raw === null) {
-      if (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual) return null
-      throw new Error(`Query operand for "${field.name}" must not be null`)
-    }
-    const normalized = normalizeScalar(field, raw)
-    if (normalized === undefined) invalidOperand(field)
-    return normalized
+    return definition.operand(field, raw)
   },
 
   /**
@@ -608,18 +655,133 @@ export function arrayMemberResolver(
 }
 
 /**
+ * Normalize an equality operand.
+ * @param field - Target field.
+ * @param raw - Raw operand.
+ * @returns The normalized operand.
+ */
+function equalOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  return field.type === FieldType.Array
+    ? arrayOperand(field, Operator.Comparison.Equal, raw)
+    : scalarOperand(field, Operator.Comparison.Equal, raw, true)
+}
+
+/**
+ * Normalize a not-equal operand before it lowers to `Not(Equal)`.
+ * @param field - Target field.
+ * @param raw - Raw operand.
+ * @returns The normalized operand.
+ */
+function notEqualOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  return field.type === FieldType.Array
+    ? arrayOperand(field, Operator.Comparison.NotEqual, raw)
+    : scalarOperand(field, Operator.Comparison.NotEqual, raw, true)
+}
+
+/**
+ * Normalize a sequence-equality operand.
+ * @param field - Target array field.
+ * @param raw - Raw operand.
+ * @returns The normalized element list.
+ */
+function sequenceEqualOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  return arrayOperand(field as ArrayFieldDefinition, Operator.Comparison.SequenceEqual, raw)
+}
+
+/**
+ * Normalize a containment operand.
+ * @param field - Target array, JSON, or string field.
+ * @param raw - Raw operand.
+ * @returns The normalized operand.
+ */
+function containsOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  if (field.type === FieldType.Array) return arrayOperand(field, Operator.Comparison.Contains, raw)
+  if (field.type === FieldType.JSON) return normalizeJSON(raw)
+  return scalarOperand(field, Operator.Comparison.Contains, raw, false)
+}
+
+/**
+ * Normalize an overlap operand.
+ * @param field - Target array field.
+ * @param raw - Raw operand.
+ * @returns The normalized element list.
+ */
+function overlapsOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  return arrayOperand(field as ArrayFieldDefinition, Operator.Comparison.Overlaps, raw)
+}
+
+/**
+ * Normalize an empty operand.
+ * @returns `null`; emptiness is decided by the physical renderer.
+ */
+function emptyOperand(): null {
+  return null
+}
+
+/**
+ * Build one ordered-comparison operand strategy.
+ * @param operator - Range operator identity.
+ * @returns The operand strategy for that operator.
+ */
+function rangeOperand(
+  operator: Operator.Comparison,
+): (field: QueryFieldDefinition, raw: unknown) => unknown {
+  return (field, raw) => scalarOperand(field, operator, raw, false)
+}
+
+/**
+ * Normalize one scalar operand against its field.
+ * @param field - Target scalar field.
+ * @param operator - Comparison operator identity.
+ * @param raw - Raw operand.
+ * @param allowNull - Whether null is a valid equality operand.
+ * @returns The normalized scalar or field-reference operand.
+ */
+function scalarOperand(
+  field: QueryFieldDefinition,
+  operator: Operator.Comparison,
+  raw: unknown,
+  allowNull: boolean,
+): unknown {
+  if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
+  if (field.name === ACTOR_FIELD_NAME) {
+    if (allowNull && raw === null) return null
+    throw new Error('Query operand for "$me" must compare actor presence with null')
+  }
+  if (isFieldOperand(raw)) {
+    if (operator === Operator.Comparison.Contains) {
+      throw new Error(`Query operator "${operator}" does not accept a field reference operand`)
+    }
+    assertFieldPath(raw.$field)
+    return { $field: raw.$field }
+  }
+  if (field.type === FieldType.Enum) {
+    if (typeof raw !== 'string') invalidOperand(field)
+    return raw
+  }
+  if (raw === '$me') {
+    if (field.type === FieldType.ID) return raw
+    throw new Error('Query operand "$me" is only valid for identity fields')
+  }
+  if (raw === null) {
+    if (allowNull) return null
+    throw new Error(`Query operand for "${field.name}" must not be null`)
+  }
+  const normalized = normalizeScalar(field as ScalarFieldDefinition, raw)
+  if (normalized === undefined) invalidOperand(field)
+  return normalized
+}
+
+/**
  * Normalize one scalar membership operand.
  * @param field - Target scalar field.
  * @param raw - Raw array operand.
  * @returns Normalized element values in operand order.
- * @throws {Error} When the field, list shape, or an element is invalid.
+ * @throws {Error} When the list shape or an element is invalid.
  */
 function inOperand(field: QueryFieldDefinition, raw: unknown): unknown {
   if (field.name === ACTOR_FIELD_NAME) {
     throw new Error('Query operand for "$me" must compare actor presence with null')
-  }
-  if (!isMembershipField(field)) {
-    throw new Error(`Query operator "${Operator.Comparison.In}" is not valid for field "${field.name}"`)
   }
   if (!Array.isArray(raw)) {
     throw new Error(`Query operator "${Operator.Comparison.In}" requires an array operand for "${field.name}"`)

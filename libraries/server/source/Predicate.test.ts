@@ -10,6 +10,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       { field: 'id', format: 'UUID' },
       { field: 'active', type: 'Boolean' },
       { field: 'createdAt', type: 'Timestamp' },
+      { field: 'dueOn', type: 'Date' },
       { field: 'kind', type: 'String' },
       { enum: 'Kind', field: 'label', type: 'Enum' },
       { field: 'operator', type: 'String' },
@@ -432,7 +433,7 @@ describe('Predicate.normalize', () => {
       field: 'payload',
       operator: Operator.Comparison.Equal,
       value: {},
-    })).toThrow('not valid for JSON')
+    })).toThrow('not valid for field')
   })
 
   test('normalizes collection contains, independent requirements, universal, and empty', () => {
@@ -506,7 +507,7 @@ describe('Predicate.normalize', () => {
     })).toThrow('must compare actor presence with null')
   })
 
-  test('normalizes scalar $in arrays for String, Enum, and ID fields', () => {
+  test('normalizes scalar $in arrays for every equality-comparable scalar field', () => {
     expect(normalize({
       field: 'kind',
       operator: Operator.Comparison.In,
@@ -534,6 +535,42 @@ describe('Predicate.normalize', () => {
       field: 'id',
       operator: Operator.Comparison.In,
       value: [identity],
+    })
+    expect(normalize({
+      field: 'score',
+      operator: Operator.Comparison.In,
+      value: [10, 20, 30],
+    })).toEqual({
+      field: 'score',
+      operator: Operator.Comparison.In,
+      value: [10, 20, 30],
+    })
+    expect(normalize({
+      field: 'active',
+      operator: Operator.Comparison.In,
+      value: [true, false],
+    })).toEqual({
+      field: 'active',
+      operator: Operator.Comparison.In,
+      value: [true, false],
+    })
+    expect(normalize({
+      field: 'dueOn',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02', '2026-01-03'],
+    })).toEqual({
+      field: 'dueOn',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02', '2026-01-03'],
+    })
+    expect(normalize({
+      field: 'createdAt',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02T03:04:05.000Z'],
+    })).toEqual({
+      field: 'createdAt',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02T03:04:05.000Z'],
     })
   })
 
@@ -563,8 +600,8 @@ describe('Predicate.normalize', () => {
     expect(() => normalize({
       field: 'score',
       operator: Operator.Comparison.In,
-      value: [1, 2],
-    })).toThrow('Query operator "$in" is not valid for field "score"')
+      value: [1, '2'],
+    })).toThrow('not a valid number value')
   })
 
   test('preserves actor-presence semantics and the membership list bound', () => {

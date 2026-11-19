@@ -438,6 +438,38 @@ describe('SQL.where', () => {
       sql: 'WHERE "title" IN ($1, $2)',
       values: ['A', 'B'],
     })
+    expect(SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.In,
+      value: [10, 20, 30],
+    })).toEqual({
+      sql: 'WHERE "score" IN ($1, $2, $3)',
+      values: [10, 20, 30],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'active',
+      operator: Operator.Comparison.In,
+      value: [true, false],
+    })).toEqual({
+      sql: 'WHERE "active" IN ($1, $2)',
+      values: [true, false],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'dueOn',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02', '2026-01-03'],
+    })).toEqual({
+      sql: 'WHERE "dueOn" IN ($1, $2)',
+      values: ['2026-01-02', '2026-01-03'],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'createdAt',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02T03:04:05.000Z'],
+    })).toEqual({
+      sql: 'WHERE "createdAt" IN ($1)',
+      values: ['2026-01-02T03:04:05.000Z'],
+    })
   })
 
   test('rejects invalid scalar $in operands before emitting SQL', () => {
@@ -451,11 +483,6 @@ describe('SQL.where', () => {
       operator: Operator.Comparison.In,
       value: ['A', null],
     })).toThrow('cannot contain null')
-    expect(() => SQL.where(definitions, entity, {
-      field: 'score',
-      operator: Operator.Comparison.In,
-      value: [1, 2],
-    })).toThrow('not valid for field')
   })
 
   test('maps null equality to IS NULL without binding', () => {
@@ -489,7 +516,7 @@ describe('SQL.where', () => {
       field: 'active',
       operator: Operator.Comparison.GreaterThan,
       value: true,
-    })).toThrow('is not valid for field "Note.active"')
+    })).toThrow('is not valid for field "active"')
     expect(SQL.where(definitions, entity, {
       field: 'id',
       operator: Operator.Comparison.GreaterThan,
