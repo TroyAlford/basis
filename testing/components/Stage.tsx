@@ -1,4 +1,5 @@
-import { AnchorPoint, Await, Mermaid, Pin, Theme, Tooltip, TypedTable } from 'basis/react'
+import { Mermaid } from 'basis/docs/mermaid'
+import { AnchorPoint, Await, Pin, Theme, Tooltip, TypedTable } from 'basis/react'
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
 import { OverlayStage } from './OverlayStage'

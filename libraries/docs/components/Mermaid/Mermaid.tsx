@@ -1,6 +1,6 @@
 import { renderMermaidSVG } from 'beautiful-mermaid'
 import * as React from 'react'
-import { Component } from '../Component/Component'
+import { Component } from '../../../react/components/Component/Component'
 
 import './Mermaid.styles.ts'
 
