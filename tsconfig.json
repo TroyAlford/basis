@@ -16,6 +16,9 @@
       "basis/react/icons": [
         "./consumer/react-icons.ts"
       ],
+      "basis/react/mermaid": [
+        "./consumer/react-mermaid.ts"
+      ],
       "basis/testing/bun": [
         "./consumer/testing-bun.ts"
       ]
