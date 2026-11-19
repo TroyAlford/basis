@@ -378,7 +378,7 @@ const collectionComparisons = [
 - A structured `filters` array contains independent requirements. A one-item `filters` array containing an `$and`, `$or`, or `$not` tree applies that whole tree to one member. `$all` accepts exactly one member predicate.
 - Inner predicates are relative to the collection item and may use the item’s scalar or singular-reference paths, including terminal identity equality and `null`; reference paths retain the same eight-hop limit as projection. Named N:M relationship properties use the established lowercase prefix, such as `membership.role`. The prefix is not available on inverse collections, and Array or JSON relationship properties are rejected as predicate targets.
 - Collection comparisons preserve two-valued null behavior. A null inner scalar makes a non-null comparison false; its negation is true, and a null field is a counterexample to `$all`.
-- Each independent requirement compiles to its own correlated `EXISTS`; negation uses the shared logical operator with null-safe two-valued semantics. The query remains one parameterized SQL statement with the same finite work budget. Nested collection comparisons, unbounded traversal, N+1 lookups, and application-side child hydration are rejected.
+- Each independent requirement compiles to its own correlated `EXISTS`; negation uses the shared logical operator with null-safe two-valued semantics. The query remains one parameterized SQL statement with the same finite work budget. Nested collection comparisons are supported within the existing finite work budget and reference-depth limits. Unbounded traversal, N+1 lookups, and application-side child hydration are rejected.
 
 ## Stage 19 — native Array and opaque JSON (implemented)
 
