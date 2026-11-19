@@ -92,6 +92,10 @@ describe('QueryNormalizer', () => {
     expect(() => QueryNormalizer.normalize(entity, "title $in [['A']]")).toThrow('must be a scalar literal')
     expect(() => QueryNormalizer.normalize(entity, "title $in ['A', 7]"))
       .toThrow('not a valid string value')
+    expect(() => QueryNormalizer.normalize(
+      entity,
+      "$me $in ['00000000-0000-4000-8000-000000000001']",
+    )).toThrow('must compare actor presence with null')
   })
 
   test('normalizes substring containment expressions', () => {

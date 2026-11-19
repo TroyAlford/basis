@@ -537,6 +537,46 @@ const cases: readonly ParityCase[] = [
       operator: Operator.Comparison.Contains,
     },
   },
+  {
+    entity: 'Person',
+    expected: [ada, grace, linus],
+    source: "entity $in ['SystemUser', 'Client']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['SystemUser', 'Client'],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, linus],
+    source: "entity $in ['SystemUser']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['SystemUser'],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [],
+    source: "entity $in ['Pet']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['Pet'],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, linus],
+    source: "entity $in ['SystemUser', 'Pet']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['SystemUser', 'Pet'],
+    },
+  },
 ]
 
 describe('Query parity gate', () => {

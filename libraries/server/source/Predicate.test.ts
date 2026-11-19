@@ -567,6 +567,33 @@ describe('Predicate.normalize', () => {
     })).toThrow('Query operator "$in" is not valid for field "score"')
   })
 
+  test('preserves actor-presence semantics and the membership list bound', () => {
+    expect(() => normalize({
+      field: '$me',
+      operator: Operator.Comparison.In,
+      value: ['00000000-0000-4000-8000-000000000001'],
+    })).toThrow('must compare actor presence with null')
+    expect(() => normalize({
+      field: '$me',
+      operator: Operator.Comparison.In,
+      value: [],
+    })).toThrow('must compare actor presence with null')
+    expect(() => normalize({
+      field: 'kind',
+      operator: Operator.Comparison.In,
+      value: Array.from({ length: 129 }, (_, index) => `value-${index}`),
+    })).toThrow('maximum of 128 elements')
+    expect(normalize({
+      field: 'kind',
+      operator: Operator.Comparison.In,
+      value: Array.from({ length: 128 }, (_, index) => `value-${index}`),
+    })).toEqual({
+      field: 'kind',
+      operator: Operator.Comparison.In,
+      value: Array.from({ length: 128 }, (_, index) => `value-${index}`),
+    })
+  })
+
   test('normalizes canonical field-reference operands', () => {
     const reference = EntityDefinitions.load(JSON.stringify({
       entities: [{

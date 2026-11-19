@@ -146,6 +146,24 @@ describe('Query parity gate', () => {
         source: 'score $in [1, 2]',
         structured: { field: 'score', operator: Operator.Comparison.In, value: [1, 2] },
       },
+      {
+        message: 'must compare actor presence with null',
+        source: `$me $in ['${identity}']`,
+        structured: {
+          field: '$me',
+          operator: Operator.Comparison.In,
+          value: [identity],
+        },
+      },
+      {
+        message: 'maximum of 128 elements',
+        source: `title $in [${excessive.map(value => `'${value}'`).join(', ')}]`,
+        structured: {
+          field: 'title',
+          operator: Operator.Comparison.In,
+          value: excessive,
+        },
+      },
     ] as const
     for (const queryCase of invalid) {
       expect(() => source('Note', queryCase.source)).toThrow(queryCase.message)

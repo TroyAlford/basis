@@ -610,6 +610,9 @@ export function arrayMemberResolver(
  * @throws {Error} When the field, list shape, or an element is invalid.
  */
 function inOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  if (field.name === ACTOR_FIELD_NAME) {
+    throw new Error('Query operand for "$me" must compare actor presence with null')
+  }
   if (!IN_FIELD_TYPES.has(field.type)) {
     throw new Error(`Query operator "${Operator.Comparison.In}" is not valid for field "${field.name}"`)
   }
@@ -618,6 +621,9 @@ function inOperand(field: QueryFieldDefinition, raw: unknown): unknown {
   }
   if (raw.length === 0) {
     throw new Error(`Query operator "${Operator.Comparison.In}" requires a non-empty array operand for "${field.name}"`)
+  }
+  if (raw.length > MAX_ARRAY_OPERAND) {
+    throw new Error(`Array operand for "${field.name}" exceeds the maximum of ${MAX_ARRAY_OPERAND} elements`)
   }
   return raw.map(value => {
     if (value === null) {

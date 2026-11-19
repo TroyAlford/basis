@@ -138,6 +138,11 @@ const scalarOperators = [
     source: 'score $between [5, 10]',
   },
   {
+    meaning: 'membership in a scalar list',
+    structured: { field: 'title', operator: '$in', value: ['Hello', 'Hi'] },
+    source: "title $in ['Hello', 'Hi']",
+  },
+  {
     meaning: 'substring',
     structured: { field: 'title', operator: '$contains', value: 'Ada' },
     source: "title $contains 'Ada'",
@@ -165,7 +170,7 @@ const scalarOperators = [
 ]
 ```
 
-`$between` has exactly two bounds. A `null` bound is open; `[null, null]` is invalid. String `$empty` means exactly SQL `NULL` or the empty string, never whitespace; relationship `$empty` means zero related rows and is documented in stage 18. `$contains` is case-insensitive substring matching for `String`; wildcard characters are escaped before binding. Ranges are limited to `String`, `Number`, `Date`, `Timestamp`, and `ID`; booleans use equality only.
+`$between` has exactly two bounds. A `null` bound is open; `[null, null]` is invalid. `$in` accepts a nonempty list for `String`, `Enum`, and `ID` fields, capped at 128 values. List entries are normalized by the field's scalar rules; `null`, nested arrays, field references, empty lists, and invalid element types are rejected. Use the array operators (`$contains`, `$overlaps`, `$sequenceEqual`) for native arrays, not `$in`. The left-hand `$me` presence field remains null-only: use `$me != null` or `$me = null`, never `$me $in [...]`. String `$empty` means exactly SQL `NULL` or the empty string, never whitespace; relationship `$empty` means zero related rows and is documented in stage 18. `$contains` is case-insensitive substring matching for `String`; wildcard characters are escaped before binding. Ranges are limited to `String`, `Number`, `Date`, `Timestamp`, and `ID`; booleans use equality only.
 
 `$ne` lowers to `Not(Equal)`. `$between` lowers to the applicable `And` of inclusive bounds. `$empty` lowers to `Or(Equal(null), Equal(''))`. The canonical filter tree therefore has only primitive comparisons and logical groups; source-only conveniences never reach SQL as special cases.
 
