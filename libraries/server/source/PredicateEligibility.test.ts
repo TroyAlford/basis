@@ -422,6 +422,21 @@ describe('PredicateEligibility', () => {
     )
   })
 
+  test('does not treat inapplicable members as universal counterexamples', () => {
+    const member = eq('role', 'admin')
+    expect(lowerCollection(
+      memberDefinitions,
+      Predicate.universal('document.workspace.members', [member]),
+    )).toEqual(
+      and(
+        documentGuard,
+        not(collection([
+          and(guard('entity', ['AdminMember']), not(member)),
+        ])),
+      ),
+    )
+  })
+
   test('analyzes user-authored dotted entity comparisons instead of treating them as guards', () => {
     const filter: Filter = {
       field: 'document.entity',
