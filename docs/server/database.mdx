@@ -111,6 +111,32 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 
 The example derives `User.articles` from `Article.author.inverse`, and derives `User.campaigns` and `Campaign.members` from the single `Membership` relationship. Inverse and relationship navigations are not authored entity fields. Explicit Collections are authored navigation fields and are validated separately. Like effective fields, derived navigations and explicit Collections are inherited across MTI: a `SystemUser extends User` query exposes the ancestor’s `articles`, `campaigns`, and any declared Collections, and a descendant field or navigation that shadows an inherited navigation is rejected.
 
+### Authored hierarchy validation
+
+`Graph` and `EntityDefinitions.fromDocument()` validate every authored inheritance hierarchy during construction. Same-named logical fields and navigations must be compatible across the concrete descendants of an authored ancestor, even when no query or policy references them. Incompatible declarations fail immediately at construction rather than at query time.
+
+Compatibility is logical, not physical:
+
+- Scalars agree on type, enum identity, `ID` format, and normalized nullability.
+- Native arrays agree on element type, element format, and normalized nullability.
+- Entity references agree on target and normalized nullability; references remain nullable by default.
+- Singular inverses agree on their target cardinality and target entity.
+- Collections and inverse `Many` navigations agree on the result kind (entity or relationship record) and target entity.
+
+Physical table ownership, defaults, indexes, collection `via` paths, relationship sources, pagination, and ordering are not part of the logical contract. Different concrete siblings may therefore own compatible fields in different tables or expose a compatible collection through an inverse rather than a named relationship.
+
+Partial coverage is valid: a field or navigation may exist on only one branch. The synthetic universal `Entity` root is not an authored common domain class, so unrelated top-level entity families may reuse a name with different contracts. Universal root-owned fields are excluded from sibling comparison; their existing rules, including descendant `id` format refinement, continue to apply unchanged.
+
+```ts
+new Graph({
+  entities: [
+    { name: 'A', fields: [] },
+    { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+    { extends: 'A', fields: [{ field: 'foo', type: 'String' }], name: 'C' },
+  ],
+}) // throws during construction: incompatible field contract "foo"
+```
+
 ### Entity-owned Collections
 
 An entity may declare a virtual Collection with `type: "Collection"`, a `target`, and an owner-relative `via` path:
@@ -405,7 +431,7 @@ const pets = await server.db.query<{
 })
 ```
 
-Same-named descendant-only fields are accepted only when their type, format, and reference-target contracts are compatible. The value is selected conditionally from the owning table for each concrete leaf; incompatible declarations fail before SQL runs.
+Same-named descendant-only fields are accepted only when their logical contracts are compatible. The value is selected conditionally from the owning table for each concrete leaf; incompatible declarations fail while the Graph is constructed, before SQL runs.
 
 Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf. A reference targeting the universal `Entity` root derives leaf-owned fields and references from the actual target leaf; leaves without that field yield `null`:
 

@@ -2382,6 +2382,7 @@ function logicalFieldContract(source: LogicalFieldSource): string {
 function entityFieldContracts(entity: EntityDefinition): ReadonlyMap<string, string> {
   const contracts = new Map<string, string>()
   for (const field of entity.effectiveFields) {
+    if (field.owner === 'Entity') continue
     contracts.set(field.name, logicalFieldContract(field))
   }
   for (const collection of entity.collections) {

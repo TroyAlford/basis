@@ -1742,6 +1742,31 @@ describe('EntityDefinitions', () => {
     })).not.toThrow()
   })
 
+  test('allows heterogeneous root id refinements but rejects authored ID format conflicts', () => {
+    expect(() => load({
+      entities: [
+        { fields: [], name: 'A' },
+        { extends: 'A', fields: [{ field: 'id', format: 'UUID' }], name: 'B' },
+        { extends: 'A', fields: [{ field: 'id', format: 'Snowflake' }], name: 'C' },
+      ],
+    })).not.toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        {
+          extends: 'A',
+          fields: [{ field: 'foo', items: { format: 'UUID', type: 'ID' }, type: 'Array' }],
+          name: 'B',
+        },
+        {
+          extends: 'A',
+          fields: [{ field: 'foo', items: { format: 'Snowflake', type: 'ID' }, type: 'Array' }],
+          name: 'C',
+        },
+      ],
+    })).toThrow('incompatible field contract "foo" in hierarchy "A"')
+  })
+
   test('rejects incompatible scalar, array, reference, and enum contracts', () => {
     const hierarchy = (bFields: readonly unknown[], cFields: readonly unknown[], extra: readonly unknown[] = []) => ({
       entities: [
