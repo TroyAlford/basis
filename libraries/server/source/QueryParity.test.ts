@@ -14,6 +14,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
         { field: 'title', type: 'String' },
         { field: 'score', type: 'Number' },
         { field: 'parent', target: 'Note', type: 'Entity' },
+        { field: 'favoriteIds', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
         { field: 'scores', items: { type: 'Number' }, type: 'Array' },
         { field: 'payload', type: 'JSON' },
@@ -97,6 +98,221 @@ describe('Query parity gate', () => {
         value: 5,
       }),
     )
+  })
+
+  test('matches source and structured scalar $in predicates', () => {
+    const sourceQuery = source('Note', "title $in ['A', 'B']")
+    const structuredQuery = structured('Note', {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: ['A', 'B'],
+    })
+    expect(sourceQuery).toEqual(structuredQuery)
+    expect(sourceQuery.sql).toContain('"title" IN ($1, $2)')
+    expect(sourceQuery.values.slice(0, 2)).toEqual(['A', 'B'])
+    expect(sourceQuery.values).not.toContain('C')
+    expect(QueryNormalizer.normalize(note, "title $in ['A', 'B']")).toEqual(
+      Predicate.normalize(note, {
+        field: 'title',
+        operator: Operator.Comparison.In,
+        value: ['A', 'B'],
+      }),
+    )
+    expect(source('Note', 'score $in [10, 20, 30]')).toEqual(
+      structured('Note', {
+        field: 'score',
+        operator: Operator.Comparison.In,
+        value: [10, 20, 30],
+      }),
+    )
+  })
+
+  test('lowers field-backed $in membership into native-array containment', () => {
+    expect(QueryNormalizer.normalize(note, 'id $in favoriteIds')).toEqual(
+      Predicate.normalize(note, {
+        field: 'favoriteIds',
+        operator: Operator.Comparison.Contains,
+        value: { $field: 'id' },
+      }),
+    )
+    expect(QueryNormalizer.normalize(note, '$me $in favoriteIds')).toEqual(
+      Predicate.normalize(note, {
+        field: 'favoriteIds',
+        operator: Operator.Comparison.Contains,
+        value: '$me',
+      }),
+    )
+    expect(QueryNormalizer.normalize(note, '$me $in favoriteIds')).toEqual({
+      field: 'favoriteIds',
+      operator: Operator.Comparison.Contains,
+      value: ['$me'],
+    })
+    expect(QueryNormalizer.normalize(note, 'title $in tags')).toEqual(
+      Predicate.normalize(note, {
+        field: 'tags',
+        operator: Operator.Comparison.Contains,
+        value: { $field: 'title' },
+      }),
+    )
+    expect(QueryNormalizer.normalize(note, 'tags $contains title')).toEqual(
+      QueryNormalizer.normalize(note, 'title $in tags'),
+    )
+    expect(QueryNormalizer.normalize(note, 'favoriteIds $contains id')).toEqual(
+      QueryNormalizer.normalize(note, 'id $in favoriteIds'),
+    )
+    expect(QueryNormalizer.normalize(note, 'favoriteIds $contains $me')).toEqual(
+      QueryNormalizer.normalize(note, '$me $in favoriteIds'),
+    )
+    expect(source('Note', 'id $in favoriteIds')).toEqual(structured('Note', {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    }))
+    expect(source('Note', '$me $in favoriteIds')).toEqual(structured('Note', {
+      field: '$me',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    }))
+    expect(source('Note', 'title $in tags')).toEqual(structured('Note', {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: { $field: 'tags' },
+    }))
+    expect(source('Note', 'tags $contains title')).toEqual(source('Note', 'title $in tags'))
+  })
+
+  test('rejects incompatible or non-array field-backed membership', () => {
+    const invalid = [
+      {
+        message: 'not comparable with native array',
+        source: 'id $in tags',
+        structured: { field: 'id', operator: Operator.Comparison.In, value: { $field: 'tags' } },
+      },
+      {
+        message: 'not comparable with native array',
+        source: 'title $in favoriteIds',
+        structured: {
+          field: 'title',
+          operator: Operator.Comparison.In,
+          value: { $field: 'favoriteIds' },
+        },
+      },
+      {
+        message: 'not a native array',
+        source: 'id $in title',
+        structured: { field: 'id', operator: Operator.Comparison.In, value: { $field: 'title' } },
+      },
+      {
+        message: 'not a native array',
+        source: 'id $in missing',
+        structured: { field: 'id', operator: Operator.Comparison.In, value: { $field: 'missing' } },
+      },
+      {
+        message: 'must compare actor presence with null',
+        source: `$me $in ['${identity}']`,
+        structured: {
+          field: '$me',
+          operator: Operator.Comparison.In,
+          value: [identity],
+        },
+      },
+    ] as const
+    for (const queryCase of invalid) {
+      expect(() => source('Note', queryCase.source)).toThrow(queryCase.message)
+      expect(() => structured('Note', queryCase.structured)).toThrow(queryCase.message)
+    }
+  })
+
+  test('rejects the actor sentinel outside native-array containment', () => {
+    const invalid = [
+      {
+        source: "favoriteIds == ['$me']",
+        structured: { field: 'favoriteIds', operator: Operator.Comparison.Equal, value: ['$me'] },
+      },
+      {
+        source: "favoriteIds $overlaps ['$me']",
+        structured: {
+          field: 'favoriteIds',
+          operator: Operator.Comparison.Overlaps,
+          value: ['$me'],
+        },
+      },
+      {
+        source: "favoriteIds $sequenceEqual ['$me']",
+        structured: {
+          field: 'favoriteIds',
+          operator: Operator.Comparison.SequenceEqual,
+          value: ['$me'],
+        },
+      },
+    ] as const
+    for (const queryCase of invalid) {
+      expect(() => source('Note', queryCase.source)).toThrow('native-array containment')
+      expect(() => structured('Note', queryCase.structured)).toThrow('native-array containment')
+    }
+  })
+
+  test('rejects malformed scalar $in predicates in both forms', () => {
+    const invalid = [
+      {
+        message: 'non-empty',
+        source: 'title $in []',
+        structured: { field: 'title', operator: Operator.Comparison.In, value: [] },
+      },
+      {
+        message: 'cannot contain null',
+        source: 'title $in [null]',
+        structured: { field: 'title', operator: Operator.Comparison.In, value: [null] },
+      },
+      {
+        message: 'scalar',
+        source: "title $in [['A']]",
+        structured: { field: 'title', operator: Operator.Comparison.In, value: [['A']] },
+      },
+      {
+        message: 'not a valid string value',
+        source: "title $in ['A', 7]",
+        structured: { field: 'title', operator: Operator.Comparison.In, value: ['A', 7] },
+      },
+      {
+        message: 'not valid for field',
+        source: "tags $in ['a']",
+        structured: { field: 'tags', operator: Operator.Comparison.In, value: ['a'] },
+      },
+      {
+        message: 'not valid for field',
+        source: "payload $in ['a']",
+        structured: { field: 'payload', operator: Operator.Comparison.In, value: ['a'] },
+      },
+      {
+        message: 'must compare actor presence with null',
+        source: `$me $in ['${identity}']`,
+        structured: {
+          field: '$me',
+          operator: Operator.Comparison.In,
+          value: [identity],
+        },
+      },
+      {
+        message: 'maximum of 128 elements',
+        source: `title $in [${excessive.map(value => `'${value}'`).join(', ')}]`,
+        structured: {
+          field: 'title',
+          operator: Operator.Comparison.In,
+          value: excessive,
+        },
+      },
+    ] as const
+    for (const queryCase of invalid) {
+      expect(() => source('Note', queryCase.source)).toThrow(queryCase.message)
+      expect(() => structured('Note', queryCase.structured)).toThrow(queryCase.message)
+    }
+    expect(() => source('User', 'id $in pets')).toThrow('not a native array')
+    expect(() => structured('User', {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: { $field: 'pets' },
+    })).toThrow('not a native array')
   })
 
   test('preserves source diagnostics with exact offsets', () => {

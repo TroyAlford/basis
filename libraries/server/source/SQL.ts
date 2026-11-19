@@ -1,9 +1,9 @@
 import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, EnumFieldDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 import { Operator } from './Operator'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
-import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, isFieldOperand, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, ComparisonOperators, isFieldOperand, Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -162,10 +162,8 @@ export type BoundScalar = string | number | boolean | bigint | Date
 /** The verified actor identity expression; `NULL` for anonymous requests. */
 const ACTOR_SQL = 'nullif(current_setting(\'actor.id\', true), \'\')'
 
-/** A per-comparison definition used by the closed operator registry. */
-interface ComparisonDefinition {
-  /** Field types the operator supports. */
-  readonly allowedFieldTypes: ReadonlySet<FieldType>,
+/** The physical SQL renderer for one comparison operator. */
+interface ComparisonRenderer {
   /** Build the SQL fragment and bind its value. */
   readonly build: (
     field: QueryFieldDefinition,
@@ -173,8 +171,6 @@ interface ComparisonDefinition {
     operand: unknown,
     bind: (value: BoundScalar) => string,
   ) => string,
-  /** Validate and normalize the raw operand. */
-  readonly validateOperand: (field: QueryFieldDefinition, operator: Operator.Comparison, raw: unknown) => unknown,
 }
 
 /** A per-logical-operator definition used by the closed operator registry. */
@@ -187,31 +183,9 @@ interface LogicalDefinition {
   readonly minimumOperands: number,
 }
 
-/** All scalar field types support equality. */
-const ALL_FIELD_TYPES = new Set<FieldType>([
-  FieldType.Boolean,
-  FieldType.Date,
-  FieldType.Enum,
-  FieldType.ID,
-  FieldType.Number,
-  FieldType.String,
-  FieldType.Timestamp,
-])
-/** Scalar and native array fields support equality. */
-const EQUAL_FIELD_TYPES = new Set<FieldType>([...ALL_FIELD_TYPES, FieldType.Array])
-/** Only ordered scalar field types support range comparisons. */
-const RANGE_FIELD_TYPES = new Set<FieldType>([
-  FieldType.Date,
-  FieldType.ID,
-  FieldType.Number,
-  FieldType.String,
-  FieldType.Timestamp,
-])
-
-/** The complete comparison operator registry. */
-const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>([
+/** The complete comparison renderer registry. */
+const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
   [Operator.Comparison.Equal, {
-    allowedFieldTypes: EQUAL_FIELD_TYPES,
     build: (field, column, operand, bind) => {
       if (field.type === FieldType.Array) {
         if (operand === null) return `${column} IS NULL`
@@ -221,20 +195,16 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
       if (operand === null) return `${column} IS NULL`
       return `${column} IS NOT DISTINCT FROM ${bind(operand as BoundScalar)}`
     },
-    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
   }],
   [Operator.Comparison.SequenceEqual, {
-    allowedFieldTypes: new Set([FieldType.Array]),
     build: (field, column, operand, bind) => {
       if (field.type !== FieldType.Array) {
         throw new Error(`Query operator "${Operator.Comparison.SequenceEqual}" requires an array field`)
       }
       return `${column} IS NOT DISTINCT FROM ${arrayExpression(field, operand, bind)}`
     },
-    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
   }],
   [Operator.Comparison.Contains, {
-    allowedFieldTypes: new Set([FieldType.Array, FieldType.JSON, FieldType.String]),
     build: (field, column, operand, bind) => {
       if (field.type === FieldType.Array) {
         return `${column} @> ${arrayExpression(field, operand, bind)}`
@@ -246,32 +216,36 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
       const pattern = `%${value.replace(/[\\%_]/gu, '\\$&')}%`
       return `(${column} IS NOT NULL AND ${column} ILIKE ${bind(pattern)} ESCAPE '\\')`
     },
-    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
+  }],
+  [Operator.Comparison.In, {
+    build: (_field, column, operand, bind) => {
+      const values = operand as readonly BoundScalar[]
+      if (values.length === 0) {
+        throw new Error(`Query operator "${Operator.Comparison.In}" requires a non-empty value list`)
+      }
+      return `${column} IN (${values.map(value => bind(value)).join(', ')})`
+    },
   }],
   [Operator.Comparison.Overlaps, {
-    allowedFieldTypes: new Set([FieldType.Array]),
     build: (field, column, operand, bind) => {
       if (field.type !== FieldType.Array) {
         throw new Error(`Query operator "${Operator.Comparison.Overlaps}" requires an array field`)
       }
       return `${column} && ${arrayExpression(field, operand, bind)}`
     },
-    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
   }],
   [Operator.Comparison.Empty, {
-    allowedFieldTypes: new Set([FieldType.Array]),
     build: (field, column) => {
       if (field.type !== FieldType.Array) {
         throw new Error(`Query operator "${Operator.Comparison.Empty}" requires an array field`)
       }
       return `COALESCE(cardinality(${column}), 0) = 0`
     },
-    validateOperand: () => null,
   }],
-  [Operator.Comparison.GreaterThan, rangeDefinition('>', RANGE_FIELD_TYPES)],
-  [Operator.Comparison.GreaterThanOrEqual, rangeDefinition('>=', RANGE_FIELD_TYPES)],
-  [Operator.Comparison.LessThan, rangeDefinition('<', RANGE_FIELD_TYPES)],
-  [Operator.Comparison.LessThanOrEqual, rangeDefinition('<=', RANGE_FIELD_TYPES)],
+  [Operator.Comparison.GreaterThan, rangeRenderer('>')],
+  [Operator.Comparison.GreaterThanOrEqual, rangeRenderer('>=')],
+  [Operator.Comparison.LessThan, rangeRenderer('<')],
+  [Operator.Comparison.LessThanOrEqual, rangeRenderer('<=')],
 ])
 
 /** The complete logical operator registry. */
@@ -406,8 +380,8 @@ function whereClause(
       return requirements.join(' AND ')
     }
 
-    const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
-    if (comparison) {
+    const contract = ComparisonOperators.definition(node.operator as Operator.Comparison)
+    if (contract) {
       const comparisonFilter = node as ComparisonFilter
       const field = comparisonFilter.field === ACTOR_FIELD_NAME
         ? ACTOR_FIELD
@@ -428,13 +402,29 @@ function whereClause(
           `"${comparisonFilter.field}"`,
         )
       }
-      if (!comparison.allowedFieldTypes.has(field.type)) {
+      if (!contract.allowedFieldTypes.has(field.type)) {
         throw new Error(
           `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
         )
       }
-      const operand = comparison.validateOperand(field, comparisonFilter.operator, comparisonFilter.value)
+      const operand = contract.operand(field, comparisonFilter.value)
+      const renderer = comparisonRenderers.get(comparisonFilter.operator)
+      if (!renderer) throw new Error(`Query operator "${comparisonFilter.operator}" is not supported`)
       const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field, bind)
+      if (comparisonFilter.operator === Operator.Comparison.Contains
+        && field.type === FieldType.Array
+        && isFieldOperand(operand)) {
+        const reference = (active.filterField ?? active.field)(operand.$field)
+        if (comparableType(reference.type) !== comparableType(arrayItemField(field).type)) {
+          throw new Error(
+            `Query field reference "${operand.$field}" is not comparable with "${comparisonFilter.field}"`,
+          )
+        }
+        const referenceSql = reference.name === ACTOR_FIELD_NAME
+          ? ACTOR_SQL
+          : active.expression(reference, bind)
+        return renderer.build(field, column, [referenceSql], () => referenceSql)
+      }
       if (isFieldOperand(operand)) {
         if (ACTOR_FIELD_NAME === operand.$field) {
           throw new Error('Query field references cannot target the actor sentinel')
@@ -448,9 +438,9 @@ function whereClause(
         const referenceSql = reference.name === ACTOR_FIELD_NAME
           ? ACTOR_SQL
           : active.expression(reference, bind)
-        return comparison.build(field, column, operand, () => referenceSql)
+        return renderer.build(field, column, operand, () => referenceSql)
       }
-      return comparison.build(field, column, operand, bind)
+      return renderer.build(field, column, operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -482,22 +472,16 @@ function comparableType(type: FieldType): FieldType {
 }
 
 /**
- * Create a parameterized range-comparison definition.
+ * Create a parameterized range-comparison renderer.
  * @param operator - SQL comparison operator.
- * @param allowedFieldTypes - Field types that support ordered comparison.
- * @returns The comparison definition.
+ * @returns The comparison renderer.
  */
-function rangeDefinition(
-  operator: string,
-  allowedFieldTypes: ReadonlySet<FieldType>,
-): ComparisonDefinition {
+function rangeRenderer(operator: string): ComparisonRenderer {
   return {
-    allowedFieldTypes,
     build: (_field, column, operand, bind) => {
       if (operand === null) throw new Error(`Query operator "${operator}" requires a non-null value`)
       return `COALESCE(${column} ${operator} ${bind(operand as BoundScalar)}, FALSE)`
     },
-    validateOperand: (field, compare, raw) => Predicate.operand(field, compare, raw),
   }
 }
 

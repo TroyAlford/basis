@@ -17,6 +17,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       { field: 'createdAt', type: 'Timestamp' },
       { field: 'dueOn', type: 'Date' },
       { field: 'externalId', type: 'Number' },
+      { field: 'favoriteIds', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
       { field: 'score', type: 'Number' },
       { field: 'title', type: 'String' },
     ],
@@ -405,6 +406,105 @@ describe('SQL.where', () => {
     })
   })
 
+  test('compiles scalar $in lists to ordered parameter placeholders', () => {
+    expect(SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: ['A', 'B'],
+    })).toEqual({
+      sql: 'WHERE "title" IN ($1, $2)',
+      values: ['A', 'B'],
+    })
+    expect(SQL.where(definitions, entity, {
+      filters: [
+        { field: 'title', operator: Operator.Comparison.Equal, value: 'prefix' },
+        { field: 'title', operator: Operator.Comparison.In, value: ['A', 'B'] },
+      ],
+      operator: Operator.Logical.And,
+    })).toEqual({
+      sql: 'WHERE ("title" IS NOT DISTINCT FROM $1 AND "title" IN ($2, $3))',
+      values: ['prefix', 'A', 'B'],
+    })
+    const identity = '00000000-0000-4000-8000-000000000001'
+    expect(SQL.where(definitions, entity, {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: [identity],
+    })).toEqual({
+      sql: 'WHERE "id" IN ($1)',
+      values: [identity],
+    })
+    const source = QueryNormalizer.normalize(note, "title $in ['A', 'B']")
+    expect(SQL.where(definitions, entity, source)).toEqual({
+      sql: 'WHERE "title" IN ($1, $2)',
+      values: ['A', 'B'],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.In,
+      value: [10, 20, 30],
+    })).toEqual({
+      sql: 'WHERE "score" IN ($1, $2, $3)',
+      values: [10, 20, 30],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'active',
+      operator: Operator.Comparison.In,
+      value: [true, false],
+    })).toEqual({
+      sql: 'WHERE "active" IN ($1, $2)',
+      values: [true, false],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'dueOn',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02', '2026-01-03'],
+    })).toEqual({
+      sql: 'WHERE "dueOn" IN ($1, $2)',
+      values: ['2026-01-02', '2026-01-03'],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'createdAt',
+      operator: Operator.Comparison.In,
+      value: ['2026-01-02T03:04:05.000Z'],
+    })).toEqual({
+      sql: 'WHERE "createdAt" IN ($1)',
+      values: ['2026-01-02T03:04:05.000Z'],
+    })
+  })
+
+  test('compiles field-backed array containment through the existing array path', () => {
+    expect(SQL.where(definitions, entity, {
+      field: 'favoriteIds',
+      operator: Operator.Comparison.Contains,
+      value: { $field: 'id' },
+    })).toEqual({
+      sql: 'WHERE "favoriteIds" @> ARRAY["id"::text]',
+      values: [],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'favoriteIds',
+      operator: Operator.Comparison.Contains,
+      value: '$me',
+    })).toEqual({
+      sql: 'WHERE "favoriteIds" @> ARRAY[nullif(current_setting(\'actor.id\', true), \'\')::text]',
+      values: [],
+    })
+  })
+
+  test('rejects invalid scalar $in operands before emitting SQL', () => {
+    expect(() => SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: [],
+    })).toThrow('non-empty')
+    expect(() => SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: ['A', null],
+    })).toThrow('cannot contain null')
+  })
+
   test('maps null equality to IS NULL without binding', () => {
     expect(SQL.where(definitions, entity, { score: null })).toEqual({
       sql: 'WHERE "score" IS NULL',
@@ -436,7 +536,7 @@ describe('SQL.where', () => {
       field: 'active',
       operator: Operator.Comparison.GreaterThan,
       value: true,
-    })).toThrow('is not valid for field "Note.active"')
+    })).toThrow('is not valid for field "active"')
     expect(SQL.where(definitions, entity, {
       field: 'id',
       operator: Operator.Comparison.GreaterThan,

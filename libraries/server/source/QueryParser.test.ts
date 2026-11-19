@@ -132,6 +132,26 @@ describe('QueryParser', () => {
       .toEqual(comparison('title', Operator.Comparison.Equal, [string('"Hello"', 'Hello')]))
   })
 
+  test('parses scalar $in list literals and preserves their source span', () => {
+    const source = "kind $in ['B', 'C']"
+    const parsed = comparisonNode(QueryParser.parse(source).expression)
+    expect(slice(source, parsed)).toBe(source)
+    expect(withoutSpans(parsed)).toEqual({
+      field: 'kind',
+      kind: 'comparison',
+      operator: Operator.Comparison.In,
+      values: [{
+        kind: 'array',
+        raw: "['B', 'C']",
+        value: [
+          { kind: 'string', raw: "'B'", value: 'B' },
+          { kind: 'string', raw: "'C'", value: 'C' },
+        ],
+      }],
+    })
+    expect(QueryParser.parse('kind $in []').expression).not.toBeNull()
+  })
+
   test('preserves source comparison operators without executing them', () => {
     const expected = comparison('score', Operator.Comparison.NotEqual, [number('5')])
     expect(withoutSpans(QueryParser.parse('score $ne 5').expression)).toEqual(expected)

@@ -197,6 +197,30 @@ describe('QueryLexer', () => {
     ])
   })
 
+  test('tokenizes scalar $in lists with exact source spans', () => {
+    const source = "kind $in ['B', 'C']"
+    assertLex(source, [
+      field('kind'),
+      operator('$in', Operator.Comparison.In),
+      leftBracket(),
+      string("'B'", 'B'),
+      comma(),
+      string("'C'", 'C'),
+      rightBracket(),
+    ])
+    const tokens = QueryLexer.tokenize(source).tokens.slice(0, -1)
+    expect(tokens.map(token => [source.slice(token.start, token.end), token.start, token.end])).toEqual([
+      ['kind', 0, 4],
+      ['$in', 5, 8],
+      ['[', 9, 10],
+      ["'B'", 10, 13],
+      [',', 13, 14],
+      ["'C'", 15, 18],
+      [']', 18, 19],
+    ])
+    expect(QueryLexer.tokenize('kind $in').diagnostics).toEqual([])
+  })
+
   test('tokenizes scoped member and collection count fields', () => {
     assertLex('@ @.age @.owner.name pets.$total scores.$total', [
       field('@'),

@@ -1,8 +1,8 @@
 import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 import { Operator } from './Operator'
 import type { ArrayResolver, CollectionResolver, Filter } from './Predicate'
-import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, ComparisonOperators, isFieldOperand, Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
@@ -117,6 +117,26 @@ function comparison(
 
   if (node.operator === Operator.Comparison.Empty) return Predicate.empty(entity, field)
 
+  if (node.operator === Operator.Comparison.In) {
+    if (!ComparisonOperators.supports(field, node.operator)) {
+      throw new Error(`Query operator "${node.operator}" is not valid for field "${node.field}"`)
+    }
+    assertValues(node, 1)
+    const list = node.values[0]
+    if (list?.kind === 'field') {
+      return Predicate.invertMembership(node.field, field, list.value as string, resolve)
+    }
+    if (list?.kind !== 'array') {
+      throw new Error(`Query operator "${node.operator}" requires an array list for "${node.field}"`)
+    }
+    const value = Predicate.operand(
+      field,
+      node.operator,
+      list.value.map(element => inElement(field, element)),
+    )
+    return { field: field.name, operator: node.operator, value }
+  }
+
   if (node.operator === Operator.Comparison.Between) {
     if (field.type !== FieldType.String
       && field.type !== FieldType.Number
@@ -136,6 +156,11 @@ function comparison(
 
   assertValues(node, 1)
   const raw = literal(field, node.values[0] as QueryLiteral)
+  if (node.operator === Operator.Comparison.Contains
+    && field.type === FieldType.Array
+    && (isFieldOperand(raw) || raw === ACTOR_FIELD_NAME)) {
+    return Predicate.arrayContains(field, raw, resolve)
+  }
   const value = Predicate.operand(field, node.operator, raw)
   if (node.operator === Operator.Comparison.NotEqual) return Predicate.notEqual(field.name, value)
   return { field: field.name, operator: node.operator, value }
@@ -181,6 +206,26 @@ function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
     return node.value
   }
   return scalarLiteral(field, node)
+}
+
+/**
+ * Convert one source element of a scalar membership list.
+ * @param field - Target scalar field.
+ * @param node - Element syntax literal.
+ * @returns The typed scalar value, or null so the canonical operand validator rejects it.
+ */
+function inElement(field: QueryFieldDefinition, node: QueryLiteral): unknown {
+  if (node.kind === 'null') return null
+  if (node.kind === 'array' || node.kind === 'object' || node.kind === 'field') {
+    throw new Error(`Query operand for "${field.name}" must be a scalar literal`)
+  }
+  if (field.type === FieldType.Enum) {
+    if (node.kind !== 'string') {
+      throw new Error(`Query operand for "${field.name}" is not a valid enum value`)
+    }
+    return node.value
+  }
+  return scalarLiteral(field as ScalarFieldDefinition, node)
 }
 
 /**

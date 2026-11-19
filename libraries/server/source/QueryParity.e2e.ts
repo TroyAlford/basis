@@ -12,7 +12,9 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'id', format: 'UUID' },
         { field: 'title', type: 'String' },
+        { field: 'primaryTag', type: 'String' },
         { field: 'manager', target: 'Person', type: 'Entity' },
+        { field: 'favoriteIds', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
         {
           cardinality: 'Many',
           field: 'pets',
@@ -131,12 +133,23 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${campaignThree}, 'Campaign Three', 'Campaign')
   `
   await database.sql`
-    INSERT INTO "Person" ("id", "title", "manager.id", "scores", "tags", "payload")
+    INSERT INTO "Person" (
+      "id",
+      "title",
+      "primaryTag",
+      "manager.id",
+      "favoriteIds",
+      "scores",
+      "tags",
+      "payload"
+    )
     VALUES
       (
         ${ada},
         'Ada',
+        'urgent',
         ${null},
+        ARRAY [${ada}, ${grace}]::TEXT[],
         ARRAY [1, 2, 2],
         ARRAY ['urgent', 'important'],
         '{"kind":"note","meta":{"active":true}}'::JSONB
@@ -144,7 +157,9 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (
         ${grace},
         'Grace',
+        'important',
         ${ada},
+        ARRAY [${grace}]::TEXT[],
         ARRAY [3],
         ARRAY ['urgent'],
         '{"kind":"other"}'::JSONB
@@ -152,7 +167,9 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (
         ${linus},
         'Linus',
+        '',
         ${ada},
+        ARRAY []::TEXT[],
         ARRAY []::DOUBLE PRECISION[],
         ARRAY []::TEXT[],
         '{}'::JSONB
@@ -194,6 +211,32 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${linus}, ${campaignOne}, 'Player'),
       (${grace}, ${campaignTwo}, 'GM')
   `
+}
+
+/**
+ * Execute one native-array containment query under an explicit actor context.
+ * @param database - Isolated PostgreSQL database.
+ * @param actor - Actor identity, or null for anonymous.
+ * @param entity - Entity being queried.
+ * @param where - Source or structured filter.
+ * @returns Matching row identities.
+ */
+async function executeAsActor(
+  database: LifecycleDatabase,
+  actor: string | null,
+  entity: string,
+  where: Filter | Readonly<Record<string, unknown>> | string,
+): Promise<{ id: string }[]> {
+  return database.tx(async sql => {
+    await sql`
+      SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+    `
+    return queryEntity<{ id: string }>(sql, definitions, entity, {
+      fields: ['id'],
+      orderBy: 'id',
+      where,
+    })
+  })
 }
 
 /**
@@ -537,6 +580,106 @@ const cases: readonly ParityCase[] = [
       operator: Operator.Comparison.Contains,
     },
   },
+  {
+    entity: 'Person',
+    expected: [ada, grace, linus],
+    source: "entity $in ['SystemUser', 'Client']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['SystemUser', 'Client'],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, linus],
+    source: "entity $in ['SystemUser']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['SystemUser'],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [],
+    source: "entity $in ['Pet']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['Pet'],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, linus],
+    source: "entity $in ['SystemUser', 'Pet']",
+    structured: {
+      field: 'entity',
+      operator: Operator.Comparison.In,
+      value: ['SystemUser', 'Pet'],
+    },
+  },
+  {
+    entity: 'Pet',
+    expected: [petOne, petTwo],
+    source: 'age $in [3, 8]',
+    structured: {
+      field: 'age',
+      operator: Operator.Comparison.In,
+      value: [3, 8],
+    },
+  },
+  {
+    entity: 'Pet',
+    expected: [petOne, petTwo],
+    source: 'vaccinated $in [true]',
+    structured: {
+      field: 'vaccinated',
+      operator: Operator.Comparison.In,
+      value: [true],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, grace],
+    source: 'id $in favoriteIds',
+    structured: {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [],
+    source: '$me $in favoriteIds',
+    structured: {
+      field: '$me',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada],
+    source: 'primaryTag $in tags',
+    structured: {
+      field: 'primaryTag',
+      operator: Operator.Comparison.In,
+      value: { $field: 'tags' },
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada],
+    source: 'tags $contains primaryTag',
+    structured: {
+      field: 'tags',
+      operator: Operator.Comparison.Contains,
+      value: { $field: 'primaryTag' },
+    },
+  },
 ]
 
 describe('Query parity gate', () => {
@@ -598,6 +741,41 @@ describe('Query parity gate', () => {
         where: 'pets.$total >= 0',
       })
       expect(ordered.map(row => row.id)).toEqual([linus, grace, ada])
+
+      const actorCases = [
+        { actor: ada, expected: [ada] },
+        { actor: grace, expected: [ada, grace] },
+        { actor: campaignOne, expected: [] },
+        { actor: null, expected: [] },
+      ] as const
+      for (const actorCase of actorCases) {
+        const inverseSource = await executeAsActor(
+          database,
+          actorCase.actor,
+          'Person',
+          '$me $in favoriteIds',
+        )
+        const inverseStructured = await executeAsActor(database, actorCase.actor, 'Person', {
+          field: '$me',
+          operator: Operator.Comparison.In,
+          value: { $field: 'favoriteIds' },
+        })
+        const containsSource = await executeAsActor(
+          database,
+          actorCase.actor,
+          'Person',
+          'favoriteIds $contains $me',
+        )
+        const containsStructured = await executeAsActor(database, actorCase.actor, 'Person', {
+          field: 'favoriteIds',
+          operator: Operator.Comparison.Contains,
+          value: '$me',
+        })
+        expect(inverseSource).toEqual(inverseStructured)
+        expect(containsSource).toEqual(containsStructured)
+        expect(inverseSource.map(row => row.id)).toEqual([...actorCase.expected])
+        expect(containsSource.map(row => row.id)).toEqual([...actorCase.expected])
+      }
     })
   })
 })

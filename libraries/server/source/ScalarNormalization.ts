@@ -1,5 +1,6 @@
 import type { ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import { isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 
 /** A normalized non-null scalar value ready for SQL or a write. */
 export type NormalizedScalar = string | number | boolean | Date
