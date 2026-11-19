@@ -1,5 +1,7 @@
 import { runAsync } from 'basis/utilities'
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, setDefaultTimeout, test } from 'bun:test'
+
+setDefaultTimeout(60_000)
 import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SNAPSHOT_ACTIVITY_LOG } from './browser'

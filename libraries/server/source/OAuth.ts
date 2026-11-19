@@ -20,6 +20,9 @@ import type { ILogger } from '../../utilities'
 /** Cookie holding the CSRF state for one authorization round trip. */
 const STATE_COOKIE = 'basis_oauth_state'
 
+/** Cookie holding the validated post-login destination. */
+const RETURN_TO_COOKIE = 'basis_oauth_return_to'
+
 /** How long an authorization round trip has to finish. */
 const STATE_MAX_AGE_SECONDS = 600
 
@@ -38,14 +41,17 @@ export interface OAuthOptions {
   /**
    * Build the provider authorize URL for a state value, using the client
    * credentials. Called on login; the caller closes over its provider's
-   * endpoint, redirect URI, and scopes.
+   * endpoint and scopes, and uses the request for the redirect URI when the
+   * application answers on more than one host.
    */
-  authorize: (state: string, credentials: IdentityCredentials) => string,
+  authorize: (state: string, credentials: IdentityCredentials, request?: Request) => string,
+  /** Optional shared domain for the one-shot state and return cookies. */
+  cookieDomain?: string,
   /**
    * Exchange an authorization code for an access token, or `null` on failure.
-   * Called on callback with the client credentials.
+   * Called on callback with the client credentials and the callback request.
    */
-  exchange: (code: string, credentials: IdentityCredentials) => Promise<string | null>,
+  exchange: (code: string, credentials: IdentityCredentials, request?: Request) => Promise<string | null>,
   /**
    * Resolve the provider subject and optional profile from an access token, or
    * `null` on failure. Called on callback.
@@ -53,12 +59,23 @@ export interface OAuthOptions {
   identity: (accessToken: string) => Promise<string | OAuthIdentity | null>,
   /** Optional logger for flow failures. */
   logger?: ILogger,
-  /** Where to send the browser after a successful callback. Defaults to `/`. */
+  /** Fallback destination when a request has no valid `returnTo`. Defaults to `/`. */
   returnTo?: string,
+  /**
+   * Explicit domains that may receive cross-host return targets, including their
+   * subdomains. Omit to allow only the request's own origin.
+   */
+  returnToDomains?: readonly string[],
   /** The identity cookie capability used to sign the session in and out. */
   session: Identity,
   /** State cookie lifetime in seconds. Defaults to 600. */
   stateMaxAgeSeconds?: number,
+  /**
+   * Trust `X-Forwarded-Host` and `X-Forwarded-Proto` from an ingress that
+   * overwrites them. Defaults to false; forwarded headers never expand the
+   * destination allowlist on their own.
+   */
+  trustForwardedOrigin?: boolean,
 }
 
 /**
@@ -80,15 +97,31 @@ export class OAuth {
 
   /**
    * Begin a sign-in: set the CSRF state cookie and redirect to the provider.
+   * @param request - The login request, when routed through a server.
    * @returns A redirect to the provider authorize URL.
    */
-  login(): Response {
+  login(request?: Request): Response {
     const state = Array.from(
       crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2, '0'),
     ).join('')
-    const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials()) })
-    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, { maxAgeSeconds: this.#stateMaxAge() }))
+    const returnTarget = request ? new URL(request.url).searchParams.get('returnTo') : null
+    let returnTo: string | null = null
+    if (returnTarget !== null && request) {
+      returnTo = safeReturnTo(
+        returnTarget,
+        request,
+        this.#options.returnToDomains,
+        this.#options.trustForwardedOrigin ?? false,
+      )
+    }
+    const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials(), request) })
+    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, this.#cookieOptions()))
+    headers.append('Set-Cookie', serializeCookie(
+      RETURN_TO_COOKIE,
+      returnTo === null ? '' : encodeURIComponent(returnTo),
+      this.#cookieOptions(returnTo === null ? 0 : this.#stateMaxAge()),
+    ))
     return new Response(null, { headers, status: 302 })
   }
 
@@ -105,12 +138,17 @@ export class OAuth {
     const expected = readCookie(request.headers.get('cookie'), STATE_COOKIE)
 
     if (code === null || state === null || expected === null || !sameState(state, expected)) {
+      let reason = 'state_mismatch'
+      if (code === null) reason = 'missing_code'
+      else if (state === null) reason = 'missing_state'
+      else if (expected === null) reason = 'missing_state_cookie'
+      this.#options.logger?.info(`oauth invalid_state: ${reason}`)
       return this.#failure('invalid_state', 400)
     }
 
     let accessToken: string | null
     try {
-      accessToken = await this.#options.exchange(code, this.#credentials())
+      accessToken = await this.#options.exchange(code, this.#credentials(), request)
     } catch (error) {
       return this.#failure('exchange_failed', 401, error)
     }
@@ -125,8 +163,15 @@ export class OAuth {
     const userId = typeof identity === 'string' ? identity : identity?.subject ?? null
     if (userId === null) return this.#failure('identity_failed', 401)
 
-    const headers = new Headers({ Location: this.#options.returnTo ?? '/' })
-    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
+    const returnTo = safeReturnTo(
+      decodeReturnTo(readCookie(request.headers.get('cookie'), RETURN_TO_COOKIE)),
+      request,
+      this.#options.returnToDomains,
+      this.#options.trustForwardedOrigin ?? false,
+    ) ?? this.#options.returnTo ?? '/'
+    const headers = new Headers({ Location: returnTo })
+    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', this.#cookieOptions(0)))
+    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', this.#cookieOptions(0)))
     this.#options.session.set(request, headers, userId)
     return new Response(null, { headers, status: 302 })
   }
@@ -137,7 +182,13 @@ export class OAuth {
    * @returns A redirect back to the application.
    */
   logout(request: Request): Response {
-    const headers = new Headers({ Location: this.#options.returnTo ?? '/' })
+    const returnTo = safeReturnTo(
+      new URL(request.url).searchParams.get('returnTo'),
+      request,
+      this.#options.returnToDomains,
+      this.#options.trustForwardedOrigin ?? false,
+    ) ?? this.#options.returnTo ?? '/'
+    const headers = new Headers({ Location: returnTo })
     this.#options.session.set(request, headers, null)
     return new Response(null, { headers, status: 302 })
   }
@@ -172,7 +223,8 @@ export class OAuth {
       this.#options.logger?.error(`oauth ${reason}: ${message}`)
     }
     const headers = new Headers({ 'Content-Type': 'application/json' })
-    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', { maxAgeSeconds: 0 }))
+    headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', this.#cookieOptions(0)))
+    headers.append('Set-Cookie', serializeCookie(RETURN_TO_COOKIE, '', this.#cookieOptions(0)))
     return new Response(JSON.stringify({ error: reason }), { headers, status })
   }
 
@@ -183,6 +235,123 @@ export class OAuth {
   #stateMaxAge(): number {
     return this.#options.stateMaxAgeSeconds ?? STATE_MAX_AGE_SECONDS
   }
+
+  /**
+   * Cookie attributes for the one-shot state and return cookies.
+   * @param maxAgeSeconds - Lifetime in seconds.
+   * @returns Cookie options, including the configured shared domain.
+   */
+  #cookieOptions(maxAgeSeconds = this.#stateMaxAge()): { domain?: string, maxAgeSeconds: number } {
+    return this.#options.cookieDomain
+      ? { domain: this.#options.cookieDomain, maxAgeSeconds }
+      : { maxAgeSeconds }
+  }
+}
+
+/**
+ * Decode a stored return target, rejecting malformed values.
+ * @param value - Encoded cookie value, or `null`.
+ * @returns The decoded target, or `null`.
+ */
+function decodeReturnTo(value: string | null): string | null {
+  if (value === null) return null
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve the public request origin after a reverse proxy.
+ * @param request - The incoming request.
+ * @param trustForwardedOrigin - Whether the ingress is trusted to overwrite forwarding headers.
+ * @returns The request URL with forwarded host and protocol, when trusted.
+ */
+function publicRequestURL(request: Request, trustForwardedOrigin: boolean): URL {
+  const url = new URL(request.url)
+  if (!trustForwardedOrigin) return url
+
+  const host = firstHeader(request, 'x-forwarded-host') ?? request.headers.get('host')
+  const protocol = firstHeader(request, 'x-forwarded-proto')?.toLowerCase()
+  if (host) {
+    try {
+      const publicHost = new URL(`http://${host}`)
+      url.hostname = publicHost.hostname
+      url.port = publicHost.port
+    } catch {
+      // Keep the request URL when a proxy supplies an invalid host.
+    }
+  }
+  if (protocol === 'http' || protocol === 'https') url.protocol = `${protocol}:`
+  return url
+}
+
+/**
+ * Read the first value of a comma-separated request header.
+ * @param request - The incoming request.
+ * @param name - Header name.
+ * @returns The first trimmed value, or null.
+ */
+function firstHeader(request: Request, name: string): string | null {
+  const value = request.headers.get(name)
+  return value?.split(',')[0]?.trim() || null
+}
+
+/**
+ * Accept a relative path on the current origin, or an absolute URL on the
+ * current origin or an explicitly trusted application domain.
+ * @param value - Candidate return target.
+ * @param request - The login, callback, or logout request.
+ * @param domains - Explicit trusted domains, including their subdomains.
+ * @param trustForwardedOrigin - Whether forwarding headers define the public protocol and port.
+ * @returns A safe path or absolute URL, or `null` when the candidate is unsafe.
+ */
+function safeReturnTo(
+  value: string | null,
+  request: Request,
+  domains: readonly string[] = [],
+  trustForwardedOrigin = false,
+): string | null {
+  if (value === null || value === '' || value.includes('\\')) return null
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code <= 0x20 || code === 0x7f) return null
+  }
+
+  const internal = new URL(request.url)
+  const publicOrigin = publicRequestURL(request, trustForwardedOrigin)
+  let target: URL
+  try {
+    target = new URL(value, publicOrigin)
+  } catch {
+    return null
+  }
+
+  if (target.username !== '' || target.password !== '') return null
+  if (value.startsWith('/')) {
+    return target.origin === publicOrigin.origin
+      ? `${target.pathname}${target.search}${target.hash}`
+      : null
+  }
+
+  if (target.origin === internal.origin) return target.href
+  if (target.protocol !== publicOrigin.protocol || target.port !== publicOrigin.port) return null
+  return isTrustedReturnHost(target.hostname, domains) ? target.href : null
+}
+
+/**
+ * Whether a target host is one of the explicitly trusted domains or its subdomains.
+ * @param hostname - Target hostname.
+ * @param domains - Explicit trusted domains.
+ * @returns True when the target host is trusted.
+ */
+function isTrustedReturnHost(hostname: string, domains: readonly string[]): boolean {
+  const candidate = hostname.toLowerCase()
+  return domains.some(domain => {
+    const trusted = domain.trim().toLowerCase().replace(/^\./, '')
+    return trusted.length > 0 && (candidate === trusted || candidate.endsWith(`.${trusted}`))
+  })
 }
 
 /**

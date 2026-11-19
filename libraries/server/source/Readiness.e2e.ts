@@ -33,7 +33,7 @@ async function start(
     .main(application)
     .root(install)
   if (artifact) server.migration(artifact)
-  server.start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
+  server.start({ hostname: '127.0.0.1', logger: silent, port: 0 })
   process.chdir(previous)
   return server
 }

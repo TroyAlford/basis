@@ -188,6 +188,7 @@ describe('SSE framing integration', () => {
     const response = sseResponse(
       {},
       {
+        context: {},
         logger: new Logger({ colors: false, silent: true }),
         request: { signal: new AbortController().signal } as unknown as Request,
       },

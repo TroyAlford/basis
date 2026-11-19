@@ -60,10 +60,11 @@ export const REACT_TSCONFIG = JSON.stringify(
  */
 export const REACT_APP_SOURCE = `import { Button, Theme } from 'basis/react'
 
-export const component = (
-  <Theme>
+export const Application = () => (
+  <>
+    <Theme />
     <Button disabled>Hello</Button>
-  </Theme>
+  </>
 )
 `
 
@@ -93,8 +94,8 @@ process.stdout.write('runtime-ok')
 `
 
 /**
- * React fixture managed-production entrypoint. It starts `basis/server` in
- * production mode and prints the bound address for the test harness.
+ * React fixture managed entrypoint. It starts `basis/server` and prints the
+ * bound address for the test harness.
  */
 export const REACT_APP_SERVER = `import { Server } from 'basis/server'
 
@@ -102,7 +103,6 @@ const server = new Server()
   .root(import.meta.dir)
   .main('./app.tsx')
   .start({
-    development: false,
     hostname: '127.0.0.1',
     port: 0,
     version: 'consumer-version',
