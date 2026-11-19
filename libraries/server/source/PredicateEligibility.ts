@@ -20,9 +20,6 @@ interface InternalAnalysis extends AnalyzedPredicate {
   readonly guarded: Filter,
 }
 
-/** Guards created by this analyzer, distinct from user-authored comparisons. */
-const generatedGuards = new WeakSet<ComparisonFilter>()
-
 /**
  * Canonical predicate eligibility analysis.
  *
@@ -76,10 +73,6 @@ function analyzeInternal(
   startEntity: EntityDefinition,
   filter: Filter,
 ): InternalAnalysis {
-  if (isEligibilityPredicate(filter)) {
-    return { applicable: null, guarded: filter, match: filter }
-  }
-
   if (!('field' in filter) && 'filters' in filter) {
     return analyzeLogical(definitions, startEntity, filter)
   }
@@ -240,13 +233,11 @@ function eligibilityFilters(entries: readonly ConcreteEligibility[]): Filter | n
  */
 function eligibilityFilter(entry: ConcreteEligibility): Filter | null {
   if (entry.entityTypes.length === 0) return null
-  const filter: ComparisonFilter = {
+  return {
     field: entry.path,
     operator: Operator.Comparison.In,
     value: [...entry.entityTypes],
   }
-  generatedGuards.add(filter)
-  return filter
 }
 
 /**
@@ -347,45 +338,15 @@ function filterKey(value: unknown): string {
  */
 function negateGuarded(applicable: Filter | null, guarded: Filter): Filter {
   if (applicable === null || !isLogicalAnd(guarded)) return notFilter(guarded)
-  const applicableKeys = new Set(eligibilityKeys(applicable))
-  if (applicableKeys.size === 0) return notFilter(guarded)
-  const remaining = guarded.filters.filter(filter => (
-    !isEligibilityPredicate(filter) || !applicableKeys.has(eligibilityKey(filter))
-  ))
+  const applicableFilters = isLogicalAnd(applicable) ? applicable.filters : [applicable]
+  const applicableKeys = new Set(applicableFilters.map(filterKey))
+  const remaining = guarded.filters.filter(filter => !applicableKeys.has(filterKey(filter)))
   if (remaining.length === guarded.filters.length) return notFilter(guarded)
   if (remaining.length === 0) return notFilter(guarded)
   const body = remaining.length === 1
     ? remaining[0] as Filter
     : { filters: remaining, operator: Operator.Logical.And }
   return notFilter(body)
-}
-
-/**
- * Return the generated guard keys in one applicability filter.
- * @param filter - Applicability guard.
- * @returns Guard keys.
- */
-function eligibilityKeys(filter: Filter): string[] {
-  const filters = isLogicalAnd(filter) ? filter.filters : [filter]
-  return filters.filter(isEligibilityPredicate).map(eligibilityKey)
-}
-
-/**
- * Return one generated guard's stable identity.
- * @param filter - Eligibility comparison.
- * @returns Stable key.
- */
-function eligibilityKey(filter: ComparisonFilter): string {
-  return `${filter.field}\u0000${JSON.stringify(filter.value)}`
-}
-
-/**
- * Whether a filter is a generated entity-membership guard.
- * @param filter - Candidate filter.
- * @returns `true` for a terminal eligibility predicate.
- */
-function isEligibilityPredicate(filter: Filter): filter is ComparisonFilter {
-  return generatedGuards.has(filter as ComparisonFilter)
 }
 
 /**

@@ -200,6 +200,26 @@ const memberDefinitions = load({
   ],
 })
 
+const generatedDefinitions = load({
+  entities: [
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+    {
+      extends: 'A',
+      fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+      name: 'B',
+    },
+    { extends: 'A', fields: [], name: 'C' },
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'Document' },
+    { extends: 'Document', fields: [], name: 'PublicDocument' },
+    {
+      extends: 'Document',
+      fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+      name: 'PrivateDocument',
+    },
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'Workspace' },
+  ],
+})
+
 const referenceDefinitions = load({
   entities: [
     { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
@@ -416,6 +436,51 @@ describe('PredicateEligibility', () => {
     expect(PredicateEligibility.lower(referenceDefinitions, start, filter)).toEqual(
       and(guard('entity', ['B']), filter),
     )
+  })
+
+  test('analyzes generated, cloned, and authored guards identically', () => {
+    const start = entity(generatedDefinitions, 'A')
+    const lowered = PredicateEligibility.lower(generatedDefinitions, start, {
+      field: 'document.workspace',
+      operator: Operator.Comparison.Equal,
+      value: null,
+    })
+    if (!('filters' in lowered)) throw new Error('expected guarded conjunction')
+    const generated = lowered.filters.find(filter => (
+      'field' in filter && filter.field === 'document.entity'
+    ))
+    if (!generated) throw new Error('missing generated dotted guard')
+    const authored: Filter = {
+      field: 'document.entity',
+      operator: Operator.Comparison.In,
+      value: ['PrivateDocument'],
+    }
+    const variants: Filter[] = [
+      generated,
+      { ...generated },
+      structuredClone(generated),
+      JSON.parse(JSON.stringify(generated)) as Filter,
+      authored,
+    ]
+    const expectedAnalysis = {
+      applicable: guard('entity', ['B']),
+      match: authored,
+    }
+    const expectedLower = and(guard('entity', ['B']), authored)
+    const expectedNegated = and(guard('entity', ['B']), not(authored))
+    for (const variant of variants) {
+      expect(PredicateEligibility.analyze(generatedDefinitions, start, variant))
+        .toEqual(expectedAnalysis)
+      expect(PredicateEligibility.lower(generatedDefinitions, start, variant))
+        .toEqual(expectedLower)
+      expect(PredicateEligibility.lower(generatedDefinitions, start, not(variant)))
+        .toEqual(expectedNegated)
+      expect(PredicateEligibility.lower(
+        generatedDefinitions,
+        start,
+        PredicateEligibility.lower(generatedDefinitions, start, variant),
+      )).toEqual(expectedLower)
+    }
   })
 
   test('guards count paths with owner eligibility and source/structured parity', () => {
