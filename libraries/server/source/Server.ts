@@ -94,6 +94,12 @@ export interface ServerOptions {
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
+   * Absolute script URLs to import before the application module. Consumers use
+   * this for prebuilt vendor chunks that expose globals consumed by the
+   * application; the bundler must leave these URLs external.
+   */
+  preScripts?: readonly string[],
+  /**
    * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
    * authoritative release version from the strict semver release tag (for
@@ -696,6 +702,7 @@ export class Server<
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
+   * @param options.preScripts - Absolute classic-script URLs to load before the application.
    * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
@@ -704,6 +711,7 @@ export class Server<
     idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
+    preScripts = [],
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): this => {
     if (logger) this.#logger = logger
@@ -735,11 +743,11 @@ export class Server<
     }
     const databaseReady = this.#databaseReady()
 
-    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath]))
+    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, preScripts]))
     const entrypoints = this.#mainPath
       ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
       : []
-    const shell = writeDevShell({ directory, entrypoints, title: this.#title })
+    const shell = writeDevShell({ directory, entrypoints, preScripts, title: this.#title })
     const routes = {
       [DEV_SHELL_ROUTE]: import.meta.require(shell),
     } as Bun.Serve.Routes<SocketData, string>

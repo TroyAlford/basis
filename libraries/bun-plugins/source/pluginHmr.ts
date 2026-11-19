@@ -210,15 +210,30 @@ export function transformProductionModule(
 }
 
 /**
+ * Options for the production HMR plugin.
+ */
+export interface PluginHmrOptions {
+  /**
+   * Run the class-component HMR transform outside production. Vendor-backed
+   * preview deployments use this to keep class state with a production React
+   * vendor build instead of React Refresh.
+   */
+  force?: boolean,
+}
+
+/**
  * A Bun plugin that replaces React Fast Refresh with Basis's production class
- * component HMR. It is inert outside the browser target or production mode.
+ * component HMR. It is inert outside the browser target, or outside production
+ * mode unless {@link PluginHmrOptions.force} is set.
+ * @param options - Plugin options.
+ * @param options.force - Run the transform outside production.
  * @returns The plugin.
  */
-export const pluginHmr = (): BunPlugin => ({
+export const pluginHmr = ({ force = false }: PluginHmrOptions = {}): BunPlugin => ({
   name: 'basis-production-hmr',
   setup(build) {
     if (build.config.target !== 'browser') return
-    if (process.env.NODE_ENV !== 'production') return
+    if (!force && process.env.NODE_ENV !== 'production') return
 
     build.onLoad({ filter: /\.[jt]sx?$/ }, async args => {
       if (args.path.includes('node_modules') || /\.d\.[jt]s$/.test(args.path)) return undefined

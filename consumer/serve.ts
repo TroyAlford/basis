@@ -5,6 +5,11 @@
  */
 import { pluginServe } from '../libraries/bun-plugins/serve'
 
+export { pluginGlobals } from '../libraries/bun-plugins/source/pluginGlobals'
+export { pluginHmr } from '../libraries/bun-plugins/source/pluginHmr'
+export { pluginMarkdown } from '../libraries/bun-plugins/source/pluginMarkdown'
+export { pluginSASS } from '../libraries/bun-plugins/source/pluginSASS'
+
 // eslint-disable-next-line @basis/no-default-export -- Bun's `[serve.static]` plugin loader requires a default export.
 export default pluginServe
 export { pluginServe }

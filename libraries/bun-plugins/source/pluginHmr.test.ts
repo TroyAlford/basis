@@ -100,6 +100,24 @@ describe('pluginHmr', () => {
     expect(registersLoader(undefined)).toBe(false)
   })
 
+  test('can force the transform in development for vendor-backed previews', () => {
+    const previous = process.env.NODE_ENV
+    process.env.NODE_ENV = 'development'
+
+    try {
+      let registered = false
+      const build = {
+        config: { target: 'browser' },
+        onLoad: () => { registered = true },
+      } as unknown as PluginBuilder
+      pluginHmr({ force: true }).setup(build)
+      expect(registered).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previous
+    }
+  })
+
   test('does not register for the server target', () => {
     expect(registersLoader('production', 'bun')).toBe(false)
   })

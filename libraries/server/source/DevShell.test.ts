@@ -41,6 +41,19 @@ describe('renderDevShell', () => {
 
     expect(html).not.toContain('\\')
   })
+
+  test('renders pre-scripts through a blocking inline loader', () => {
+    const html = renderDevShell({
+      directory: shellDir,
+      entrypoints: ['/srv/app/index.tsx'],
+      preScripts: ['/assets/vendor/react.js?v=1'],
+      title: 't',
+    })
+
+    expect(html).toContain('document.write')
+    expect(html).toContain('/assets/vendor/react.js?v=1')
+    expect(html).toContain('<\\/script>')
+  })
 })
 
 describe('writeDevShell', () => {
