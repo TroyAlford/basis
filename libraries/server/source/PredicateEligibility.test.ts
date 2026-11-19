@@ -101,6 +101,7 @@ const scalarDefinitions = load({
     {
       fields: [
         { field: 'id', format: 'UUID' },
+        { field: 'createdAt', type: 'Timestamp' },
         { field: 'ratings', items: { type: 'Number' }, type: 'Array' },
       ],
       name: 'A',
@@ -311,6 +312,14 @@ describe('PredicateEligibility', () => {
         eq('bar', 9),
       ),
     )
+  })
+
+  test('preserves distinct Date operands through structural deduplication', () => {
+    const first = new Date('2026-01-01T00:00:00.000Z')
+    const second = new Date('2026-02-01T00:00:00.000Z')
+    const filters = [eq('createdAt', first), eq('createdAt', second)] as const
+    expect(lowerScalar(or(...filters))).toEqual(or(...filters))
+    expect(lowerScalar(and(...filters))).toEqual(and(...filters))
   })
 
   test('treats a universal OR operand as universally applicable', () => {

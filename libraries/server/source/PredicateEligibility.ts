@@ -357,6 +357,9 @@ function dedupeFilters(filters: readonly Filter[]): Filter[] {
  * @returns Stable key.
  */
 function filterKey(value: unknown): string {
+  if (value instanceof Date) {
+    return `Date:${Number.isNaN(value.getTime()) ? 'Invalid' : value.toISOString()}`
+  }
   if (Array.isArray(value)) return `[${value.map(filterKey).join(',')}]`
   if (value !== null && typeof value === 'object') {
     const record = value as Record<string, unknown>

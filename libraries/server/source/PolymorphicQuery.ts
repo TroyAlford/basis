@@ -1242,7 +1242,8 @@ class QueryProjection {
    * @returns Count expression and canonical existence forms.
    */
   #collectionCountExpression(plan: CollectionRelationPlan, key: string): CountScope {
-    const cached = this.#countScopes.get(key)
+    const cacheKey = `${key}\u0000${plan.parentAlias}`
+    const cached = this.#countScopes.get(cacheKey)
     if (cached) return cached
     const spec: ProjectedCollectionSpec = {
       collection: plan.collection,
@@ -1265,7 +1266,7 @@ class QueryProjection {
       fragment: count,
       render: bind => `(${SQL.bindFragment(count, bind)})`,
     }
-    this.#countScopes.set(key, scope)
+    this.#countScopes.set(cacheKey, scope)
     return scope
   }
 

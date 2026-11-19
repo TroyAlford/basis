@@ -1373,6 +1373,65 @@ describe('Query parity gate', () => {
     })
   })
 
+  test('scopes count caches to physical parent occurrences', async () => {
+    await withLifecycleDatabase('count-parent-scope', async database => {
+      const selfDefinitions = EntityDefinitions.load(JSON.stringify({
+        entities: [{
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'manager', inverse: 'reports', target: 'Employee', type: 'Entity' },
+            {
+              cardinality: 'Many',
+              field: 'reports',
+              inverse: 'manager',
+              target: 'Employee',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Employee',
+        }],
+      }))
+      await database.use(selfDefinitions)
+      const root = '00000000-0000-4000-8000-000000000401'
+      const report = '00000000-0000-4000-8000-000000000402'
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${root}, 'Root', 'Employee'), (${report}, 'Report', 'Employee')
+      `
+      await database.sql`
+        INSERT INTO "Employee" ("id", "manager.id")
+        VALUES (${root}, ${null}), (${report}, ${root})
+      `
+      const ids = async (where: Filter | string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, selfDefinitions, 'Employee', {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+      const nested = 'reports.$total > 0 AND reports $contains (reports.$total > 0)'
+      expect(await ids(nested)).toEqual([])
+      expect(await ids('reports $contains (reports.$total > 0) AND reports.$total > 0'))
+        .toEqual([])
+      expect(await ids({
+        filters: [
+          { field: 'reports.$total', operator: Operator.Comparison.GreaterThan, value: 0 },
+          {
+            field: 'reports',
+            filters: [{
+              field: 'reports.$total',
+              operator: Operator.Comparison.GreaterThan,
+              value: 0,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        ],
+        operator: Operator.Logical.And,
+      })).toEqual([])
+    })
+  })
+
   test('preserves eligibility results when sibling declarations are reversed', async () => {
     await withLifecycleDatabase('polymorphic-eligibility-reversed', async database => {
       await seedEligibility(database, eligibilityDefinitionsReversed)
