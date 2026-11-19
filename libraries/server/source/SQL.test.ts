@@ -258,14 +258,6 @@ const oneDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 
-const incompatibleDefinitions = EntityDefinitions.load(JSON.stringify({
-  entities: [
-    { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
-    { extends: 'User', fields: [{ field: 'permissions', type: 'String' }], name: 'SystemUser' },
-    { extends: 'User', fields: [{ field: 'permissions', type: 'Number' }], name: 'Client' },
-  ],
-}))
-
 describe('SQL.where', () => {
   test('compiles explicit And comparisons and preserves bound values', () => {
     const predicate = SQL.where(definitions, entity, {
@@ -840,10 +832,14 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"pets"')
   })
 
-  test('rejects incompatible descendant-only declarations', () => {
-    expect(() => compileEntityQuery(incompatibleDefinitions, 'User', {
-      fields: ['permissions'],
-    })).toThrow('has incompatible declarations')
+  test('rejects incompatible descendant-only declarations at construction', () => {
+    expect(() => EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        { extends: 'User', fields: [{ field: 'permissions', type: 'String' }], name: 'SystemUser' },
+        { extends: 'User', fields: [{ field: 'permissions', type: 'Number' }], name: 'Client' },
+      ],
+    }))).toThrow('incompatible field contract "permissions" in hierarchy "User"')
   })
 
   test('rejects invalid dotted projection paths', () => {
