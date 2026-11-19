@@ -39,8 +39,8 @@ The server delegates to Bun's dev server for compilation, watching, HMR, and Rea
 ## Other server facilities
 
 - `api(verbs, template, handler)` registers an API route under `/api`.
-- `mount(prefix, folder, { allow })` and `assets(folder)` serve static files with traversal and `.basis` protection.
-- `buildVendor({ entries, outdir })` builds content-versioned vendor chunks, and `vendor(folder)` serves them under `/assets/vendor` with immutable caching and ETag revalidation.
+- A standard `assets` directory is served automatically; `mount(prefix, folder, { allow })` and `assets(folder)` provide explicit mounts with traversal and `.basis` protection.
+- `buildVendor({ entries })` writes content-versioned chunks to `assets/vendor`; the standard `/assets/vendor` subtree gets immutable caching and ETag revalidation automatically.
 - `sse(route, handler)` registers a GET event stream.
 - `socket(route, handlers)` registers a WebSocket route.
 - `oauth(options)` mounts a provider-agnostic OAuth flow.

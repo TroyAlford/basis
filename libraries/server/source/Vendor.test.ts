@@ -52,7 +52,6 @@ describe('vendor assets', () => {
           { entrypoint: 'vendor/beta.ts', name: 'beta' },
           { entrypoint: 'vendor/consumer.ts', globals: { shared: 'window.Shared' }, name: 'consumer' },
         ],
-        outdir: 'dist/vendor',
         root,
       }
 
@@ -72,6 +71,16 @@ describe('vendor assets', () => {
       }
 
       expect(await Bun.file(artifact(second, 'consumer').file).text()).toContain('window.Shared')
+
+      const consumer = await Bun.file(artifact(second, 'consumer').file).text()
+      const previousConsumer = (globalThis as Record<string, unknown>).Consumer
+      try {
+        new Function('window', consumer)({ Shared: { value: 'shared' } })
+        expect((globalThis as Record<string, unknown>).Consumer).toBe('shared')
+      } finally {
+        if (previousConsumer === undefined) delete (globalThis as Record<string, unknown>).Consumer
+        else (globalThis as Record<string, unknown>).Consumer = previousConsumer
+      }
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -92,19 +101,18 @@ describe('vendor assets', () => {
           { entrypoint: 'vendor/beta.ts', name: 'beta' },
           { entrypoint: 'vendor/consumer.ts', globals: { shared: 'window.Shared' }, name: 'consumer' },
         ],
-        outdir: 'dist/vendor',
         root,
       }
       const initial = await buildVendor(options)
       const alpha = artifact(initial, 'alpha')
       const beta = artifact(initial, 'beta')
-      await mkdir(join(root, 'dist', 'vendor', '.basis'), { recursive: true })
-      await writeFile(join(root, 'dist', 'vendor', '.basis', 'secret'), 'secret')
+      await mkdir(join(root, 'assets', 'vendor', '.basis'), { recursive: true })
+      await writeFile(join(root, 'assets', 'vendor', '.basis', 'secret'), 'secret')
 
       const application = await useApplication({
         cwd: repoRoot,
         entry: fixture,
-        env: { VENDOR_ROOT: join(root, 'dist', 'vendor') },
+        env: { APP_ROOT: root },
       })
 
       expect((await Bun.fetch(`${application.url}/assets/vendor/.basis/secret`)).status).toBe(404)

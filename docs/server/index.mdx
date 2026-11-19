@@ -67,13 +67,13 @@ Basis resolves the verified identity first, then runs the loader and the SSR ren
 
 ## Static files
 
-`assets(folder)` serves a fixed asset directory. `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. Both reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
+A standard `<root>/assets` directory is served automatically. `assets(folder)` overrides that root, and `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. All three reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
 
 ## Vendor assets
 
-`buildVendor({ entries, outdir })` compiles each vendor entry into a stable `<name>.js` chunk and returns its SHA-256 content hash and versioned URL. An entry can map exact module specifiers to browser globals, so chunks such as `react-dom` consume a shared React chunk instead of bundling another copy.
+`buildVendor({ entries })` compiles each vendor entry into `assets/vendor/<name>.js` and returns its SHA-256 content hash and versioned URL. An entry can map exact module specifiers to browser globals, so chunks such as `react-dom` consume a shared React chunk instead of bundling another copy.
 
-`vendor(folder)` serves that folder under `/assets/vendor`. A request without the current `v` query redirects to it; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL.
+The standard `/assets/vendor` subtree is content-versioned automatically. A request without the current `v` query redirects to it; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. There is no server option or URL prefix to configure.
 
 ```ts
 import { buildVendor, Server } from 'basis/server'
@@ -83,12 +83,10 @@ const vendor = await buildVendor({
     { entrypoint: './vendor/react.ts', name: 'react' },
     { entrypoint: './vendor/react-dom.ts', globals: { react: 'window.React' }, name: 'react-dom' },
   ],
-  outdir: './dist/vendor',
 })
 
 new Server()
   .root(import.meta.dir)
-  .vendor('./dist/vendor')
   .start({ port: 8080 })
 ```
 

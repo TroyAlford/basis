@@ -25,10 +25,11 @@ export interface VendorEntry {
 export interface VendorBuildOptions {
   /** Entrypoints to build, in order. */
   entries: readonly VendorEntry[],
-  /** Directory to write chunks to, resolved relative to {@link VendorBuildOptions.root}. */
-  outdir: string,
-  /** Browser URL prefix for {@link VendorAsset.url}. Defaults to `/assets/vendor`. */
-  prefix?: string,
+  /**
+   * Directory to write chunks to, resolved relative to {@link VendorBuildOptions.root}.
+   * Defaults to `assets/vendor`.
+   */
+  outdir?: string,
   /** Root used to resolve relative entrypoints and `outdir`. Defaults to the working directory. */
   root?: string,
 }
@@ -89,13 +90,13 @@ function exactGlobals(globals: Readonly<Record<string, string>>): BunPlugin {
  * Each entrypoint is built in isolation into a stable `<name>.js` file, then
  * hashed from the emitted bytes. Rebuilding unchanged content therefore keeps
  * its URL, while changing one chunk invalidates only that chunk's version.
- * @param options - The entrypoints, output directory, and optional prefix.
+ * @param options - The entrypoints and optional output directory.
  * @returns The built artifacts and a name-indexed lookup.
  */
 export async function buildVendor(options: VendorBuildOptions): Promise<VendorBuild> {
   const root = path.resolve(options.root ?? process.cwd())
-  const outdir = path.isAbsolute(options.outdir) ? options.outdir : path.resolve(root, options.outdir)
-  const prefix = `/${(options.prefix ?? 'assets/vendor').replace(/^\/+|\/+$/g, '')}`
+  const outdirOption = options.outdir ?? 'assets/vendor'
+  const outdir = path.isAbsolute(outdirOption) ? outdirOption : path.resolve(root, outdirOption)
   const assets: VendorAsset[] = []
   const names = new Set<string>()
 
@@ -144,7 +145,7 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
       file: output.path,
       hash,
       name: entry.name,
-      url: `${prefix}/${entry.name}.js?v=${hash}`,
+      url: `/assets/vendor/${entry.name}.js?v=${hash}`,
     })
   }
 

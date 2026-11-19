@@ -140,7 +140,6 @@ export class Server<
 
   #apis = new Map<string, APIRoute<object, AppContext>>()
   #assets: string | null = null
-  #vendor: string | null = null
   #authorization: Authorization | null = null
   #graph: Graph | null = null
   #closing: Promise<void> | null = null
@@ -425,19 +424,19 @@ export class Server<
   /**
    * Handles an asset request.
    *
-   * Requests below `/assets/vendor` use the configured vendor folder when one
-   * is set. Vendor artifacts are versioned by content hash; other assets retain
-   * the server's modification-time versioning.
+   * Vendor artifacts are the standard `/assets/vendor` subtree and are versioned
+   * by content hash; other assets retain the server's modification-time
+   * versioning.
    * @param uri - The URI to handle.
    * @param request - The incoming request, when available, for conditional vendor requests.
    * @returns The asset response.
    */
   async handleAsset(uri: URI, request?: Request): Promise<Response> {
-    const vendor = this.#vendor !== null && (uri.route === 'vendor' || uri.route.startsWith('vendor/'))
-    const root = vendor ? this.#vendor : this.#assets
+    const vendor = uri.route === 'vendor' || uri.route.startsWith('vendor/')
+    const root = this.#assets
     if (!root || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const relative = vendor ? uri.route.slice('vendor'.length).replace(/^\/+/, '') : uri.route
+    const relative = uri.route
     if (relative.length === 0) return Server.NotFound
 
     const filePath = path.join(root, relative)
@@ -779,6 +778,10 @@ export class Server<
   }: ServerOptions = {}): this => {
     if (logger) this.#logger = logger
     this.#version = version
+    if (!this.#assets) {
+      const assets = path.join(this.#root, 'assets')
+      if (fs.existsSync(assets)) this.#assets = assets
+    }
     this.#favIcon = resolveFavIcon(
       this.#favIconInput,
       this.#favIconOptions,
@@ -1135,26 +1138,6 @@ export class Server<
     }
 
     this.#assets = absolute
-    return this
-  }
-
-  /**
-   * Sets the vendor asset folder served under `/assets/vendor`.
-   *
-   * Vendor chunks are versioned by the SHA-256 of their bytes. A request without
-   * the current `v` query redirects to it; a matching request is immutable and
-   * supports ETag revalidation. A stale version redirects to the current hash
-   * rather than serving different bytes under the old URL.
-   * @param folder - Folder to serve, absolute or relative to the server root.
-   * @returns The server.
-   */
-  vendor(folder: string): this {
-    const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
-    if (!fs.existsSync(absolute)) {
-      throw new Error(`Vendor folder "${absolute}" does not exist`)
-    }
-
-    this.#vendor = absolute
     return this
   }
 
