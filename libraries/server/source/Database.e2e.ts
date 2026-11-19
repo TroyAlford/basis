@@ -2048,8 +2048,8 @@ describe('Server database lifecycle', () => {
     ).map(row => row.id)
 
     expect(await ids('Person', "pets $contains (trait = 'good')")).toEqual([ada, grace])
-    // Cat members do not declare the Dog-only path, so they are not applicable counterexamples.
-    expect(await ids('Person', "pets $all (trait = 'good')")).toEqual([ada, grace, linus, dana])
+    expect(await ids('Person', "pets $contains (NOT (trait = 'good'))")).toEqual([])
+    expect(await ids('Person', "pets $all (trait = 'good')")).toEqual([grace, linus])
     expect(await ids('Person', "pets !$contains (trait = 'good')")).toEqual([linus, dana])
     expect(await ids('Person', 'pets $empty')).toEqual([linus])
     expect(await ids('Person', 'pets $contains (lives = 9)')).toEqual([ada, dana])
@@ -2057,7 +2057,7 @@ describe('Server database lifecycle', () => {
     expect(await ids('Person', `pets $contains (mentor = '${grace}')`)).toEqual([ada])
     expect(await ids('Person', "pets $contains (mentor.manager.title = 'Ada')")).toEqual([ada])
     expect(await ids('Person', "pets $contains (mentor.title = 'Ada')")).toEqual([grace])
-    expect(await ids('Person', "pets $all (mentor.title = 'Grace')")).toEqual([ada, linus, dana])
+    expect(await ids('Person', "pets $all (mentor.title = 'Grace')")).toEqual([linus])
 
     const nineHops = Array.from({ length: 8 }, () => 'manager').join('.')
     expect(() => compileEntityQuery(entities, 'Person', {

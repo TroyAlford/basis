@@ -1,7 +1,7 @@
 import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
-import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
+import { Constraint, FieldType, identityDefinition, logicalFieldContract } from './EntityDefinitions'
 import { resolveCollectionPath, resolveFieldPath, resolvePredicatePath } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
@@ -1038,7 +1038,9 @@ class QueryProjection {
     })
     if ('kind' in resolved) return undefined
     if (!('kind' in resolved.terminal)) return undefined
-    if (resolved.variants.length === 0) return undefined
+    if (resolved.variants.length === 0) {
+      throw new Error(`Predicate path "${name}" resolved without physical collection variants`)
+    }
     const scopes = resolved.variants.map((variant, index) => {
       let current = context
       let prefix = ''
@@ -1049,7 +1051,12 @@ class QueryProjection {
           terminal = field
           break
         }
-        if (field.type !== FieldType.Entity) return undefined
+        if (field.type !== FieldType.Entity) {
+          throw new Error(
+            `Predicate path "${name}" contains non-reference field "${field.name}" ` +
+            'before its collection terminal',
+          )
+        }
         const sourceAlias = this.#ownerAlias(current, field.owner, true, sink)
         current = this.#filterTarget(
           field,
@@ -1060,7 +1067,9 @@ class QueryProjection {
         prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
         occurrences.set(prefix, current.rootAlias)
       }
-      if (!terminal) return undefined
+      if (!terminal) {
+        throw new Error(`Predicate path "${name}" resolved without a collection terminal`)
+      }
       const scope = this.#scopeForCollection(
         { collection: terminal, parentAlias: current.baseAlias },
         `${name}\u0000${index}`,
@@ -1071,18 +1080,24 @@ class QueryProjection {
           ? ''
           : restriction.path.slice(0, -'.entity'.length)
         const alias = occurrences.get(prefixName)
-        return alias === undefined
-          ? undefined
-          : `${alias}.${quote('entity')} IN (` +
-            `${restriction.entityTypes.map(quoteLiteral).join(', ')})`
-      }).filter(guard => guard !== undefined)
+        if (alias === undefined) {
+          throw new Error(
+            `Predicate path "${name}" restriction "${restriction.path}" ` +
+            'has no physical occurrence',
+          )
+        }
+        return `${alias}.${quote('entity')} IN (` +
+          `${restriction.entityTypes.map(quoteLiteral).join(', ')})`
+      })
       return {
         guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
         scope,
       }
-    }).filter(scope => scope !== undefined)
+    })
     const [first] = scopes
-    if (!first) return undefined
+    if (!first) {
+      throw new Error(`Predicate path "${name}" resolved without compilable collection variants`)
+    }
     return { ...first.scope, variants: scopes }
   }
 
@@ -2640,7 +2655,7 @@ function collectDescendantFields(
         variants = new Map()
         groups.set(field.name, variants)
       }
-      const key = `${field.owner}\u0000${fieldContract(field)}`
+      const key = `${field.owner}\u0000${logicalFieldContract(field)}`
       let variant = variants.get(key)
       if (!variant) {
         variant = { field, leaves: new Set() }
@@ -2653,7 +2668,7 @@ function collectDescendantFields(
   const result = new Map<string, DescendantField>()
   for (const [name, variants] of groups) {
     const values = [...variants.values()]
-    const contracts = new Set(values.map(variant => fieldContract(variant.field)))
+    const contracts = new Set(values.map(variant => logicalFieldContract(variant.field)))
     result.set(name, {
       contracts,
       name,
@@ -2713,23 +2728,6 @@ function descendantReferenceExpression(
     `THEN (${branch.resolved.count?.expression ?? branch.resolved.expression})`
   )).join(' ')
   return `(CASE ${cases} ELSE ${hasCount ? '0' : 'NULL'} END)`
-}
-
-/**
- * Build one canonical contract signature for descendant compatibility.
- * @param field - Field declaration.
- * @returns Type/format/reference-target signature.
- */
-function fieldContract(field: FieldDefinition): string {
-  if (field.type === FieldType.JSON) return 'JSON'
-  if (field.type === FieldType.Enum) return `Enum:${field.enum}`
-  if (field.type === FieldType.Array) {
-    return `Array:${field.items.type}:${field.items.format ?? ''}`
-  }
-  if (field.type === FieldType.Entity) return `Entity:${field.target}`
-  if (field.type === FieldType.Collection) return `Collection:${field.target}:${field.via}`
-  if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
-  return `${field.type}:${field.format ?? ''}`
 }
 
 /** One parsed collection ordering entry. */

@@ -432,7 +432,9 @@ export const Predicate = {
    * Build a canonical universal collection predicate.
    *
    * The canonical form is `Not(Contains(Not(P)))`, so universal and
-   * existential collection predicates share one SQL mechanism.
+   * existential collection predicates share one SQL mechanism. Eligibility
+   * lowering recognizes this form and negates the fully guarded member
+   * predicate, making an inapplicable member a counterexample.
    * @param field - Collection navigation name.
    * @param filters - Exactly one member requirement.
    * @returns The canonical universal collection filter.

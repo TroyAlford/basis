@@ -422,17 +422,32 @@ describe('PredicateEligibility', () => {
     )
   })
 
-  test('does not treat inapplicable members as universal counterexamples', () => {
+  test('treats inapplicable members as universal counterexamples', () => {
     const member = eq('role', 'admin')
-    expect(lowerCollection(
+    const lowered = lowerCollection(
       memberDefinitions,
       Predicate.universal('document.workspace.members', [member]),
-    )).toEqual(
+    )
+    expect(lowered).toEqual(
       and(
         documentGuard,
         not(collection([
-          and(guard('entity', ['AdminMember']), not(member)),
+          not(and(guard('entity', ['AdminMember']), member)),
         ])),
+      ),
+    )
+    expect(lowerCollection(memberDefinitions, lowered)).toEqual(lowered)
+  })
+
+  test('keeps ordinary member negation guarded outside universal quantification', () => {
+    const member = eq('role', 'admin')
+    expect(lowerCollection(
+      memberDefinitions,
+      collection([not(member)]),
+    )).toEqual(
+      and(
+        documentGuard,
+        collection([and(guard('entity', ['AdminMember']), not(member))]),
       ),
     )
   })
