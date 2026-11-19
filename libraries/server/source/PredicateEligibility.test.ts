@@ -200,6 +200,19 @@ const memberDefinitions = load({
   ],
 })
 
+const referenceDefinitions = load({
+  entities: [
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+    {
+      extends: 'A',
+      fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+      name: 'B',
+    },
+    { extends: 'A', fields: [], name: 'C' },
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'Document' },
+  ],
+})
+
 const scalarA = entity(scalarDefinitions, 'A')
 const scalarB = entity(scalarDefinitions, 'B')
 
@@ -386,6 +399,22 @@ describe('PredicateEligibility', () => {
       Predicate.universal('document.workspace.members', [member]),
     )).toEqual(
       and(documentGuard, not(collection([not(member)]))),
+    )
+  })
+
+  test('analyzes user-authored dotted entity comparisons instead of treating them as guards', () => {
+    const filter: Filter = {
+      field: 'document.entity',
+      operator: Operator.Comparison.In,
+      value: ['Document'],
+    }
+    const start = entity(referenceDefinitions, 'A')
+    expect(PredicateEligibility.analyze(referenceDefinitions, start, filter)).toEqual({
+      applicable: guard('entity', ['B']),
+      match: filter,
+    })
+    expect(PredicateEligibility.lower(referenceDefinitions, start, filter)).toEqual(
+      and(guard('entity', ['B']), filter),
     )
   })
 

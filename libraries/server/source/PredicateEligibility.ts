@@ -20,6 +20,9 @@ interface InternalAnalysis extends AnalyzedPredicate {
   readonly guarded: Filter,
 }
 
+/** Guards created by this analyzer, distinct from user-authored comparisons. */
+const generatedGuards = new WeakSet<ComparisonFilter>()
+
 /**
  * Canonical predicate eligibility analysis.
  *
@@ -237,11 +240,13 @@ function eligibilityFilters(entries: readonly ConcreteEligibility[]): Filter | n
  */
 function eligibilityFilter(entry: ConcreteEligibility): Filter | null {
   if (entry.entityTypes.length === 0) return null
-  return {
+  const filter: ComparisonFilter = {
     field: entry.path,
     operator: Operator.Comparison.In,
     value: [...entry.entityTypes],
   }
+  generatedGuards.add(filter)
+  return filter
 }
 
 /**
@@ -380,11 +385,7 @@ function eligibilityKey(filter: ComparisonFilter): string {
  * @returns `true` for a terminal eligibility predicate.
  */
 function isEligibilityPredicate(filter: Filter): filter is ComparisonFilter {
-  return !('filters' in filter)
-    && filter.operator === Operator.Comparison.In
-    && (filter.field === 'entity' || filter.field.endsWith('.entity'))
-    && Array.isArray(filter.value)
-    && filter.value.every(value => typeof value === 'string')
+  return generatedGuards.has(filter as ComparisonFilter)
 }
 
 /**
