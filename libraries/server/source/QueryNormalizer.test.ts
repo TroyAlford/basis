@@ -76,6 +76,24 @@ describe('QueryNormalizer', () => {
     )
   })
 
+  test('normalizes scalar $in lists identically to structured JSON', () => {
+    expect(QueryNormalizer.normalize(entity, "title $in ['A', 'B']")).toEqual(
+      Predicate.normalize(entity, {
+        field: 'title',
+        operator: Operator.Comparison.In,
+        value: ['A', 'B'],
+      }),
+    )
+  })
+
+  test('rejects malformed scalar $in lists in source form', () => {
+    expect(() => QueryNormalizer.normalize(entity, 'title $in []')).toThrow('non-empty')
+    expect(() => QueryNormalizer.normalize(entity, 'title $in [null]')).toThrow('cannot contain null')
+    expect(() => QueryNormalizer.normalize(entity, "title $in [['A']]")).toThrow('must be a scalar literal')
+    expect(() => QueryNormalizer.normalize(entity, "title $in ['A', 7]"))
+      .toThrow('not a valid string value')
+  })
+
   test('normalizes substring containment expressions', () => {
     expect(QueryNormalizer.normalize(entity, 'title $contains "5%"')).toEqual({
       field: 'title',
