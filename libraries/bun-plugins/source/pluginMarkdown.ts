@@ -19,11 +19,11 @@ interface MarkdownNode {
 const MERMAID_FENCE = /^`{3,}\s*mermaid\b/m
 
 /**
- * The import that makes `<Mermaid>` resolve to the component, not a missing
- * reference. Mermaid is an opt-in entrypoint so the main `basis/react` barrel
- * never pulls `beautiful-mermaid`/`elkjs` into a page that has no diagrams.
+ * The import that makes a `mermaid` fence resolve to the docs Mermaid component.
+ * The docs setup injects this automatically, so a consumer never imports the
+ * diagram component or adds Mermaid to an application bundle.
  */
-const MERMAID_IMPORT = "import { Mermaid } from 'basis/react/mermaid'\n\n"
+const MERMAID_IMPORT = "import { Mermaid } from 'basis/docs/mermaid'\n\n"
 
 /** Options for the Markdown/MDX loader. */
 export interface MarkdownPluginOptions {

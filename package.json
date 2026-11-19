@@ -16,6 +16,7 @@
   "exports": {
     "./cli": "./consumer/cli.ts",
     "./configuration": "./consumer/configuration.ts",
+    "./docs/mermaid": "./consumer/docs-mermaid.ts",
     "./eslint": "./consumer/eslint.ts",
     "./eslint.config.mjs": "./eslint.config.mjs",
     "./logger": "./consumer/logger.ts",
@@ -24,7 +25,6 @@
     "./package.json": "./package.json",
     "./react": "./consumer/react.ts",
     "./react/icons": "./consumer/react-icons.ts",
-    "./react/mermaid": "./consumer/react-mermaid.ts",
     "./review": "./consumer/review.ts",
     "./serve": "./consumer/serve.ts",
     "./server": "./consumer/server.ts",

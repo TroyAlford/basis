@@ -1,4 +1,4 @@
-import { css, style } from '../../utilities/style'
+import { css, style } from '../../../react/utilities/style'
 
 style('basis:mermaid', css`
   .mermaid-diagram.component {

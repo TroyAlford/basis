@@ -29,4 +29,31 @@ describe('pluginMarkdown', () => {
       rmSync(root, { force: true, recursive: true })
     }
   })
+
+  test('injects the docs Mermaid component for Mermaid fences', async () => {
+    const root = tempDirectory('basis-markdown-mermaid-')
+    const docs = join(root, 'docs')
+    mkdirSync(docs)
+
+    try {
+      writeFileSync(
+        join(docs, 'diagram.mdx'),
+        '# Diagram\n\n```mermaid\nflowchart TD\n  A[Start] --> B[Ship]\n```\n',
+      )
+
+      const result = await Bun.build({
+        entrypoints: [join(docs, 'diagram.mdx')],
+        external: ['basis/docs/mermaid', 'react/jsx-runtime'],
+        plugins: [pluginMarkdown({ docsRoot: docs })],
+        target: 'bun',
+      })
+
+      expect(result.success).toBe(true)
+      const code = await result.outputs[0].text()
+      expect(code).toContain('basis/docs/mermaid')
+      expect(code).toContain('Mermaid')
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
 })

@@ -1,4 +1,4 @@
-import { Mermaid } from 'basis/react/mermaid'
+import { Mermaid } from 'basis/docs/mermaid'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { existsSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -61,9 +61,9 @@ console.log(App, React)
     expect(bundle).not.toContain('ELK')
   })
 
-  test('the opt-in Mermaid entrypoint includes its layout dependencies', async () => {
+  test('the docs Mermaid entrypoint includes its layout dependencies', async () => {
     const bundle = await build(`
-import { Mermaid } from 'basis/react/mermaid'
+import { Mermaid } from 'basis/docs/mermaid'
 
 console.log(Mermaid)
 `)
@@ -72,7 +72,7 @@ console.log(Mermaid)
     expect(bundle.length).toBeGreaterThan(1_000_000)
   })
 
-  test('Mermaid remains server-renderable from the opt-in entrypoint', () => {
+  test('Mermaid remains server-renderable from the docs entrypoint', () => {
     const html = renderToString(
       React.createElement(Mermaid, null, 'flowchart TD\n  A[Start] --> B[Ship]'),
     )

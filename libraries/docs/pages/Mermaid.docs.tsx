@@ -1,7 +1,7 @@
-import { Mermaid } from '../../react/components/Mermaid/Mermaid'
 import { Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
+import { Mermaid } from '../components/Mermaid/Mermaid'
 
 const FLOWCHART = `flowchart TD
   A[Request] --> B{Signed in?}
@@ -95,14 +95,14 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>Basic Usage</h2>
-          <p>Pass the diagram source as the component’s text:</p>
+          <p>Basis’s docs setup renders a <code>mermaid</code> fence automatically. There is no component import or plugin configuration for a documentation author:</p>
           {Code.format(`
-        import { Mermaid } from 'basis/react/mermaid'
-
-        <Mermaid>{\`flowchart TD
+        \`\`\`mermaid
+        flowchart TD
           A[Start] --> B{Ready?}
           B -->|Yes| C[Ship]
-          B -->|No| A\`}</Mermaid>
+          B -->|No| A
+        \`\`\`
       `)}
           <Mermaid>
             {`flowchart TD
@@ -113,7 +113,7 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>Theming</h2>
-          <p>A diagram is themed from the design tokens in scope where it renders, so wrapping it in a <code>Theme</code> is the whole customization surface. Render the <code>Theme</code> with a <code>name</code>, then put the diagram in that scope — the component’s <code>theme</code> prop sets <code>data-theme</code> for you.</p>
+          <p>A diagram is themed from the design tokens in scope where it renders. Wrap the docs page or the diagram’s scope in a <code>Theme</code>, and the fence picks up those tokens.</p>
           <div data-theme-example="default">
             <h3>Default theme</h3>
             <Mermaid>{FLOWCHART}</Mermaid>
@@ -128,20 +128,21 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
           />
           <div data-theme-example="named">
             <h3>A named theme</h3>
-            <p>The same diagram inside <code>&lt;Mermaid theme=&quot;diagram-dusk&quot;&gt;</code>:</p>
+            <p>The same diagram inside a <code>data-theme=&quot;diagram-dusk&quot;</code> scope:</p>
             <Mermaid theme="diagram-dusk">{FLOWCHART}</Mermaid>
           </div>
           {Code.format(`
             import { Theme } from 'basis/react'
-            import { Mermaid } from 'basis/react/mermaid'
 
             <Theme
               name="diagram-dusk"
               color={{ background: '#0f172a', foreground: '#e2e8f0', primary: '#38bdf8' }}
             />
 
-            <Mermaid theme="diagram-dusk">{\`flowchart TD
-              A[Start] --> B[Ship]\`}</Mermaid>
+            \`\`\`mermaid
+            flowchart TD
+              A[Start] --> B[Ship]
+            \`\`\`
           `)}
         </section>
         <section>
