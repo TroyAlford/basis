@@ -69,6 +69,31 @@ Basis resolves the verified identity first, then runs the loader and the SSR ren
 
 `assets(folder)` serves a fixed asset directory. `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. Both reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
 
+## Vendor assets
+
+`buildVendor({ entries, outdir })` compiles each vendor entry into a stable `<name>.js` chunk and returns its SHA-256 content hash and versioned URL. An entry can map exact module specifiers to browser globals, so chunks such as `react-dom` consume a shared React chunk instead of bundling another copy.
+
+`vendor(folder)` serves that folder under `/assets/vendor`. A request without the current `v` query redirects to it; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL.
+
+```ts
+import { buildVendor, Server } from 'basis/server'
+
+const vendor = await buildVendor({
+  entries: [
+    { entrypoint: './vendor/react.ts', name: 'react' },
+    { entrypoint: './vendor/react-dom.ts', globals: { react: 'window.React' }, name: 'react-dom' },
+  ],
+  outdir: './dist/vendor',
+})
+
+new Server()
+  .root(import.meta.dir)
+  .vendor('./dist/vendor')
+  .start({ port: 8080 })
+```
+
+`vendor.byName.react.url` is the versioned URL for the React chunk. Building unchanged content keeps the same URL; changing one chunk changes only that chunk's hash.
+
 ## Live transports
 
 `sse(route, handler)` registers a GET event stream and owns framing, disconnect cleanup, and a bounded buffer. `socket(route, handlers)` registers a WebSocket route with the same `open`/`message`/`close` lifecycle used by the server's own HMR transport.

@@ -1,5 +1,6 @@
 import type { Server as BunServer, ServerWebSocket } from 'bun'
 import type { FSWatcher } from 'chokidar'
+import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -75,6 +76,20 @@ interface ResolvedContext<AppContext extends object> {
   readonly headers: Headers,
 }
 
+/**
+ * Whether an `If-None-Match` header matches the current strong ETag.
+ * @param header - The request header value.
+ * @param etag - The current strong ETag, including quotes.
+ * @returns Whether the client's cached representation is still current.
+ */
+function matchesETag(header: string | null, etag: string): boolean {
+  if (!header) return false
+  return header.split(',').some(value => {
+    const candidate = value.trim()
+    return candidate === '*' || candidate === etag || candidate === `W/${etag}`
+  })
+}
+
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
@@ -125,6 +140,7 @@ export class Server<
 
   #apis = new Map<string, APIRoute<object, AppContext>>()
   #assets: string | null = null
+  #vendor: string | null = null
   #authorization: Authorization | null = null
   #graph: Graph | null = null
   #closing: Promise<void> | null = null
@@ -408,19 +424,35 @@ export class Server<
 
   /**
    * Handles an asset request.
+   *
+   * Requests below `/assets/vendor` use the configured vendor folder when one
+   * is set. Vendor artifacts are versioned by content hash; other assets retain
+   * the server's modification-time versioning.
    * @param uri - The URI to handle.
+   * @param request - The incoming request, when available, for conditional vendor requests.
    * @returns The asset response.
    */
-  async handleAsset(uri: URI): Promise<Response> {
-    if (!this.#assets || isInternalStatePath(uri.route)) return Server.NotFound
+  async handleAsset(uri: URI, request?: Request): Promise<Response> {
+    const vendor = this.#vendor !== null && (uri.route === 'vendor' || uri.route.startsWith('vendor/'))
+    const root = vendor ? this.#vendor : this.#assets
+    if (!root || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const filePath = path.join(this.#assets, uri.route)
-    if (containsInternalStateSegment(this.#assets) || containsInternalStateSegment(filePath)) {
+    const relative = vendor ? uri.route.slice('vendor'.length).replace(/^\/+/, '') : uri.route
+    if (relative.length === 0) return Server.NotFound
+
+    const filePath = path.join(root, relative)
+    if (
+      containsInternalStateSegment(root)
+      || containsInternalStateSegment(filePath)
+      || (vendor && !filePath.startsWith(`${root}${path.sep}`))
+    ) {
       return Server.NotFound
     }
 
     const asset = await publicStaticFile(filePath)
     if (!asset) return Server.NotFound
+
+    if (vendor) return this.#serveVendor(uri, asset, request)
 
     const version = asset.lastModified.toString()
 
@@ -437,6 +469,48 @@ export class Server<
           status: 307,
         })
       }
+    } catch {
+      return Server.NotFound
+    }
+  }
+
+  /**
+   * Serve one content-versioned vendor artifact.
+   * @param uri - The vendor request URI.
+   * @param asset - The resolved vendor file.
+   * @param request - The incoming request, when available.
+   * @returns The versioned asset, a redirect to the current version, or a 304.
+   */
+  async #serveVendor(
+    uri: URI,
+    asset: ReturnType<typeof Bun.file>,
+    request: Request | undefined,
+  ): Promise<Response> {
+    try {
+      const bytes = new Uint8Array(await asset.arrayBuffer())
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      const etag = `"${hash}"`
+      const immutable = 'public, max-age=31536000, immutable'
+
+      if (uri.query.get('v') !== hash) {
+        uri.query.set('v', hash)
+        return new Response(null, {
+          headers: { 'Cache-Control': 'no-cache', 'Location': uri.toString() },
+          status: 307,
+        })
+      }
+
+      if (matchesETag(request?.headers.get('if-none-match') ?? null, etag)) {
+        return new Response(null, {
+          headers: { 'Cache-Control': immutable, 'ETag': etag },
+          status: 304,
+        })
+      }
+
+      return new Response(bytes, {
+        headers: { 'Cache-Control': immutable, 'Content-Type': asset.type, 'ETag': etag },
+        status: 200,
+      })
     } catch {
       return Server.NotFound
     }
@@ -1065,6 +1139,26 @@ export class Server<
   }
 
   /**
+   * Sets the vendor asset folder served under `/assets/vendor`.
+   *
+   * Vendor chunks are versioned by the SHA-256 of their bytes. A request without
+   * the current `v` query redirects to it; a matching request is immutable and
+   * supports ETag revalidation. A stale version redirects to the current hash
+   * rather than serving different bytes under the old URL.
+   * @param folder - Folder to serve, absolute or relative to the server root.
+   * @returns The server.
+   */
+  vendor(folder: string): this {
+    const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
+    if (!fs.existsSync(absolute)) {
+      throw new Error(`Vendor folder "${absolute}" does not exist`)
+    }
+
+    this.#vendor = absolute
+    return this
+  }
+
+  /**
    * Configures the favicon the server serves at the standard
    * `/assets/favicon` URL.
    *
@@ -1264,7 +1358,7 @@ export class Server<
 
     switch (uri.type) {
       case 'api': return Server.BadRequest
-      case 'assets': return this.handleAsset(uri)
+      case 'assets': return this.handleAsset(uri, request)
       default: return this.handleUI(request)
     }
   }
