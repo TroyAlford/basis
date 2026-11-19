@@ -14,6 +14,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
         { field: 'title', type: 'String' },
         { field: 'score', type: 'Number' },
         { field: 'parent', target: 'Note', type: 'Entity' },
+        { field: 'favoriteIds', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
         { field: 'scores', items: { type: 'Number' }, type: 'Array' },
         { field: 'payload', type: 'JSON' },
@@ -126,6 +127,102 @@ describe('Query parity gate', () => {
     )
   })
 
+  test('lowers field-backed $in membership into native-array containment', () => {
+    expect(QueryNormalizer.normalize(note, 'id $in favoriteIds')).toEqual(
+      Predicate.normalize(note, {
+        field: 'favoriteIds',
+        operator: Operator.Comparison.Contains,
+        value: { $field: 'id' },
+      }),
+    )
+    expect(QueryNormalizer.normalize(note, '$me $in favoriteIds')).toEqual(
+      Predicate.normalize(note, {
+        field: 'favoriteIds',
+        operator: Operator.Comparison.Contains,
+        value: '$me',
+      }),
+    )
+    expect(QueryNormalizer.normalize(note, '$me $in favoriteIds')).toEqual({
+      field: 'favoriteIds',
+      operator: Operator.Comparison.Contains,
+      value: ['$me'],
+    })
+    expect(QueryNormalizer.normalize(note, 'title $in tags')).toEqual(
+      Predicate.normalize(note, {
+        field: 'tags',
+        operator: Operator.Comparison.Contains,
+        value: { $field: 'title' },
+      }),
+    )
+    expect(QueryNormalizer.normalize(note, 'tags $contains title')).toEqual(
+      QueryNormalizer.normalize(note, 'title $in tags'),
+    )
+    expect(QueryNormalizer.normalize(note, 'favoriteIds $contains id')).toEqual(
+      QueryNormalizer.normalize(note, 'id $in favoriteIds'),
+    )
+    expect(QueryNormalizer.normalize(note, 'favoriteIds $contains $me')).toEqual(
+      QueryNormalizer.normalize(note, '$me $in favoriteIds'),
+    )
+    expect(source('Note', 'id $in favoriteIds')).toEqual(structured('Note', {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    }))
+    expect(source('Note', '$me $in favoriteIds')).toEqual(structured('Note', {
+      field: '$me',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    }))
+    expect(source('Note', 'title $in tags')).toEqual(structured('Note', {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: { $field: 'tags' },
+    }))
+    expect(source('Note', 'tags $contains title')).toEqual(source('Note', 'title $in tags'))
+  })
+
+  test('rejects incompatible or non-array field-backed membership', () => {
+    const invalid = [
+      {
+        message: 'not comparable with native array',
+        source: 'id $in tags',
+        structured: { field: 'id', operator: Operator.Comparison.In, value: { $field: 'tags' } },
+      },
+      {
+        message: 'not comparable with native array',
+        source: 'title $in favoriteIds',
+        structured: {
+          field: 'title',
+          operator: Operator.Comparison.In,
+          value: { $field: 'favoriteIds' },
+        },
+      },
+      {
+        message: 'not a native array',
+        source: 'id $in title',
+        structured: { field: 'id', operator: Operator.Comparison.In, value: { $field: 'title' } },
+      },
+      {
+        message: 'not a native array',
+        source: 'id $in missing',
+        structured: { field: 'id', operator: Operator.Comparison.In, value: { $field: 'missing' } },
+      },
+      {
+        message: 'must compare actor presence with null',
+        source: `$me $in ['${identity}']`,
+        structured: {
+          field: '$me',
+          operator: Operator.Comparison.In,
+          value: [identity],
+        },
+      },
+    ] as const
+    for (const queryCase of invalid) {
+      expect(() => source('Note', queryCase.source)).toThrow(queryCase.message)
+      expect(() => structured('Note', queryCase.structured)).toThrow(queryCase.message)
+    }
+  })
+
   test('rejects malformed scalar $in predicates in both forms', () => {
     const invalid = [
       {
@@ -181,6 +278,12 @@ describe('Query parity gate', () => {
       expect(() => source('Note', queryCase.source)).toThrow(queryCase.message)
       expect(() => structured('Note', queryCase.structured)).toThrow(queryCase.message)
     }
+    expect(() => source('User', 'id $in pets')).toThrow('not a native array')
+    expect(() => structured('User', {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: { $field: 'pets' },
+    })).toThrow('not a native array')
   })
 
   test('preserves source diagnostics with exact offsets', () => {

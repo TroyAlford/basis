@@ -411,6 +411,20 @@ function whereClause(
       const renderer = comparisonRenderers.get(comparisonFilter.operator)
       if (!renderer) throw new Error(`Query operator "${comparisonFilter.operator}" is not supported`)
       const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field, bind)
+      if (comparisonFilter.operator === Operator.Comparison.Contains
+        && field.type === FieldType.Array
+        && isFieldOperand(operand)) {
+        const reference = (active.filterField ?? active.field)(operand.$field)
+        if (comparableType(reference.type) !== comparableType(arrayItemField(field).type)) {
+          throw new Error(
+            `Query field reference "${operand.$field}" is not comparable with "${comparisonFilter.field}"`,
+          )
+        }
+        const referenceSql = reference.name === ACTOR_FIELD_NAME
+          ? ACTOR_SQL
+          : active.expression(reference, bind)
+        return `${column} @> ARRAY[${referenceSql}::${postgresScalarType(field.items.type)}]`
+      }
       if (isFieldOperand(operand)) {
         if (ACTOR_FIELD_NAME === operand.$field) {
           throw new Error('Query field references cannot target the actor sentinel')

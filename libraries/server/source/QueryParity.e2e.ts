@@ -12,7 +12,9 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'id', format: 'UUID' },
         { field: 'title', type: 'String' },
+        { field: 'primaryTag', type: 'String' },
         { field: 'manager', target: 'Person', type: 'Entity' },
+        { field: 'favoriteIds', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
         {
           cardinality: 'Many',
           field: 'pets',
@@ -131,12 +133,23 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${campaignThree}, 'Campaign Three', 'Campaign')
   `
   await database.sql`
-    INSERT INTO "Person" ("id", "title", "manager.id", "scores", "tags", "payload")
+    INSERT INTO "Person" (
+      "id",
+      "title",
+      "primaryTag",
+      "manager.id",
+      "favoriteIds",
+      "scores",
+      "tags",
+      "payload"
+    )
     VALUES
       (
         ${ada},
         'Ada',
+        'urgent',
         ${null},
+        ARRAY [${ada}, ${grace}]::TEXT[],
         ARRAY [1, 2, 2],
         ARRAY ['urgent', 'important'],
         '{"kind":"note","meta":{"active":true}}'::JSONB
@@ -144,7 +157,9 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (
         ${grace},
         'Grace',
+        'important',
         ${ada},
+        ARRAY [${grace}]::TEXT[],
         ARRAY [3],
         ARRAY ['urgent'],
         '{"kind":"other"}'::JSONB
@@ -152,7 +167,9 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (
         ${linus},
         'Linus',
+        '',
         ${ada},
+        ARRAY []::TEXT[],
         ARRAY []::DOUBLE PRECISION[],
         ARRAY []::TEXT[],
         '{}'::JSONB
@@ -595,6 +612,46 @@ const cases: readonly ParityCase[] = [
       field: 'vaccinated',
       operator: Operator.Comparison.In,
       value: [true],
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, grace],
+    source: 'id $in favoriteIds',
+    structured: {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [],
+    source: '$me $in favoriteIds',
+    structured: {
+      field: '$me',
+      operator: Operator.Comparison.In,
+      value: { $field: 'favoriteIds' },
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada],
+    source: 'primaryTag $in tags',
+    structured: {
+      field: 'primaryTag',
+      operator: Operator.Comparison.In,
+      value: { $field: 'tags' },
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada],
+    source: 'tags $contains primaryTag',
+    structured: {
+      field: 'tags',
+      operator: Operator.Comparison.Contains,
+      value: { $field: 'primaryTag' },
     },
   },
 ]

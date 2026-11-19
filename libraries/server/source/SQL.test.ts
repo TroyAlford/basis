@@ -17,6 +17,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       { field: 'createdAt', type: 'Timestamp' },
       { field: 'dueOn', type: 'Date' },
       { field: 'externalId', type: 'Number' },
+      { field: 'favoriteIds', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
       { field: 'score', type: 'Number' },
       { field: 'title', type: 'String' },
     ],
@@ -469,6 +470,25 @@ describe('SQL.where', () => {
     })).toEqual({
       sql: 'WHERE "createdAt" IN ($1)',
       values: ['2026-01-02T03:04:05.000Z'],
+    })
+  })
+
+  test('compiles field-backed array containment through the existing array path', () => {
+    expect(SQL.where(definitions, entity, {
+      field: 'favoriteIds',
+      operator: Operator.Comparison.Contains,
+      value: { $field: 'id' },
+    })).toEqual({
+      sql: 'WHERE "favoriteIds" @> ARRAY["id"::text]',
+      values: [],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'favoriteIds',
+      operator: Operator.Comparison.Contains,
+      value: '$me',
+    })).toEqual({
+      sql: 'WHERE "favoriteIds" @> ARRAY[nullif(current_setting(\'actor.id\', true), \'\')::text]',
+      values: [],
     })
   })
 

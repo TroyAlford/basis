@@ -2,7 +2,7 @@ import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } fr
 import { FieldType } from './FieldType'
 import { Operator } from './Operator'
 import type { ArrayResolver, CollectionResolver, Filter } from './Predicate'
-import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, ComparisonOperators, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, ComparisonOperators, isFieldOperand, Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
@@ -123,6 +123,9 @@ function comparison(
     }
     assertValues(node, 1)
     const list = node.values[0]
+    if (list?.kind === 'field') {
+      return Predicate.invertMembership(node.field, field, list.value as string, resolve)
+    }
     if (list?.kind !== 'array') {
       throw new Error(`Query operator "${node.operator}" requires an array list for "${node.field}"`)
     }
@@ -153,6 +156,11 @@ function comparison(
 
   assertValues(node, 1)
   const raw = literal(field, node.values[0] as QueryLiteral)
+  if (node.operator === Operator.Comparison.Contains
+    && field.type === FieldType.Array
+    && (isFieldOperand(raw) || raw === ACTOR_FIELD_NAME)) {
+    return Predicate.arrayContains(field, raw, resolve)
+  }
   const value = Predicate.operand(field, node.operator, raw)
   if (node.operator === Operator.Comparison.NotEqual) return Predicate.notEqual(field.name, value)
   return { field: field.name, operator: node.operator, value }

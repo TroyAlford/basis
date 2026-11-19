@@ -219,6 +219,27 @@ export const ComparisonOperators = {
  */
 export const Predicate = {
   /**
+   * Build canonical native-array containment for a scalar field or actor member.
+   * @param field - Native array field.
+   * @param operand - Scalar field reference or actor sentinel.
+   * @param resolve - Resolve a logical field or path.
+   * @returns The canonical `$contains` comparison filter.
+   * @throws {Error} When the member is not a compatible scalar field.
+   */
+  arrayContains(
+    field: ArrayFieldDefinition,
+    operand: unknown,
+    resolve: (name: string) => QueryFieldDefinition,
+  ): ComparisonFilter {
+    assertArrayMember(field, operand, resolve)
+    return {
+      field: field.name,
+      operator: Operator.Comparison.Contains,
+      value: operand === ACTOR_FIELD_NAME ? [ACTOR_FIELD_NAME] : operand,
+    }
+  },
+
+  /**
    * Expand an inclusive range into primitive comparisons.
    * @param field - Root entity field name.
    * @param lower - Inclusive lower bound, or null for an open bound.
@@ -287,6 +308,45 @@ export const Predicate = {
       )
     }
     return field
+  },
+
+  /**
+   * Lower the inverse membership spelling into canonical native-array containment.
+   *
+   * `member $in arrayField` is the same predicate as `arrayField $contains member`.
+   * Relationship collections keep their existing scoped `$contains` form.
+   * @param leftPath - Original left-hand field path.
+   * @param left - Resolved left-hand field.
+   * @param rightPath - Right-hand field path that must resolve to a native array.
+   * @param resolve - Resolve a logical field or path.
+   * @returns The canonical `$contains` comparison filter.
+   * @throws {Error} When the right-hand side is not a compatible native array.
+   */
+  invertMembership(
+    leftPath: string,
+    left: QueryFieldDefinition,
+    rightPath: string,
+    resolve: (name: string) => QueryFieldDefinition,
+  ): ComparisonFilter {
+    let right: QueryFieldDefinition
+    try {
+      right = resolve(rightPath)
+    } catch {
+      throw new Error(
+        `Query operator "${Operator.Comparison.In}" requires a literal list or native array field; ` +
+        `"${rightPath}" is not a native array`,
+      )
+    }
+    if (right.type !== FieldType.Array) {
+      throw new Error(
+        `Query operator "${Operator.Comparison.In}" requires a literal list or native array field; ` +
+        `"${rightPath}" is not a native array`,
+      )
+    }
+    const member = left.name === ACTOR_FIELD_NAME
+      ? ACTOR_FIELD_NAME
+      : { $field: leftPath }
+    return Predicate.arrayContains(right, member, resolve)
   },
 
   /**
@@ -519,6 +579,33 @@ function explicit(
     )
   }
 
+  if (operator === Operator.Comparison.In) {
+    assertKeys(input, ['operator', 'field', 'value'])
+    const definition = requireField(entity, input, resolve)
+    if (isFieldOperand(input.value)) {
+      return Predicate.invertMembership(
+        input.field as string,
+        definition,
+        input.value.$field,
+        resolve,
+      )
+    }
+    return {
+      field: definition.name,
+      operator,
+      value: Predicate.operand(definition, operator, input.value),
+    }
+  }
+
+  if (operator === Operator.Comparison.Contains) {
+    const definition = requireField(entity, input, resolve)
+    if (definition.type === FieldType.Array
+      && (isFieldOperand(input.value) || input.value === ACTOR_FIELD_NAME)) {
+      assertKeys(input, ['operator', 'field', 'value'])
+      return Predicate.arrayContains(definition, input.value, resolve)
+    }
+  }
+
   if (operator === Operator.Comparison.Between) {
     assertKeys(input, ['operator', 'field', 'values'])
     const definition = requireField(entity, input, resolve)
@@ -695,7 +782,19 @@ function sequenceEqualOperand(field: QueryFieldDefinition, raw: unknown): unknow
  * @returns The normalized operand.
  */
 function containsOperand(field: QueryFieldDefinition, raw: unknown): unknown {
-  if (field.type === FieldType.Array) return arrayOperand(field, Operator.Comparison.Contains, raw)
+  if (field.type === FieldType.Array) {
+    if (isFieldOperand(raw)) {
+      assertFieldPath(raw.$field)
+      return { $field: raw.$field }
+    }
+    if (raw === ACTOR_FIELD_NAME) {
+      if (arrayItemField(field).type !== FieldType.ID) {
+        throw new Error('Query operand "$me" is only valid for identity array members')
+      }
+      return [ACTOR_FIELD_NAME]
+    }
+    return arrayOperand(field, Operator.Comparison.Contains, raw)
+  }
   if (field.type === FieldType.JSON) return normalizeJSON(raw)
   return scalarOperand(field, Operator.Comparison.Contains, raw, false)
 }
@@ -821,6 +920,48 @@ function inOperand(field: QueryFieldDefinition, raw: unknown): unknown {
 }
 
 /**
+ * Assert that an operand is a compatible scalar member of a native array.
+ * @param field - Native array field.
+ * @param operand - Scalar field reference or actor sentinel.
+ * @param resolve - Resolve a logical field or path.
+ * @throws {Error} When the operand is not a compatible scalar member.
+ */
+function assertArrayMember(
+  field: ArrayFieldDefinition,
+  operand: unknown,
+  resolve: (name: string) => QueryFieldDefinition,
+): void {
+  const item = arrayItemField(field)
+  if (operand === ACTOR_FIELD_NAME) {
+    if (item.type !== FieldType.ID) incompatibleArrayMember(field.name, ACTOR_FIELD_NAME)
+    return
+  }
+  if (!isFieldOperand(operand)) {
+    throw new Error(
+      `Query operand for "${field.name}" must be a scalar field reference or $me`,
+    )
+  }
+  const member = resolve(operand.$field)
+  if (member.type !== item.type) incompatibleArrayMember(field.name, operand.$field)
+  if (item.type === FieldType.ID
+    && item.format !== undefined
+    && member.format !== undefined
+    && item.format !== member.format) {
+    incompatibleArrayMember(field.name, operand.$field)
+  }
+}
+
+/**
+ * Throw the standard native-array member compatibility error.
+ * @param field - Native array field name.
+ * @param member - Referenced member path.
+ * @throws {Error} Always.
+ */
+function incompatibleArrayMember(field: string, member: string): never {
+  throw new Error(`Query membership operand "${member}" is not comparable with native array field "${field}"`)
+}
+
+/**
  * Normalize one array operand.
  * @param field - Native array field.
  * @param operator - Comparison operator identity.
@@ -845,6 +986,10 @@ function arrayOperand(
   const item = arrayItemField(field)
   return values.map(value => {
     if (value === null) throw new Error(`Array operands for "${field.name}" cannot contain null`)
+    if (value === ACTOR_FIELD_NAME) {
+      if (item.type === FieldType.ID) return value
+      throw new Error('Query operand "$me" is only valid for identity array members')
+    }
     const normalized = normalizeScalar(item, value)
     if (normalized === undefined) invalidOperand(item)
     return normalized
