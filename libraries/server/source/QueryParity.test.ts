@@ -341,6 +341,12 @@ const descendantDefinitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'id', format: 'UUID' },
         { field: 'members', target: 'User', type: 'Collection', via: 'Membership[workspace = @].user' },
+        {
+          field: 'editors',
+          target: 'User',
+          type: 'Collection',
+          via: "Membership[workspace = @ $and role = 'editor'].user",
+        },
       ],
       name: 'Workspace',
     },
@@ -384,7 +390,7 @@ const descendantDefinitions = EntityDefinitions.load(JSON.stringify({
       { field: 'workspace', target: 'Workspace' },
       { field: 'user', target: 'User' },
     ],
-    fields: [],
+    fields: [{ field: 'role', type: 'String' }],
     name: 'Membership',
   }],
 }))
@@ -431,6 +437,13 @@ describe('canonical descendant query gate', () => {
     const query = descendantQuery('SiblingSection', 'document.workspace.id = $me')
     expect(query.sql).toContain('"PublicDocument"')
     expect(query.sql).toContain('"PrivateDocument"')
+  })
+
+  test('preserves bound parameters in guarded descendant collection counts', () => {
+    const query = descendantQuery('Section', 'document.workspace.editors.$total >= 1')
+    expect(query.values).toContain('editor')
+    expect(query.sql).toContain('count(*)::int')
+    expect(query.sql).toContain('CASE WHEN')
   })
 
   test('rejects incompatible sibling declarations', () => {

@@ -287,6 +287,12 @@ const siblingGraph = new Graph({
     {
       fields: [
         { field: 'members', target: 'User', type: 'Collection', via: 'SiblingMembership[workspace = @].user' },
+        {
+          field: 'editors',
+          target: 'User',
+          type: 'Collection',
+          via: "SiblingMembership[workspace = @ $and role = 'editor'].user",
+        },
       ],
       name: 'Workspace',
       security: { [Action.Read]: Security.Public },
@@ -341,7 +347,7 @@ const siblingGraph = new Graph({
       { field: 'workspace', target: 'Workspace' },
       { field: 'user', target: 'User' },
     ],
-    fields: [],
+    fields: [{ field: 'role', type: 'String' }],
     name: 'SiblingMembership',
     security: { [Action.Read]: Security.Public },
   }],
@@ -375,12 +381,12 @@ async function setupSiblings(database: Parameters<Parameters<typeof withDatabase
     { id: siblingIds.publicWorkspace, name: 'Public workspace' },
   ])
   await database.sql`
-    INSERT INTO "SiblingMembership" ("workspace.id", "user.id")
+    INSERT INTO "SiblingMembership" ("workspace.id", "user.id", "role")
     VALUES
-      (${siblingIds.publicWorkspace}, ${siblingIds.alice}),
-      (${siblingIds.privateWorkspace}, ${siblingIds.bob}),
-      (${siblingIds.publicWorkspace}, ${siblingIds.carol}),
-      (${siblingIds.privateWorkspace}, ${siblingIds.carol})
+      (${siblingIds.publicWorkspace}, ${siblingIds.alice}, 'editor'),
+      (${siblingIds.privateWorkspace}, ${siblingIds.bob}, 'editor'),
+      (${siblingIds.publicWorkspace}, ${siblingIds.carol}, 'viewer'),
+      (${siblingIds.privateWorkspace}, ${siblingIds.carol}, 'viewer')
   `
   await database.create('SiblingPublicDocument', {
     code: 'shared',
@@ -430,6 +436,14 @@ test('resolves compatible sibling reference owners in queries and policy', async
       fields: ['id'],
       orderBy: 'id',
       where: 'document.workspace.members.$total = 2',
+    })).toEqual([
+      { id: siblingIds.privateSection },
+      { id: siblingIds.publicSection },
+    ])
+    expect(await database.query('SiblingDocumentSection', {
+      fields: ['id'],
+      orderBy: 'id',
+      where: 'document.workspace.editors.$total = 1',
     })).toEqual([
       { id: siblingIds.privateSection },
       { id: siblingIds.publicSection },

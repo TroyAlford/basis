@@ -521,21 +521,8 @@ class QueryProjection {
         })
         const first = counts[0]
         if (first === undefined) throw new Error(`Query count path "${fullName}" has no collection branch`)
-        if (counts.length === 1) {
-          return {
-            count: first,
-            expression: '',
-            field: { name: fullName, type: FieldType.Number },
-            identity: false,
-          }
-        }
-        const expression = `(${counts.map(count => (count.expression === '' ? '0' : count.expression)).join(' + ')})`
         return {
-          count: {
-            empty: `${expression} = 0`,
-            exists: `${expression} > 0`,
-            expression,
-          },
+          count: counts.length === 1 ? first : this.#combineCounts(counts),
           expression: '',
           field: { name: fullName, type: FieldType.Number },
           identity: false,
@@ -705,11 +692,70 @@ class QueryProjection {
         ? bind => `(CASE WHEN ${applicable} THEN (${value(bind)}) ELSE ${fallback} END)`
         : `(CASE WHEN ${applicable} THEN (${value}) ELSE ${fallback} END)`
     )
+    const empty = wrap(count.empty, 'TRUE')
+    const exists = wrap(count.exists, 'FALSE')
+    const expression = count.expression === ''
+      ? ''
+      : `(CASE WHEN ${applicable} THEN (${count.expression}) ELSE 0 END)`
+    let fragment: SqlFragment | undefined
+    if (count.fragment !== undefined) {
+      fragment = SQL.compose([
+        '(CASE WHEN ',
+        applicable,
+        ' THEN (',
+        count.fragment,
+        ') ELSE 0 END)',
+      ])
+    }
+    let render: ((bind: (value: BoundScalar) => string) => string) | undefined
+    if (count.render !== undefined) {
+      const unguarded = count.render
+      render = bind => `(CASE WHEN ${applicable} THEN (${unguarded(bind)}) ELSE 0 END)`
+    }
+    if (fragment === undefined) {
+      return render === undefined
+        ? { empty, exists, expression }
+        : { empty, exists, expression, render }
+    }
+    return render === undefined
+      ? { empty, exists, expression, fragment }
+      : { empty, exists, expression, fragment, render }
+  }
+
+  /**
+   * Combine independent concrete-branch counts into one count scope.
+   * @param counts - Guarded branch counts.
+   * @returns A count scope that preserves bindings and branch semantics.
+   */
+  #combineCounts(counts: readonly CountScope[]): CountScope {
+    const compatibleExpressions = counts.every(count => count.expression !== '')
+    const expression = compatibleExpressions
+      ? `(${counts.map(count => count.expression).join(' + ')})`
+      : ''
+    const fragments = counts.map(count => count.fragment)
+    const fragmentParts: (SqlFragment | string)[] = ['(']
+    for (const [index, value] of fragments.entries()) {
+      if (value === undefined) continue
+      if (index > 0) fragmentParts.push('+')
+      fragmentParts.push(value)
+    }
+    fragmentParts.push(')')
+    const fragment = fragments.every((value): value is SqlFragment => value !== undefined)
+      ? SQL.compose(fragmentParts)
+      : undefined
+    const render = (bind: (value: BoundScalar) => string): string => (
+      `(${counts.map(count => (
+        count.render === undefined
+          ? count.expression === '' ? '0' : count.expression
+          : count.render(bind)
+      )).join(' + ')})`
+    )
     return {
-      ...count,
-      empty: wrap(count.empty, 'TRUE'),
-      exists: wrap(count.exists, 'FALSE'),
-      expression: `(CASE WHEN ${applicable} THEN (${count.expression === '' ? '0' : count.expression}) ELSE 0 END)`,
+      empty: bind => `(${render(bind)} = 0)`,
+      exists: bind => `(${render(bind)} > 0)`,
+      expression,
+      ...(fragment === undefined ? {} : { fragment }),
+      render,
     }
   }
 
@@ -1365,10 +1411,14 @@ class QueryProjection {
         if (firstCount === undefined) {
           throw new Error(`Query count path "${path}" has no collection branch`)
         }
-        const expression = counts.length === 1
-          ? firstCount.expression
-          : `(${counts.map(count => (count.expression === '' ? '0' : count.expression)).join(' + ')})`
-        this.#addComputedScalar(node, `${name}.$total`, expression)
+        const combined = counts.length === 1 ? firstCount : this.#combineCounts(counts)
+        if (combined.expression !== '') {
+          this.#addComputedScalar(node, `${name}.$total`, combined.expression)
+        } else if (combined.fragment !== undefined) {
+          this.#addComputedFragment(node, `${name}.$total`, combined.fragment)
+        } else {
+          throw new Error(`Query count path "${path}" requires a bindable count expression`)
+        }
         return
       }
       const field = node.context.effective.get(name)
@@ -2033,6 +2083,20 @@ class QueryProjection {
       `${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
         `${quote('__child')}.${quote('id')})`,
     ])
+  }
+
+  /**
+   * Select one computed scalar field from a parameterized fragment.
+   * @param node - Projection occurrence.
+   * @param name - Logical computed field name.
+   * @param fragment - Parameterized SQL fragment.
+   */
+  #addComputedFragment(node: ProjectionNode, name: string, fragment: SqlFragment): void {
+    if (node.fieldNames.has(name)) return
+    const start = this.#valueStart + this.values.length
+    const composed = SQL.compose([fragment], { startIndex: start })
+    this.values.push(...composed.values)
+    this.#addComputedScalar(node, name, `(${composed.sql})`)
   }
 
   /**
