@@ -80,6 +80,101 @@ const definitions = EntityDefinitions.load(JSON.stringify({
   }],
 }))
 
+const eligibilityEntities = [
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'label', type: 'String' },
+    ],
+    name: 'A',
+  },
+  {
+    extends: 'A',
+    fields: [
+      { field: 'foo', nullable: true, type: 'Number' },
+      {
+        cardinality: 'Many',
+        field: 'items',
+        inverse: 'ownerB',
+        target: 'Item',
+        type: 'Inverse',
+      },
+    ],
+    name: 'B',
+  },
+  {
+    extends: 'A',
+    fields: [
+      { field: 'foo', nullable: true, type: 'Number' },
+      {
+        cardinality: 'Many',
+        field: 'items',
+        inverse: 'ownerC',
+        target: 'Item',
+        type: 'Inverse',
+      },
+    ],
+    name: 'C',
+  },
+  { extends: 'A', fields: [], name: 'D' },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'title', type: 'String' },
+      { field: 'ownerB', inverse: 'items', target: 'B', type: 'Entity' },
+      { field: 'ownerC', inverse: 'items', target: 'C', type: 'Entity' },
+    ],
+    name: 'Item',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'document', target: 'Document', type: 'Entity' },
+    ],
+    name: 'Section',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'code', type: 'String' },
+    ],
+    name: 'Document',
+  },
+  { extends: 'Document', fields: [], name: 'PublicDocument' },
+  {
+    extends: 'Document',
+    fields: [{ field: 'secret', type: 'String' }],
+    name: 'PrivateDocument',
+  },
+]
+const eligibilityDefinitions = EntityDefinitions.load(JSON.stringify({ entities: eligibilityEntities }))
+const eligibilityDefinitionsReversed = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    eligibilityEntities[0],
+    eligibilityEntities[2],
+    eligibilityEntities[1],
+    ...eligibilityEntities.slice(3),
+  ],
+}))
+
+const eligibilityB1 = '00000000-0000-4000-8000-000000000101'
+const eligibilityB2 = '00000000-0000-4000-8000-000000000102'
+const eligibilityB3 = '00000000-0000-4000-8000-000000000103'
+const eligibilityC1 = '00000000-0000-4000-8000-000000000111'
+const eligibilityC2 = '00000000-0000-4000-8000-000000000112'
+const eligibilityC3 = '00000000-0000-4000-8000-000000000113'
+const eligibilityD1 = '00000000-0000-4000-8000-000000000121'
+const eligibilityItem1 = '00000000-0000-4000-8000-000000000201'
+const eligibilityItem2 = '00000000-0000-4000-8000-000000000202'
+const eligibilityItem3 = '00000000-0000-4000-8000-000000000203'
+const eligibilityItem4 = '00000000-0000-4000-8000-000000000204'
+const eligibilitySection1 = '00000000-0000-4000-8000-000000000301'
+const eligibilitySection2 = '00000000-0000-4000-8000-000000000302'
+const eligibilitySection3 = '00000000-0000-4000-8000-000000000303'
+const eligibilityPublicDoc = '00000000-0000-4000-8000-000000000311'
+const eligibilityPrivateDoc = '00000000-0000-4000-8000-000000000312'
+const eligibilityPrivateDocTwo = '00000000-0000-4000-8000-000000000313'
+
 /** One source/structured parity case. */
 interface ParityCase {
   /** Entity being queried. */
@@ -210,6 +305,89 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${grace}, ${campaignOne}, 'Player'),
       (${linus}, ${campaignOne}, 'Player'),
       (${grace}, ${campaignTwo}, 'GM')
+  `
+}
+
+/**
+ * Seed the polymorphic eligibility fixture.
+ * @param database - Isolated PostgreSQL database.
+ * @param model - Entity definitions to install.
+ */
+async function seedEligibility(
+  database: LifecycleDatabase,
+  model = eligibilityDefinitions,
+): Promise<void> {
+  await database.use(model)
+  await database.sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES
+      (${eligibilityB1}, 'B1', 'B'),
+      (${eligibilityB2}, 'B2', 'B'),
+      (${eligibilityB3}, 'B3', 'B'),
+      (${eligibilityC1}, 'C1', 'C'),
+      (${eligibilityC2}, 'C2', 'C'),
+      (${eligibilityC3}, 'C3', 'C'),
+      (${eligibilityD1}, 'D1', 'D'),
+      (${eligibilityItem1}, 'Item 1', 'Item'),
+      (${eligibilityItem2}, 'Item 2', 'Item'),
+      (${eligibilityItem3}, 'Item 3', 'Item'),
+      (${eligibilityItem4}, 'Item 4', 'Item'),
+      (${eligibilitySection1}, 'Section 1', 'Section'),
+      (${eligibilitySection2}, 'Section 2', 'Section'),
+      (${eligibilitySection3}, 'Section 3', 'Section'),
+      (${eligibilityPublicDoc}, 'Public Document', 'PublicDocument'),
+      (${eligibilityPrivateDoc}, 'Private Document', 'PrivateDocument'),
+      (${eligibilityPrivateDocTwo}, 'Private Document Two', 'PrivateDocument')
+  `
+  await database.sql`
+    INSERT INTO "A" ("id", "label")
+    VALUES
+      (${eligibilityB1}, 'b7'),
+      (${eligibilityB2}, 'bnull'),
+      (${eligibilityB3}, 'b8'),
+      (${eligibilityC1}, 'c7'),
+      (${eligibilityC2}, 'cnull'),
+      (${eligibilityC3}, 'c9'),
+      (${eligibilityD1}, 'd')
+  `
+  await database.sql`
+    INSERT INTO "B" ("id", "foo")
+    VALUES (${eligibilityB1}, 7), (${eligibilityB2}, ${null}), (${eligibilityB3}, 8)
+  `
+  await database.sql`
+    INSERT INTO "C" ("id", "foo")
+    VALUES (${eligibilityC1}, 7), (${eligibilityC2}, ${null}), (${eligibilityC3}, 9)
+  `
+  await database.sql`
+    INSERT INTO "D" ("id")
+    VALUES (${eligibilityD1})
+  `
+  await database.sql`
+    INSERT INTO "Item" ("id", "title", "ownerB.id", "ownerC.id")
+    VALUES
+      (${eligibilityItem1}, 'match', ${eligibilityB1}, ${null}),
+      (${eligibilityItem2}, 'other', ${eligibilityB2}, ${null}),
+      (${eligibilityItem3}, 'match', ${null}, ${eligibilityC1}),
+      (${eligibilityItem4}, 'other', ${null}, ${eligibilityC2})
+  `
+  await database.sql`
+    INSERT INTO "Document" ("id", "code")
+    VALUES (${eligibilityPublicDoc}, 'pub'), (${eligibilityPrivateDoc}, 'priv'), (${eligibilityPrivateDocTwo}, 'priv2')
+  `
+  await database.sql`
+    INSERT INTO "PublicDocument" ("id")
+    VALUES (${eligibilityPublicDoc})
+  `
+  await database.sql`
+    INSERT INTO "PrivateDocument" ("id", "secret")
+    VALUES (${eligibilityPrivateDoc}, 's'), (${eligibilityPrivateDocTwo}, 't')
+  `
+  await database.sql`
+    INSERT INTO "Section" ("id", "document.id")
+    VALUES
+      (${eligibilitySection1}, ${eligibilityPublicDoc}),
+      (${eligibilitySection2}, ${eligibilityPrivateDoc}),
+      (${eligibilitySection3}, ${eligibilityPrivateDocTwo})
   `
 }
 
@@ -776,6 +954,106 @@ describe('Query parity gate', () => {
         expect(inverseSource.map(row => row.id)).toEqual([...actorCase.expected])
         expect(containsSource.map(row => row.id)).toEqual([...actorCase.expected])
       }
+    })
+  })
+
+  test('enforces descendant field and collection eligibility against PostgreSQL', async () => {
+    await withLifecycleDatabase('polymorphic-eligibility', async database => {
+      await seedEligibility(database)
+      const ids = async (entity: string, where: string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, eligibilityDefinitions, entity, {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+
+      const eligibilityCases = [
+        { entity: 'A', expected: [eligibilityB1, eligibilityC1], where: 'foo = 7' },
+        { entity: 'A', expected: [eligibilityB2, eligibilityC2], where: 'foo = null' },
+        {
+          entity: 'A',
+          expected: [eligibilityB2, eligibilityB3, eligibilityC2, eligibilityC3],
+          where: 'NOT(foo = 7)',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1, eligibilityD1],
+          where: "foo = 7 OR label = 'd'",
+        },
+        { entity: 'A', expected: [eligibilityB1], where: "label = 'b7'" },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1],
+          where: "items $contains (title = 'match')",
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB3, eligibilityC1, eligibilityC3],
+          where: "items $all (title = 'match')",
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          where: 'items $empty',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          where: 'items.$total = 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB2, eligibilityC1, eligibilityC2],
+          where: 'items.$total > 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1],
+          where: "items[title = 'match'].$matched >= 1",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: "document.secret = 's'",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: "NOT(document.secret = 's')",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection1],
+          where: "document.code = 'pub'",
+        },
+      ] as const
+      for (const queryCase of eligibilityCases) {
+        expect(await ids(queryCase.entity, queryCase.where)).toEqual([...queryCase.expected])
+      }
+      await expect(queryEntity(database.sql, eligibilityDefinitions, 'A', {
+        fields: ['id'],
+        where: 'missing = 1',
+      })).rejects.toThrow()
+    })
+  })
+
+  test('preserves eligibility results when sibling declarations are reversed', async () => {
+    await withLifecycleDatabase('polymorphic-eligibility-reversed', async database => {
+      await seedEligibility(database, eligibilityDefinitionsReversed)
+      const ids = async (where: string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, eligibilityDefinitionsReversed, 'A', {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+      expect(await ids('foo = 7')).toEqual([eligibilityB1, eligibilityC1])
+      expect(await ids("items $contains (title = 'match')"))
+        .toEqual([eligibilityB1, eligibilityC1])
+      expect(await ids('items.$total = 0')).toEqual([eligibilityB3, eligibilityC3])
     })
   })
 })

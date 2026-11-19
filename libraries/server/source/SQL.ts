@@ -72,8 +72,18 @@ export interface CollectionScope {
   readonly predicate?: SqlFragment,
   /** SQL relation containing the related items. */
   readonly relation: string,
+  /** Concrete physical variants for descendant-only sibling collections. */
+  readonly variants?: readonly CollectionScopeVariant[],
   /** Expanded relation join work emitted by this scope. */
   readonly work?: number,
+}
+
+/** One concrete physical variant of a descendant-only collection. */
+export interface CollectionScopeVariant {
+  /** SQL predicate selecting this variant's concrete owner type. */
+  readonly guard: string,
+  /** Scope for the variant's physical relation and member fields. */
+  readonly scope: CollectionScope,
 }
 
 /** One parameterized SQL fragment. */
@@ -354,30 +364,12 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
-      if (collectionFilter.operator === Operator.Comparison.Empty) {
-        const authored = collection.predicate === undefined
-          ? ''
-          : ` AND (${bindFragment(collection.predicate, bind)})`
-        collection.consume?.(collection.work ?? 1)
-        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition}${authored})`
+      if (collection.variants !== undefined && collection.variants.length > 0) {
+        return `(${collection.variants.map(variant => (
+          `(${variant.guard} AND ${compileCollection(collectionFilter, variant.scope)})`
+        )).join(' OR ')})`
       }
-      if (collectionFilter.operator !== Operator.Comparison.Contains) {
-        throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
-      }
-      if (collectionFilter.filters.length === 0) {
-        throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
-      }
-      const requirements = collectionFilter.filters.map(requirement => {
-        const inner = compile(requirement, collection)
-        collection.consume?.(collection.work ?? 1)
-        const predicate = collection.predicate === undefined
-          ? ''
-          : ` AND (${bindFragment(collection.predicate, bind)})`
-        return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition}${predicate} AND (${inner}))`
-      })
-      return requirements.join(' AND ')
+      return compileCollection(collectionFilter, collection)
     }
 
     const contract = ComparisonOperators.definition(node.operator as Operator.Comparison)
@@ -457,6 +449,36 @@ function whereClause(
       )
     }
     return logical.build(logicalFilter.filters.map(childNode => compile(childNode, active)))
+  }
+
+  const compileCollection = (
+    collectionFilter: CollectionFilter,
+    collection: CollectionScope,
+  ): string => {
+    if (collectionFilter.operator === Operator.Comparison.Empty) {
+      const authored = collection.predicate === undefined
+        ? ''
+        : ` AND (${bindFragment(collection.predicate, bind)})`
+      collection.consume?.(collection.work ?? 1)
+      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+        `${collection.condition}${authored})`
+    }
+    if (collectionFilter.operator !== Operator.Comparison.Contains) {
+      throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
+    }
+    if (collectionFilter.filters.length === 0) {
+      throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
+    }
+    const requirements = collectionFilter.filters.map(requirement => {
+      const inner = compile(requirement, collection)
+      collection.consume?.(collection.work ?? 1)
+      const predicate = collection.predicate === undefined
+        ? ''
+        : ` AND (${bindFragment(collection.predicate, bind)})`
+      return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+        `${collection.condition}${predicate} AND (${inner}))`
+    })
+    return requirements.join(' AND ')
   }
 
   return { sql: `WHERE ${compile(filter, base)}`, values }

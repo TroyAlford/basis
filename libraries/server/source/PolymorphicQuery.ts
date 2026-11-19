@@ -5,7 +5,8 @@ import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
 import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
-import { arrayItemField } from './Predicate'
+import { arrayItemField, Predicate } from './Predicate'
+import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope, SqlFragment, SQLPredicate } from './SQL'
 import { SQL } from './SQL'
@@ -249,6 +250,24 @@ interface CollectionRelationPlan {
   readonly work: number,
 }
 
+/** One physical collection definition shared by a set of concrete leaves. */
+interface DerivedCollectionVariant {
+  /** Collection navigation and its physical source. */
+  readonly collection: DerivedCollectionDefinition,
+  /** Concrete entity names selected by this variant. */
+  readonly leaves: readonly string[],
+}
+
+/** One branch of a descendant-only collection count. */
+interface CollectionVariantCountPart {
+  /** Static count expression, when no values need binding. */
+  readonly expression?: string,
+  /** SQL predicate selecting this variant's concrete owner type. */
+  readonly guard: string,
+  /** Value-aware count renderer. */
+  readonly render?: (bind: (value: BoundScalar) => string) => string,
+}
+
 /** One physical member query for a collection projection. */
 interface CollectionMemberQuery extends SqlFragment {
   /** Hydrate one selected member row. */
@@ -478,6 +497,26 @@ class QueryProjection {
         )
       }
       const key = fullName.slice(0, -(rest[0].length + 1))
+      const directCollection = context.definition.collections.some(
+        candidate => candidate.name === directives.name,
+      )
+      const variants = directCollection
+        ? undefined
+        : descendantCollectionVariants(this.#entities, context.definition, directives.name)
+      if (variants && variants.length > 0) {
+        const count = this.#variantCollectionCount(
+          context,
+          variants,
+          `${fullName}\u0000${context.baseAlias}`,
+          rest[0] === '$matched' ? directives.filter : undefined,
+        )
+        return {
+          count,
+          expression: '',
+          field: { name: fullName, type: FieldType.Number },
+          identity: false,
+        }
+      }
       const collection = context.collections.get(directives.name)
       if (collection) {
         const plan = this.#collectionPlan(collection, context.baseAlias, key)
@@ -885,6 +924,26 @@ class QueryProjection {
   collectionScope(name: string): CollectionScope | undefined {
     const cached = this.#collectionScopes.get(name)
     if (cached) return cached
+    if (!this.root.definition.collections.some(collection => collection.name === name)) {
+      const variants = descendantCollectionVariants(this.#entities, this.root.definition, name)
+      const first = variants?.[0]
+      if (variants && first) {
+        const scopes = variants.map(variant => ({
+          guard: `${this.root.rootAlias}.${quote('entity')} IN (` +
+            `${variant.leaves.map(quoteLiteral).join(', ')})`,
+          scope: this.#scopeForCollection(
+            { collection: variant.collection, parentAlias: this.root.baseAlias },
+            `${name}\u0000${variant.leaves.join(',')}`,
+            false,
+          ),
+        }))
+        const [firstScope] = scopes
+        if (!firstScope) return undefined
+        const scope = { ...firstScope.scope, variants: scopes }
+        this.#collectionScopes.set(name, scope)
+        return scope
+      }
+    }
     const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
     if (!resolved) return undefined
     const scope = this.#scopeForCollection(resolved, name, true)
@@ -1078,6 +1137,62 @@ class QueryProjection {
       get work() { return plan.work + joins.length },
     }
     return scope
+  }
+
+  /**
+   * Build count SQL metadata across descendant-only collection variants.
+   * @param context - Occurrence owning the collection.
+   * @param variants - Physical collection variants.
+   * @param key - Stable logical count path.
+   * @param filter - Authored filter for `$matched`, when present.
+   * @returns Count expression and canonical existence forms.
+   */
+  #variantCollectionCount(
+    context: EntityContext,
+    variants: readonly DerivedCollectionVariant[],
+    key: string,
+    filter?: string,
+  ): CountScope {
+    const parts: CollectionVariantCountPart[] = variants.map(variant => {
+      const variantKey = `${key}\u0000${variant.leaves.join(',')}`
+      const plan = this.#collectionPlan(
+        variant.collection,
+        context.baseAlias,
+        variantKey,
+      )
+      this.#consume(plan.work)
+      const guard = `${context.rootAlias}.${quote('entity')} IN (` +
+        `${variant.leaves.map(quoteLiteral).join(', ')})`
+      if (filter !== undefined) {
+        return { guard, render: this.#collectionMatchedRenderer(plan, filter) }
+      }
+      const count = this.#collectionCountExpression(plan, variantKey)
+      const fragment = count.fragment
+      const render = count.render ?? (fragment === undefined
+        ? undefined
+        : (bind: (value: BoundScalar) => string) => `(${SQL.bindFragment(fragment, bind)})`)
+      return { expression: count.expression, guard, render }
+    })
+    const render = (bind: (value: BoundScalar) => string): string => (
+      `(CASE ${parts.map(part => {
+        const value = part.render === undefined ? part.expression as string : part.render(bind)
+        return `WHEN ${part.guard} THEN (${value})`
+      }).join(' ')} ELSE 0 END)`
+    )
+    if (parts.some(part => part.render !== undefined)) {
+      return {
+        empty: bind => `COALESCE((${render(bind)}), 0) = 0`,
+        exists: bind => `COALESCE((${render(bind)}), 0) > 0`,
+        expression: '',
+        render,
+      }
+    }
+    const expression = render(() => '')
+    return {
+      empty: `COALESCE((${expression}), 0) = 0`,
+      exists: `COALESCE((${expression}), 0) > 0`,
+      expression,
+    }
   }
 
   /**
@@ -2169,9 +2284,14 @@ export function compilePolymorphicQuery(
     orderField: name => projection.orderField(name),
   }
   const scope: QueryScope = baseScope
-  const where = typeof options.where === 'string'
+  const normalized = typeof options.where === 'string'
     ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
-    : options.where
+    : options.where === undefined
+      ? undefined
+      : Predicate.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
+  const where = normalized === undefined
+    ? undefined
+    : PredicateEligibility.lower(entities, synthetic, normalized)
   const predicate = SQL.where(entities, definition.name, where, scope)
   let ordering = ''
   if (options.orderBy !== undefined) {
@@ -2303,6 +2423,31 @@ function contextCollections(
     }
   }
   return result
+}
+
+/**
+ * Group descendant-only collections by their physical definition.
+ * @param entities - Canonical definitions.
+ * @param definition - Abstract ancestor being queried.
+ * @param name - Logical collection name.
+ * @returns Physical variants with their concrete leaves.
+ */
+function descendantCollectionVariants(
+  entities: EntityDefinitions,
+  definition: EntityDefinition,
+  name: string,
+): readonly DerivedCollectionVariant[] | undefined {
+  if (!definition.abstract) return undefined
+  const groups = new Map<DerivedCollectionDefinition, string[]>()
+  for (const leaf of entities.concreteDescendants(definition.name)) {
+    const collection = entities.collections(leaf.name).find(candidate => candidate.name === name)
+    if (!collection) continue
+    const leaves = groups.get(collection) ?? []
+    leaves.push(leaf.name)
+    groups.set(collection, leaves)
+  }
+  if (groups.size === 0) return undefined
+  return [...groups].map(([collection, leaves]) => ({ collection, leaves }))
 }
 
 /**

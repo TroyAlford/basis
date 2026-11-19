@@ -20,6 +20,12 @@ interface InternalAnalysis extends AnalyzedPredicate {
   readonly guarded: Filter,
 }
 
+/** Relationship-owned member paths available inside one collection scope. */
+interface MemberScope {
+  /** Prefix for relationship-owned properties, when present. */
+  readonly relationshipPrefix?: string,
+}
+
 /**
  * Canonical predicate eligibility analysis.
  *
@@ -66,20 +72,22 @@ export const PredicateEligibility = {
  * @param definitions - Canonical entity definitions.
  * @param startEntity - Entity where the filter is rooted.
  * @param filter - Normalized filter tree.
+ * @param memberScope - Active relationship-owned member scope.
  * @returns Applicability, match, and guarded lowering.
  */
 function analyzeInternal(
   definitions: EntityDefinitions,
   startEntity: EntityDefinition,
   filter: Filter,
+  memberScope?: MemberScope,
 ): InternalAnalysis {
   if (!('field' in filter) && 'filters' in filter) {
-    return analyzeLogical(definitions, startEntity, filter)
+    return analyzeLogical(definitions, startEntity, filter, memberScope)
   }
   if ('field' in filter && 'filters' in filter) {
     return analyzeCollection(definitions, startEntity, filter)
   }
-  return analyzeComparison(definitions, startEntity, filter)
+  return analyzeComparison(definitions, startEntity, filter, memberScope)
 }
 
 /**
@@ -87,14 +95,18 @@ function analyzeInternal(
  * @param definitions - Canonical entity definitions.
  * @param startEntity - Entity where the group is rooted.
  * @param filter - Logical filter.
+ * @param memberScope - Active relationship-owned member scope.
  * @returns Applicability, match, and guarded lowering.
  */
 function analyzeLogical(
   definitions: EntityDefinitions,
   startEntity: EntityDefinition,
   filter: LogicalFilter,
+  memberScope?: MemberScope,
 ): InternalAnalysis {
-  const children = filter.filters.map(child => analyzeInternal(definitions, startEntity, child))
+  const children = filter.filters.map(child => (
+    analyzeInternal(definitions, startEntity, child, memberScope)
+  ))
   if (filter.operator === Operator.Logical.Not) {
     const child = children[0]
     if (!child) throw new Error('Query logical NOT requires exactly one filter')
@@ -152,10 +164,16 @@ function analyzeCollection(
     }
   }
   const member = definitions.entity(terminal.target)
+  let memberScope: MemberScope | undefined
+  if (member !== undefined) {
+    memberScope = 'relationship' in terminal
+      ? { relationshipPrefix: `${lowerFirst(terminal.relationship.name)}.` }
+      : {}
+  }
   const children = filter.filters.map(child => (
     member === undefined
       ? { applicable: null, guarded: child, match: child }
-      : analyzeInternal(definitions, member, child)
+      : analyzeInternal(definitions, member, child, memberScope)
   ))
   const applicable = eligibilityFilters(resolved.eligibility)
   const match: CollectionFilter = {
@@ -177,23 +195,49 @@ function analyzeCollection(
  * @param definitions - Canonical entity definitions.
  * @param startEntity - Entity where the comparison is rooted.
  * @param filter - Comparison filter.
+ * @param memberScope - Active relationship-owned member scope.
  * @returns Applicability, match, and guarded lowering.
  */
 function analyzeComparison(
   definitions: EntityDefinitions,
   startEntity: EntityDefinition,
   filter: ComparisonFilter,
+  memberScope?: MemberScope,
 ): InternalAnalysis {
-  const left = eligibilityFilters(resolveEligibility(definitions, startEntity, filter.field))
-  const right = isFieldOperand(filter.value) && filter.value.$field !== '$me'
-    ? eligibilityFilters(resolveEligibility(definitions, startEntity, filter.value.$field))
-    : null
+  const left = isRelationshipPath(filter.field, memberScope)
+    ? null
+    : eligibilityFilters(resolveEligibility(definitions, startEntity, filter.field))
+  const rightPath = isFieldOperand(filter.value) && filter.value.$field !== '$me'
+    ? filter.value.$field
+    : undefined
+  const right = rightPath === undefined || isRelationshipPath(rightPath, memberScope)
+    ? null
+    : eligibilityFilters(resolveEligibility(definitions, startEntity, rightPath))
   const applicable = andFilters([left, right])
   return {
     applicable,
     guarded: guard(applicable, filter),
     match: filter,
   }
+}
+
+/**
+ * Whether a path is owned by the active collection relationship.
+ * @param path - Member field path.
+ * @param scope - Active member scope.
+ * @returns `true` for relationship-owned properties.
+ */
+function isRelationshipPath(path: string, scope?: MemberScope): boolean {
+  return scope?.relationshipPrefix !== undefined && path.startsWith(scope.relationshipPrefix)
+}
+
+/**
+ * Lower the first character of a name.
+ * @param value - Name to lower.
+ * @returns Lower-cased name.
+ */
+function lowerFirst(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`
 }
 
 /**

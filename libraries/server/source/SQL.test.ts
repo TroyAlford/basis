@@ -687,7 +687,7 @@ describe('SQL.where', () => {
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { payload: 'x' },
-    })).toThrow('not valid for field "Pet.payload"')
+    })).toThrow('not valid for field "payload"')
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       orderBy: 'payload',
