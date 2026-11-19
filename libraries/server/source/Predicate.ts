@@ -793,7 +793,7 @@ function containsOperand(field: QueryFieldDefinition, raw: unknown): unknown {
       }
       return [ACTOR_FIELD_NAME]
     }
-    return arrayOperand(field, Operator.Comparison.Contains, raw)
+    return arrayOperand(field, Operator.Comparison.Contains, raw, true)
   }
   if (field.type === FieldType.JSON) return normalizeJSON(raw)
   return scalarOperand(field, Operator.Comparison.Contains, raw, false)
@@ -966,12 +966,14 @@ function incompatibleArrayMember(field: string, member: string): never {
  * @param field - Native array field.
  * @param operator - Comparison operator identity.
  * @param raw - Raw scalar or array operand.
+ * @param allowActor - Whether `$me` is valid for identity containment.
  * @returns Normalized element values in operand order.
  */
 function arrayOperand(
   field: ArrayFieldDefinition,
   operator: Operator.Comparison,
   raw: unknown,
+  allowActor = false,
 ): unknown {
   if (raw === null) {
     if (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual) return null
@@ -987,6 +989,9 @@ function arrayOperand(
   return values.map(value => {
     if (value === null) throw new Error(`Array operands for "${field.name}" cannot contain null`)
     if (value === ACTOR_FIELD_NAME) {
+      if (!allowActor) {
+        throw new Error('Query operand "$me" is only valid for native-array containment')
+      }
       if (item.type === FieldType.ID) return value
       throw new Error('Query operand "$me" is only valid for identity array members')
     }

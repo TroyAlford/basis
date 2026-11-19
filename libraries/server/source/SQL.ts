@@ -423,7 +423,7 @@ function whereClause(
         const referenceSql = reference.name === ACTOR_FIELD_NAME
           ? ACTOR_SQL
           : active.expression(reference, bind)
-        return `${column} @> ARRAY[${referenceSql}::${postgresScalarType(field.items.type)}]`
+        return renderer.build(field, column, [referenceSql], () => referenceSql)
       }
       if (isFieldOperand(operand)) {
         if (ACTOR_FIELD_NAME === operand.$field) {

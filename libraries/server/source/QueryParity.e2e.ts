@@ -214,6 +214,32 @@ async function seed(database: LifecycleDatabase): Promise<void> {
 }
 
 /**
+ * Execute one native-array containment query under an explicit actor context.
+ * @param database - Isolated PostgreSQL database.
+ * @param actor - Actor identity, or null for anonymous.
+ * @param entity - Entity being queried.
+ * @param where - Source or structured filter.
+ * @returns Matching row identities.
+ */
+async function executeAsActor(
+  database: LifecycleDatabase,
+  actor: string | null,
+  entity: string,
+  where: Filter | Readonly<Record<string, unknown>> | string,
+): Promise<{ id: string }[]> {
+  return database.tx(async sql => {
+    await sql`
+      SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+    `
+    return queryEntity<{ id: string }>(sql, definitions, entity, {
+      fields: ['id'],
+      orderBy: 'id',
+      where,
+    })
+  })
+}
+
+/**
  * Execute one parity case in both input forms.
  * @param database - Isolated PostgreSQL database.
  * @param queryCase - Source/structured case.
@@ -715,6 +741,41 @@ describe('Query parity gate', () => {
         where: 'pets.$total >= 0',
       })
       expect(ordered.map(row => row.id)).toEqual([linus, grace, ada])
+
+      const actorCases = [
+        { actor: ada, expected: [ada] },
+        { actor: grace, expected: [ada, grace] },
+        { actor: campaignOne, expected: [] },
+        { actor: null, expected: [] },
+      ] as const
+      for (const actorCase of actorCases) {
+        const inverseSource = await executeAsActor(
+          database,
+          actorCase.actor,
+          'Person',
+          '$me $in favoriteIds',
+        )
+        const inverseStructured = await executeAsActor(database, actorCase.actor, 'Person', {
+          field: '$me',
+          operator: Operator.Comparison.In,
+          value: { $field: 'favoriteIds' },
+        })
+        const containsSource = await executeAsActor(
+          database,
+          actorCase.actor,
+          'Person',
+          'favoriteIds $contains $me',
+        )
+        const containsStructured = await executeAsActor(database, actorCase.actor, 'Person', {
+          field: 'favoriteIds',
+          operator: Operator.Comparison.Contains,
+          value: '$me',
+        })
+        expect(inverseSource).toEqual(inverseStructured)
+        expect(containsSource).toEqual(containsStructured)
+        expect(inverseSource.map(row => row.id)).toEqual([...actorCase.expected])
+        expect(containsSource.map(row => row.id)).toEqual([...actorCase.expected])
+      }
     })
   })
 })

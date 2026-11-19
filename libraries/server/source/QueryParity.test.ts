@@ -223,6 +223,35 @@ describe('Query parity gate', () => {
     }
   })
 
+  test('rejects the actor sentinel outside native-array containment', () => {
+    const invalid = [
+      {
+        source: "favoriteIds == ['$me']",
+        structured: { field: 'favoriteIds', operator: Operator.Comparison.Equal, value: ['$me'] },
+      },
+      {
+        source: "favoriteIds $overlaps ['$me']",
+        structured: {
+          field: 'favoriteIds',
+          operator: Operator.Comparison.Overlaps,
+          value: ['$me'],
+        },
+      },
+      {
+        source: "favoriteIds $sequenceEqual ['$me']",
+        structured: {
+          field: 'favoriteIds',
+          operator: Operator.Comparison.SequenceEqual,
+          value: ['$me'],
+        },
+      },
+    ] as const
+    for (const queryCase of invalid) {
+      expect(() => source('Note', queryCase.source)).toThrow('native-array containment')
+      expect(() => structured('Note', queryCase.structured)).toThrow('native-array containment')
+    }
+  })
+
   test('rejects malformed scalar $in predicates in both forms', () => {
     const invalid = [
       {
