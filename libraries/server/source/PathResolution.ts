@@ -321,3 +321,36 @@ function fieldContract(field: FieldDefinition): string {
   if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
   return `${field.type}:${field.format ?? ''}`
 }
+
+/**
+ * Build an abstract entity view with compatible descendant-only fields and
+ * the universal Entity discriminator available to path resolution.
+ * @param definitions - Canonical entity definitions.
+ * @param definitions.concreteDescendants - Concrete descendant lookup.
+ * @param entity - Entity to view.
+ * @returns The original concrete entity, or an augmented abstract view.
+ */
+export function abstractEntityView(
+  definitions: { concreteDescendants(name: string): readonly EntityDefinition[] },
+  entity: EntityDefinition,
+): EntityDefinition {
+  if (!entity.abstract) return entity
+  const fields = [...entity.effectiveFields]
+  const names = new Set(fields.map(field => field.name))
+  if (!names.has('entity')) {
+    const discriminator = identityDefinition().effectiveFields.find(field => field.name === 'entity')
+    if (discriminator !== undefined) {
+      fields.push(discriminator)
+      names.add('entity')
+    }
+  }
+  for (const [name, descendant] of descendantFields(definitions, entity)) {
+    if (names.has(name) || descendant.contracts.size > 1 || descendant.variants.length !== 1) continue
+    const variant = descendant.variants[0]
+    if (variant !== undefined) {
+      fields.push(variant.field)
+      names.add(name)
+    }
+  }
+  return { ...entity, effectiveFields: fields, fields }
+}

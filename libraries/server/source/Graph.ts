@@ -6,7 +6,7 @@ import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonic
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
 import type { DescendantField } from './PathResolution'
-import { descendantFields, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { abstractEntityView, descendantFields, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
@@ -1555,21 +1555,7 @@ export class Graph {
    * @returns Effective fields safe for policy path resolution.
    */
   #abstractPolicyFields(entity: EntityDefinition): readonly EffectiveFieldDefinition[] {
-    const fields = [...entity.effectiveFields]
-    const names = new Set(fields.map(field => field.name))
-    if (!names.has('entity')) {
-      const discriminator = identityDefinition().effectiveFields.find(field => field.name === 'entity')
-      if (discriminator !== undefined) {
-        fields.push(discriminator)
-        names.add('entity')
-      }
-    }
-    for (const [name, descendant] of this.#policyDescendantFields(entity)) {
-      if (names.has(name) || descendant.variants.length !== 1) continue
-      const variant = descendant.variants[0]
-      if (variant !== undefined) fields.push(variant.field)
-    }
-    return fields
+    return abstractEntityView(this.definitions, entity).effectiveFields
   }
 
   /**

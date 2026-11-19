@@ -3,7 +3,7 @@ import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
 import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
 import type { DescendantField } from './PathResolution'
-import { descendantFields, resolveCollectionPath, resolveFieldPath, universalDescendantFields } from './PathResolution'
+import { abstractEntityView, descendantFields, resolveCollectionPath, resolveFieldPath, universalDescendantFields } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
@@ -884,8 +884,11 @@ class QueryProjection {
     name: string,
     sink: FilterJoinScope,
   ): { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string } | undefined {
-    const resolved = resolveCollectionPath(context.definition, name, {
-      resolve: value => this.#entities.entity(value),
+    const resolved = resolveCollectionPath(abstractEntityView(this.#entities, context.definition), name, {
+      resolve: value => {
+        const entity = this.#entities.entity(value)
+        return entity === undefined ? undefined : abstractEntityView(this.#entities, entity)
+      },
     })
     if (!resolved) return undefined
     if ('kind' in resolved) {
@@ -897,9 +900,16 @@ class QueryProjection {
     if (resolved.prefix === '') {
       return { collection: resolved.collection, context, parentAlias: context.baseAlias }
     }
-    const prefix = resolveFieldPath(context.definition, resolved.prefix, {
-      resolve: value => this.#entities.entity(value),
-    })
+    const prefix = resolveFieldPath(
+      abstractEntityView(this.#entities, context.definition),
+      resolved.prefix,
+      {
+        resolve: value => {
+          const entity = this.#entities.entity(value)
+          return entity === undefined ? undefined : abstractEntityView(this.#entities, entity)
+        },
+      },
+    )
     if ('kind' in prefix) return undefined
     let current = context
     for (const hop of prefix.hops) {
