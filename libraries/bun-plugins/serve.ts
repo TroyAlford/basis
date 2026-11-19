@@ -1,5 +1,5 @@
 import type { BunPlugin } from 'bun'
-import { pluginHmr } from './source/pluginHmr'
+import { pluginHMR } from './source/pluginHMR'
 import { pluginMarkdown } from './source/pluginMarkdown'
 import { pluginRefresh } from './source/pluginRefresh'
 import { pluginSASS } from './source/pluginSASS'
@@ -15,7 +15,7 @@ import { pluginSASS } from './source/pluginSASS'
 export const pluginServe: BunPlugin = {
   name: 'basis-serve',
   setup(build) {
-    for (const plugin of [pluginSASS(), pluginMarkdown(), pluginRefresh(), pluginHmr()]) {
+    for (const plugin of [pluginSASS(), pluginMarkdown(), pluginRefresh(), pluginHMR()]) {
       plugin.setup(build)
     }
   },

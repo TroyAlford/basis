@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { attachRoot, register } from './Hmr'
+import { attachRoot, register } from './hmr'
 
 describe('production HMR runtime', () => {
   test('keeps the first class and copies updated members onto it', async () => {

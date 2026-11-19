@@ -17,7 +17,7 @@ import { ensureServeStaticConfig } from './serve-static'
  * @param rootDir - The consuming project root.
  * @param basisDir - The installed Basis package root.
  */
-const configureDevelopmentHmr = (rootDir: string, basisDir: string): void => {
+const configureDevelopmentHMR = (rootDir: string, basisDir: string): void => {
   if (rootDir === basisDir) return
 
   const bunfig = join(rootDir, 'bunfig.toml')
@@ -80,7 +80,7 @@ const main = (): void => {
   }
 
   try {
-    configureDevelopmentHmr(rootDir, basisDir)
+    configureDevelopmentHMR(rootDir, basisDir)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`[basis] failed to configure development HMR: ${message}\n`)

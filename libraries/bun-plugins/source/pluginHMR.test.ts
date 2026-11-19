@@ -1,6 +1,6 @@
 import type { PluginBuilder } from 'bun'
 import { describe, expect, test } from 'bun:test'
-import { pluginHmr, transformProductionModule } from './pluginHmr'
+import { pluginHMR, transformProductionModule } from './pluginHMR'
 
 describe('transformProductionModule', () => {
   test('registers a named class export and accepts the module', () => {
@@ -10,8 +10,8 @@ describe('transformProductionModule', () => {
       '/app',
     )
 
-    expect(result?.contents).toContain('import { register as __basisHmrRegister } from "basis/react/hmr"')
-    expect(result?.contents).toContain('__basisHmrRegister("Button.tsx:Button", Button)')
+    expect(result?.contents).toContain('import { register as __basisHMRRegister } from "basis/react/hmr"')
+    expect(result?.contents).toContain('__basisHMRRegister("Button.tsx:Button", Button)')
     expect(result?.contents).toContain('Button.displayName = "Button"')
     expect(result?.contents).toContain('import.meta.hot.accept()')
     expect(result?.contents).toContain('react/jsx-runtime')
@@ -27,7 +27,7 @@ describe('transformProductionModule', () => {
       '/app',
     )
 
-    expect(result?.contents).toContain('__basisHmrRegister("Private.tsx:Private", Private, true)')
+    expect(result?.contents).toContain('__basisHMRRegister("Private.tsx:Private", Private, true)')
   })
 
   test('rewrites a default class export to a live stable binding', () => {
@@ -39,7 +39,7 @@ describe('transformProductionModule', () => {
 
     expect(result?.contents).toContain('class Defaulted extends Component')
     expect(result?.contents).not.toContain('export default class')
-    expect(result?.contents).toContain('__basisHmrRegister("Defaulted.tsx:Defaulted", Defaulted)')
+    expect(result?.contents).toContain('__basisHMRRegister("Defaulted.tsx:Defaulted", Defaulted)')
     expect(result?.contents).toContain('export default Defaulted')
   })
 
@@ -48,7 +48,7 @@ describe('transformProductionModule', () => {
 
     expect(result?.contents).toContain('react/jsx-runtime')
     expect(result?.contents).not.toContain('jsxDEV')
-    expect(result?.contents).not.toContain('__basisHmrRegister')
+    expect(result?.contents).not.toContain('__basisHMRRegister')
     expect(result?.contents).not.toContain('import.meta.hot.accept()')
   })
 
@@ -56,7 +56,7 @@ describe('transformProductionModule', () => {
     const result = transformProductionModule("style('x', 'a{}')", '/app/Button.styles.ts', '/app')
 
     expect(result?.contents).toContain('import.meta.hot.accept()')
-    expect(result?.contents).not.toContain('__basisHmrRegister')
+    expect(result?.contents).not.toContain('__basisHMRRegister')
     expect(result?.contents).not.toContain('react-refresh')
   })
 
@@ -65,7 +65,7 @@ describe('transformProductionModule', () => {
   })
 })
 
-describe('pluginHmr', () => {
+describe('pluginHMR', () => {
   /**
    * Run plugin setup against a stub builder and report whether it registered a loader.
    * @param nodeEnv - The NODE_ENV value to run under.
@@ -83,7 +83,7 @@ describe('pluginHmr', () => {
         config: { target },
         onLoad: () => { registered = true },
       } as unknown as PluginBuilder
-      pluginHmr().setup(build)
+      pluginHMR().setup(build)
       return registered
     } finally {
       if (previous === undefined) delete process.env.NODE_ENV
@@ -110,7 +110,7 @@ describe('pluginHmr', () => {
         config: { target: 'browser' },
         onLoad: () => { registered = true },
       } as unknown as PluginBuilder
-      pluginHmr({ force: true }).setup(build)
+      pluginHMR({ force: true }).setup(build)
       expect(registered).toBe(true)
     } finally {
       if (previous === undefined) delete process.env.NODE_ENV

@@ -92,7 +92,7 @@ test('keeps production React and hot-replaces a mounted class component', async 
       await page.waitForFunction(() => document.querySelector('h1')?.textContent === 'Application 1')
 
       await page.evaluate(() => {
-        (globalThis as { __basisHmrSurvived?: string }).__basisHmrSurvived = 'yes'
+        (globalThis as { __basisHMRSurvived?: string }).__basisHMRSurvived = 'yes'
       })
 
       const original = readFileSync(join(directory, 'Application.tsx'), 'utf8')
@@ -108,7 +108,7 @@ test('keeps production React and hot-replaces a mounted class component', async 
       )
 
       // A full reload would clear the marker and reset the class state to zero.
-      expect(await page.evaluate(() => (globalThis as { __basisHmrSurvived?: string }).__basisHmrSurvived)).toBe('yes')
+      expect(await page.evaluate(() => (globalThis as { __basisHMRSurvived?: string }).__basisHMRSurvived)).toBe('yes')
     })
 
     expect(hydrated).toBe(true)

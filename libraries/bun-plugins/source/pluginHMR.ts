@@ -18,7 +18,7 @@ import * as path from 'node:path'
  * - Style modules and component modules self-accept; every other module falls
  *   back to Bun's full reload.
  */
-const REGISTER = '__basisHmrRegister'
+const REGISTER = '__basisHMRRegister'
 const RUNTIME = 'basis/react/hmr'
 const STYLE_MODULE = /\.styles\.[jt]sx?$/
 
@@ -212,7 +212,7 @@ export function transformProductionModule(
 /**
  * Options for the production HMR plugin.
  */
-export interface PluginHmrOptions {
+export interface PluginHMROptions {
   /**
    * Run the class-component HMR transform outside production. Vendor-backed
    * preview deployments use this to keep class state with a production React
@@ -224,12 +224,12 @@ export interface PluginHmrOptions {
 /**
  * A Bun plugin that replaces React Fast Refresh with Basis's production class
  * component HMR. It is inert outside the browser target, or outside production
- * mode unless {@link PluginHmrOptions.force} is set.
+ * mode unless {@link PluginHMROptions.force} is set.
  * @param options - Plugin options.
  * @param options.force - Run the transform outside production.
  * @returns The plugin.
  */
-export const pluginHmr = ({ force = false }: PluginHmrOptions = {}): BunPlugin => ({
+export const pluginHMR = ({ force = false }: PluginHMROptions = {}): BunPlugin => ({
   name: 'basis-production-hmr',
   setup(build) {
     if (build.config.target !== 'browser') return

@@ -6,7 +6,7 @@
 import { pluginServe } from '../libraries/bun-plugins/serve'
 
 export { pluginGlobals } from '../libraries/bun-plugins/source/pluginGlobals'
-export { pluginHmr } from '../libraries/bun-plugins/source/pluginHmr'
+export { pluginHMR } from '../libraries/bun-plugins/source/pluginHMR'
 export { pluginMarkdown } from '../libraries/bun-plugins/source/pluginMarkdown'
 export { pluginSASS } from '../libraries/bun-plugins/source/pluginSASS'
 
