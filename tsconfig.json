@@ -10,6 +10,9 @@
       "basis/*": [
         "./consumer/*.ts"
       ],
+      "basis/react/hmr": [
+        "./consumer/react-hmr.ts"
+      ],
       "basis/react/icons": [
         "./consumer/react-icons.ts"
       ],

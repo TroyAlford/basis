@@ -109,9 +109,12 @@ export interface ServerOptions {
  *
  * The server always delegates to Bun's dev server: the SPA shell is generated
  * and served through an HTML route, so Bun owns live compilation, file
- * watching, hot module replacement, and React Fast Refresh. A changed module is
- * replaced in place — no document reload — and only falls back to a reload when
- * nothing accepts the update.
+ * watching, and hot module replacement. Development uses React Fast Refresh
+ * with the development React runtime. Production uses Basis's production
+ * class-component HMR, which compiles JSX against the production React runtime
+ * and preserves mounted class instances across module replacement. A changed
+ * module is replaced in place — no document reload — and only falls back to a
+ * reload when nothing accepts the update.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities.

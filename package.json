@@ -16,6 +16,7 @@
     "./oauth": "./consumer/oauth.ts",
     "./package.json": "./package.json",
     "./react": "./consumer/react.ts",
+    "./react/hmr": "./consumer/react-hmr.ts",
     "./react/icons": "./consumer/react-icons.ts",
     "./review": "./consumer/review.ts",
     "./serve": "./consumer/serve.ts",

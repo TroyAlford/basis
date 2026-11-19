@@ -29,3 +29,5 @@ All UI extends the Basis `Component` or `Editor` hierarchy. Application code mus
 The documentation site is the authoritative component reference, with interactive examples for each component. Start at the docs home [`docs/index.mdx`](../../docs/index.mdx), then use the React sections of the site navigation. Architecture invariants live in [`docs/architecture.mdx`](../../docs/architecture.mdx), and engineering guidance lives in [`docs/engineering-principles.mdx`](../../docs/engineering-principles.mdx).
 
 The shared documentation shell, navigation builder, Mermaid renderer, and default typography remain exported from `basis/react`. `buildDocumentationNavigation` preserves caller order and supports non-clickable section headings; it never sorts the supplied routes.
+
+The production HMR runtime is available at `basis/react/hmr`. It is normally injected by `basis/serve`; applications only import `attachRoot`/`register` directly when they provide their own hydration entry.

@@ -24,7 +24,7 @@ const server = new Server()
 
 ## Lifecycle
 
-Bun's dev server owns the module graph, file watching, HMR, and React Fast Refresh. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. Versioned SSR artifacts are coalesced and cleaned after supersession; shutdown removes the server-owned artifact scope. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
+Bun's dev server owns the module graph, file watching, and HMR. Development uses React Fast Refresh with the development React runtime. Production uses Basis's class-component HMR: `basis/serve` compiles JSX against the production React runtime, registers top-level class components under stable ids, and keeps mounted instances across a module replacement. Components with runtime-private (`#`) members cannot transfer their private brand, so React remounts that subtree instead. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. Versioned SSR artifacts are coalesced and cleaned after supersession; shutdown removes the server-owned artifact scope. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
 `/api/health` is the readiness API. It stays `503 starting` until the browser shell, the configured SSR application module, and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 

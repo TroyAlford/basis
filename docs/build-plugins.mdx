@@ -4,13 +4,13 @@ title: Build Plugins & Serve
 
 # Build Plugins & Serve
 
-`basis/serve` registers Basis's Bun dev-server loaders so an application served through `basis/server` can import SASS/LESS-style assets and Markdown/MDX modules. The install hook adds the plugin section to the consumer's `bunfig.toml` automatically.
+`basis/serve` registers Basis's Bun dev-server loaders so an application served through `basis/server` can import SASS/LESS-style assets, Markdown/MDX modules, and the production HMR transform. The install hook adds the plugin section to the consumer's `bunfig.toml` automatically.
 
 ```toml
 [serve.static]
 plugins = ["basis/serve"]
 ```
 
-The internal `@basis/bun-plugins` workspace implements the loaders, including SASS compilation, asset handling, Markdown transformation, and the development React refresh registration. It is not a consumer import.
+The internal `@basis/bun-plugins` workspace implements the loaders, including SASS compilation, asset handling, Markdown transformation, development React refresh registration, and production class-component HMR. It is not a consumer import.
 
-The plugin section is optional for an application with no SASS or Markdown sources; keeping it is harmless. The install hook is idempotent and fails loudly if it cannot safely update an existing `[serve.static]` configuration. The basis server's production build does not require the development plugin.
+The plugin section is required for applications that use `basis/server`'s HMR shell in any environment. Development uses React Fast Refresh with the development React runtime. Production pre-compiles JSX against the production React runtime and registers top-level class components through `basis/react/hmr`, so the production bundle contains neither React Refresh nor `jsxDEV`. An in-place production update copies prototype methods, accessors, and statics onto the existing class; constructor-initialized instance fields (including arrow-function handlers) are applied on the next mount. Components that declare runtime-private (`#`) members cannot transfer their private brand, so React remounts that subtree instead. The install hook is idempotent and fails loudly if it cannot safely update an existing `[serve.static]` configuration.

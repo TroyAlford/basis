@@ -51,8 +51,10 @@ function scriptSource(directory: string, entrypoint: string): string {
  * Render the development shell document.
  *
  * Bun only enables HMR for HTML routes it bundles itself, so development serves
- * a generated document through an HTML route and lets Bun own the module graph,
- * hot updates, and React Fast Refresh. The document is {@link IndexHTML} — the
+ * a generated document through an HTML route and lets Bun own the module graph
+ * and hot updates. Development uses React Fast Refresh; production uses Basis's
+ * production class-component HMR, which keeps the production React runtime. The
+ * document is {@link IndexHTML} — the
  * same shell production renders — loaded with module script sources instead of
  * served entrypoint names, so the two shells cannot drift.
  * @param options - The entrypoints, shell directory, and document title.
@@ -102,18 +104,25 @@ export function writeHydrationEntry({ directory, mainPath }: HydrationEntryOptio
   const relative = path.relative(directory, mainPath).split(path.sep).join('/')
   const source = `import * as React from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
+import { attachRoot } from 'basis/react/hmr'
 import { HeadProvider } from 'basis/react'
 import * as Main from '${relative.startsWith('.') ? relative : `./${relative}`}'
 
-const Component = Main.Application ?? Main.default
-const root = document.getElementById('root')
+const rootElement = document.getElementById('root')
 const payload = document.getElementById('basis-bootstrap')?.textContent
 const props = payload ? JSON.parse(payload) : {}
-const application = React.createElement(HeadProvider, null, React.createElement(Component, props))
+const application = () => {
+  const Component = Main.Application ?? Main.default
+  return React.createElement(HeadProvider, null, React.createElement(Component, props))
+}
 
-if (!root) throw new Error('Basis: missing #root')
-if (root.hasChildNodes()) hydrateRoot(root, application)
-else createRoot(root).render(application)
+if (!rootElement) throw new Error('Basis: missing #root')
+
+const hydrating = rootElement.hasChildNodes()
+const root = hydrating ? hydrateRoot(rootElement, application()) : createRoot(rootElement)
+
+if (!hydrating) root.render(application())
+if (import.meta.hot) attachRoot(() => root.render(application()))
 `
   const file = path.join(directory, 'hydrate.tsx')
   fs.writeFileSync(file, source)
