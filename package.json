@@ -16,6 +16,7 @@
   "exports": {
     "./cli": "./consumer/cli.ts",
     "./configuration": "./consumer/configuration.ts",
+    "./docs/mermaid": "./consumer/docs-mermaid.ts",
     "./eslint": "./consumer/eslint.ts",
     "./eslint.config.mjs": "./eslint.config.mjs",
     "./logger": "./consumer/logger.ts",

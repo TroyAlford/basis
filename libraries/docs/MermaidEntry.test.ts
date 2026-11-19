@@ -1,5 +1,5 @@
+import { Mermaid } from 'basis/docs/mermaid'
 import * as ReactSurface from 'basis/react'
-import { Mermaid } from 'basis/react/mermaid'
 import { describe, expect, test } from 'bun:test'
 
 describe('Mermaid entrypoint', () => {
@@ -7,7 +7,7 @@ describe('Mermaid entrypoint', () => {
     expect('Mermaid' in ReactSurface).toBe(false)
   })
 
-  test('remains available from its opt-in entrypoint', () => {
+  test('remains available from the docs entrypoint', () => {
     expect(typeof Mermaid).toBe('function')
   })
 })
