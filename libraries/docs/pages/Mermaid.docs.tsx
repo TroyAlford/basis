@@ -97,12 +97,12 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
           <h2>Basic Usage</h2>
           <p>Basis’s docs setup renders a <code>mermaid</code> fence automatically. There is no component import or plugin configuration for a documentation author:</p>
           {Code.format(`
-        \`\`\`mermaid
+        ~~~mermaid
         flowchart TD
           A[Start] --> B{Ready?}
           B -->|Yes| C[Ship]
           B -->|No| A
-        \`\`\`
+        ~~~
       `)}
           <Mermaid>
             {`flowchart TD
@@ -139,10 +139,10 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
               color={{ background: '#0f172a', foreground: '#e2e8f0', primary: '#38bdf8' }}
             />
 
-            \`\`\`mermaid
+            ~~~mermaid
             flowchart TD
               A[Start] --> B[Ship]
-            \`\`\`
+            ~~~
           `)}
         </section>
         <section>
