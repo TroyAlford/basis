@@ -39,6 +39,7 @@ describe('transformModule', () => {
 
     expect(result?.contents).toContain('import { register } from "react-refresh/runtime"')
     expect(result?.contents).toContain('register(Button, "Button.tsx:Button")')
+    expect(result?.contents).toContain('if (Button.displayName == null) Button.displayName = "Button"')
     expect(result?.contents).toContain('import.meta.hot.accept()')
     expect(result?.loader).toBe('tsx')
   })

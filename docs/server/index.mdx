@@ -4,29 +4,29 @@ title: Server
 
 # Server
 
-`basis/server` provides the Bun application server used by Basis apps. One `Server` runs either a development server with Bun HMR or a deterministic production server that builds once and serves the SPA and assets.
+`basis/server` provides the Bun application server used by Basis apps. One `Server` always runs live from source through Bun HMR and renders the application on the server before hydrating it in the browser.
 
 ```ts
 import { Server } from 'basis/server'
 
 const server = new Server()
   .root(import.meta.dir)
+  .context(async request => ({ context: await loadApplicationContext(request) }))
   .main('./Application.tsx')
   .start({
-    development: Bun.env.NODE_ENV !== 'production',
     hostname: Bun.env.HOST ?? '127.0.0.1',
     port: Number(Bun.env.PORT ?? 80),
     version: Bun.env.VERSION ?? 'development',
   })
 ```
 
-`root` resolves relative entrypoints and assets, `main` registers the browser entrypoint, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for the build watcher and owned capabilities such as the database pool.
+`root` resolves relative entrypoints and assets, `context` loads request-scoped application data, `main` registers the application component, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for owned capabilities such as the database pool. `main` modules must export `Application` or a default React component; Basis renders it on the server, injects the request context as bootstrap data, and hydrates it in the browser.
 
 ## Lifecycle
 
-Development delegates to Bun's dev server, which owns the module graph, file watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the bundle and assets, and handles `SIGINT`/`SIGTERM` through graceful shutdown.
+Bun's dev server owns the module graph, file watching, HMR, and React Fast Refresh. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. Versioned SSR artifacts are coalesced and cleaned after supersession; shutdown removes the server-owned artifact scope. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
-`/api/health` is the readiness API. It stays `503 starting` until the initial build and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
+`/api/health` is the readiness API. It stays `503 starting` until the browser shell, the configured SSR application module, and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 
 ## API routes
 
@@ -40,7 +40,30 @@ new Server()
   })
 ```
 
-API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, and the server logger.
+API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, the server logger, and the typed application context under `context.context`.
+
+## Request context
+
+`context(loader)` defines the application data a request carries. The loader runs once per request; its result is passed to API handlers and to the automatically server-rendered `main` component.
+
+```ts
+type AppContext = {
+  campaign: Campaign
+  preferences: Preferences
+  user: User | null
+}
+
+new Server<AppContext>()
+  .context(async request => ({ context: await loadApplicationContext(request) }))
+  .main('./Application.tsx')
+  .api([HttpVerb.Get], 'campaign', (_params, { context }) => {
+    return Response.json(context.campaign)
+  })
+```
+
+The loader receives the request, verified identity, database, logger, and parsed request cookies. It returns the application context in a required `{ context, headers?, cookies? }` wrapper. `headers` is for non-cookie headers; cookies use the typed `Cookies` surface and are serialized into `Set-Cookie` for SSR, API, and SSE responses.
+
+Basis resolves the verified identity first, then runs the loader and the SSR render inside the same actor scope used by API handlers, so RLS applies consistently. Keep server-only capabilities such as `db`, `identity`, and the logger on the standard `RouteContext`; the application context is the shape embedded into the SSR bootstrap and hydrated in the browser.
 
 ## Static files
 
@@ -69,6 +92,10 @@ server.socket('room/:id', {
 ## Logging and runtime context
 
 `Server` owns a standard Basis logger and writes lifecycle output through it. Read it with `server.logger`, or inject a custom logger through `start({ logger })`. Runtime facts (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) are embedded into the SPA shell; `server.runtime` exposes the same facts to the host.
+
+## Page titles
+
+`basis/react` exports `Head` and `HeadProvider`. During SSR, `Head` collects the title synchronously for the shell. In the browser, title updates happen after commit, not during React's render phase. Server output escapes the title exactly once.
 
 ## Favicon and icons
 

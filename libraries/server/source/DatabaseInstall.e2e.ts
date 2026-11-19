@@ -66,7 +66,7 @@ function startWithInstall(server: Server, install: string, service?: string): Se
  * @returns The started server.
  */
 function start(server: Server): Server {
-  return server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
+  return server.start({ hostname: '127.0.0.1', logger: silent, port: 0 })
 }
 
 /** Inspected credential material and its access controls. */

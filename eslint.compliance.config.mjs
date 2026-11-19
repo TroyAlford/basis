@@ -48,6 +48,7 @@ const RULE_ALLOWANCES = {
     'libraries/server/source/DatabaseInstall.e2e.ts',
     'libraries/server/source/PostgresOperations.e2e.ts',
     'libraries/server/source/Readiness.e2e.ts',
+    'libraries/server/source/RequestContext.e2e.ts',
     'libraries/server/source/Release.e2e.ts',
     'libraries/server/source/ReleaseRecovery.e2e.ts',
     'libraries/testing/application.ts',
@@ -92,6 +93,7 @@ const allowances = Object.entries(RULE_ALLOWANCES).map(([rule, files]) => ({
 }))
 
 export default [
+  { ignores: ['**/.basis/**'] },
   ...createComplianceConfig(),
   ...(isBasisRepository ? allowances : []),
 ]

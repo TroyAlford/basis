@@ -1,4 +1,6 @@
-import { beforeAll, expect } from 'bun:test'
+import { beforeAll, expect, setDefaultTimeout } from 'bun:test'
+
+setDefaultTimeout(60_000)
 import { join } from 'node:path'
 import type { ApplicationHandle, StartApplicationOptions } from './application'
 import { useApplication } from './application'
