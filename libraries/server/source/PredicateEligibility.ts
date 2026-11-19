@@ -22,6 +22,8 @@ interface InternalAnalysis extends AnalyzedPredicate {
 
 /** Relationship-owned member paths available inside one collection scope. */
 interface MemberScope {
+  /** Relationship-owned property names available without the prefix. */
+  readonly relationshipFields?: ReadonlySet<string>,
   /** Prefix for relationship-owned properties, when present. */
   readonly relationshipPrefix?: string,
 }
@@ -64,6 +66,33 @@ export const PredicateEligibility = {
     filter: Filter,
   ): Filter {
     return analyzeInternal(definitions, startEntity, filter).guarded
+  },
+
+  /**
+   * Lower one collection-member predicate in its relationship-owned scope.
+   * @param definitions - Canonical entity definitions.
+   * @param startEntity - Collection member entity.
+   * @param filter - Normalized member predicate.
+   * @param relationshipPrefix - Relationship-owned field prefix, including the dot.
+   * @param relationshipFields - Relationship-owned properties accepted without the prefix.
+   * @returns The fully guarded member filter.
+   * @throws {Error} When a normalized member path cannot be resolved.
+   */
+  lowerMember(
+    definitions: EntityDefinitions,
+    startEntity: EntityDefinition,
+    filter: Filter,
+    relationshipPrefix?: string,
+    relationshipFields: readonly string[] = [],
+  ): Filter {
+    let memberScope: MemberScope | undefined
+    if (relationshipPrefix !== undefined) {
+      memberScope = {
+        relationshipFields: new Set(relationshipFields),
+        relationshipPrefix,
+      }
+    }
+    return analyzeInternal(definitions, startEntity, filter, memberScope).guarded
   },
 }
 
@@ -163,9 +192,16 @@ function analyzeCollection(
   const member = definitions.entity(terminal.target)
   let memberScope: MemberScope | undefined
   if (member !== undefined) {
-    memberScope = 'relationship' in terminal
-      ? { relationshipPrefix: `${lowerFirst(terminal.relationship.name)}.` }
-      : {}
+    if ('relationship' in terminal) {
+      memberScope = {
+        relationshipFields: new Set(
+          terminal.relationship.fields.map(field => field.name),
+        ),
+        relationshipPrefix: `${lowerFirst(terminal.relationship.name)}.`,
+      }
+    } else {
+      memberScope = {}
+    }
   }
   const children = filter.filters.map(child => (
     member === undefined
@@ -225,7 +261,8 @@ function analyzeComparison(
  * @returns `true` for relationship-owned properties.
  */
 function isRelationshipPath(path: string, scope?: MemberScope): boolean {
-  return scope?.relationshipPrefix !== undefined && path.startsWith(scope.relationshipPrefix)
+  return (scope?.relationshipPrefix !== undefined && path.startsWith(scope.relationshipPrefix))
+    || scope?.relationshipFields?.has(path) === true
 }
 
 /**

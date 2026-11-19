@@ -35,7 +35,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
     },
     {
       extends: 'Person',
-      fields: [{ field: 'company', type: 'String' }],
+      fields: [{ field: 'company', nullable: true, type: 'String' }],
       name: 'Client',
     },
     {
@@ -757,6 +757,16 @@ const cases: readonly ParityCase[] = [
     },
   },
   {
+    entity: 'Campaign',
+    expected: [],
+    source: 'members $contains (company = null)',
+    structured: {
+      field: 'members',
+      filters: [{ field: 'company', operator: Operator.Comparison.Equal, value: null }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
     entity: 'Person',
     expected: [ada],
     source: 'pets.$total >= 2',
@@ -1370,6 +1380,98 @@ describe('Query parity gate', () => {
         fields: ['id'],
         where: 'missing = 1',
       })).rejects.toThrow()
+    })
+  })
+
+  test('preserves relationship member eligibility in filtered counts', async () => {
+    await withLifecycleDatabase('filtered-membership-eligibility', async database => {
+      await seed(database)
+      const client = '00000000-0000-4000-8000-000000000501'
+      const campaign = '00000000-0000-4000-8000-000000000502'
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES
+          (${client}, 'Nullable Client', 'Client'),
+          (${campaign}, 'Nullable Campaign', 'Campaign')
+      `
+      await database.sql`
+        INSERT INTO "Person" (
+          "id",
+          "title",
+          "primaryTag",
+          "favoriteIds",
+          "scores",
+          "tags",
+          "payload"
+        )
+        VALUES (
+          ${client},
+          'Nullable Client',
+          '',
+          ARRAY []::TEXT[],
+          ARRAY []::DOUBLE PRECISION[],
+          ARRAY []::TEXT[],
+          '{}'::JSONB
+        )
+      `
+      await database.sql`
+        INSERT INTO "Client" ("id", "company")
+        VALUES (${client}, ${null})
+      `
+      await database.sql`
+        INSERT INTO "Campaign" ("id", "title")
+        VALUES (${campaign}, 'Nullable Campaign')
+      `
+      await database.sql`
+        INSERT INTO "Membership" ("person.id", "campaign.id", "role")
+        VALUES (${client}, ${campaign}, 'GM')
+      `
+      const ids = async (where: Filter | string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, definitions, 'Campaign', {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+      expect(await ids('members $contains (company = null)')).toEqual([campaign])
+      expect(await ids('members[company = null].$matched > 0')).toEqual([campaign])
+      expect(await ids({
+        field: 'members[company = null].$matched',
+        operator: Operator.Comparison.GreaterThan,
+        value: 0,
+      })).toEqual([campaign])
+      expect(await ids("members[membership.role = 'GM'].$matched > 0"))
+        .toEqual([campaignOne, campaignTwo, campaign])
+      expect(await ids('NOT(members[company = null].$matched > 0)'))
+        .toEqual([campaignOne, campaignTwo, campaignThree])
+      const normalize = (sql: string) => sql.replace(/\b((?:cm|ct|cr|cj|o))\d+\b/gu, '$1')
+      const matchedSource = 'members[company = null].$matched > 0'
+      const matchedStructured: Filter = {
+        field: 'members[company = null].$matched',
+        operator: Operator.Comparison.GreaterThan,
+        value: 0,
+      }
+      expect(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: matchedSource,
+      }).sql)).toBe(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: matchedStructured,
+      }).sql))
+      const roleSource = "members[membership.role = 'GM'].$matched > 0"
+      const roleStructured: Filter = {
+        field: "members[membership.role = 'GM'].$matched",
+        operator: Operator.Comparison.GreaterThan,
+        value: 0,
+      }
+      expect(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: roleSource,
+      }).sql)).toBe(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: roleStructured,
+      }).sql))
     })
   })
 

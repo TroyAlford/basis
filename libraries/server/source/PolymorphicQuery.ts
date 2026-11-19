@@ -937,9 +937,22 @@ class QueryProjection {
       scope.collection,
       scope.array,
     ) ?? undefined
-    const predicate = normalized === undefined
+    const relationshipPrefix = plan.relationship === undefined
+      ? undefined
+      : `${lowerFirst(plan.relationship.name)}.`
+    let lowered: Filter | undefined
+    if (normalized !== undefined) {
+      lowered = PredicateEligibility.lowerMember(
+        this.#entities,
+        plan.target,
+        normalized,
+        relationshipPrefix,
+        plan.relationship?.fields.map(field => field.name),
+      )
+    }
+    const predicate = lowered === undefined
       ? { sql: '', values: [] }
-      : SQL.whereFilter(this.#entities, plan.target.name, normalized, scope)
+      : SQL.whereFilter(this.#entities, plan.target.name, lowered, scope)
     const identity = scope.expression(scope.field('id'))
     const filterFragment = predicate.sql === ''
       ? undefined
