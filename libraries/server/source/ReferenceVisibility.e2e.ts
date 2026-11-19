@@ -350,6 +350,7 @@ const siblingGraph = new Graph({
 const siblingIds = {
   alice: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   bob: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  carol: 'edededed-eded-4ede-8ede-edededededed',
   privateDoc: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
   privateSection: '11111111-aaaa-4aaa-8aaa-111111111111',
   privateWorkspace: '33333333-cccc-4ccc-8ccc-333333333333',
@@ -367,6 +368,7 @@ async function setupSiblings(database: Parameters<Parameters<typeof withDatabase
   await database.create('User', [
     { id: siblingIds.alice, name: 'Alice' },
     { id: siblingIds.bob, name: 'Bob' },
+    { id: siblingIds.carol, name: 'Carol' },
   ])
   await database.create('Workspace', [
     { id: siblingIds.privateWorkspace, name: 'Private workspace' },
@@ -374,7 +376,11 @@ async function setupSiblings(database: Parameters<Parameters<typeof withDatabase
   ])
   await database.sql`
     INSERT INTO "SiblingMembership" ("workspace.id", "user.id")
-    VALUES (${siblingIds.publicWorkspace}, ${siblingIds.alice}), (${siblingIds.privateWorkspace}, ${siblingIds.bob})
+    VALUES
+      (${siblingIds.publicWorkspace}, ${siblingIds.alice}),
+      (${siblingIds.privateWorkspace}, ${siblingIds.bob}),
+      (${siblingIds.publicWorkspace}, ${siblingIds.carol}),
+      (${siblingIds.privateWorkspace}, ${siblingIds.carol})
   `
   await database.create('SiblingPublicDocument', {
     code: 'shared',
@@ -418,4 +424,109 @@ test('resolves compatible sibling reference owners in queries and policy', async
       orderBy: 'id',
     })).toEqual([{ id: siblingIds.privateSection }])
   }, { graph: siblingGraph, setup: setupSiblings })
+
+  await withDatabase('reference-visibility-sibling-owners-carol', siblingIds.carol, async database => {
+    expect(await database.query('SiblingDocumentSection', {
+      fields: ['id'],
+      orderBy: 'id',
+      where: 'document.workspace.members.$total = 2',
+    })).toEqual([
+      { id: siblingIds.privateSection },
+      { id: siblingIds.publicSection },
+    ])
+  }, { graph: siblingGraph, setup: setupSiblings })
+})
+
+const projectionSiblingGraphWithDocuments = new Graph({
+  entities: [
+    {
+      extends: 'ProjectionDocument',
+      fields: [{
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'alpha',
+        target: 'ProjectionMember',
+        type: 'Inverse',
+      }],
+      name: 'ProjectionAlpha',
+    },
+    {
+      extends: 'ProjectionDocument',
+      fields: [{
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'beta',
+        target: 'ProjectionMember',
+        type: 'Inverse',
+      }],
+      name: 'ProjectionBeta',
+    },
+    {
+      fields: [
+        { field: 'alpha', inverse: 'members', target: 'ProjectionAlpha', type: 'Entity' },
+        { field: 'beta', inverse: 'members', target: 'ProjectionBeta', type: 'Entity' },
+      ],
+      name: 'ProjectionMember',
+      security: { [Action.Read]: Security.Public },
+    },
+    {
+      fields: [],
+      name: 'ProjectionDocument',
+      security: { [Action.Read]: Security.Public },
+    },
+  ],
+})
+
+const projectionIds = {
+  alphaDocument: '10101010-1010-4010-8010-101010101010',
+  alphaMember: '20202020-2020-4020-8020-202020202020',
+  betaDocument: '30303030-3030-4030-8030-303030303030',
+  betaMember: '40404040-4040-4040-8040-404040404040',
+} as const
+
+/**
+ * Seed one member for each concrete descendant collection.
+ * @param database - Trusted fixture context.
+ */
+async function setupProjectionSiblings(
+  database: Parameters<Parameters<typeof withDatabase>[2]>[0],
+): Promise<void> {
+  await database.create('ProjectionAlpha', {
+    id: projectionIds.alphaDocument,
+    name: 'Alpha document',
+  })
+  await database.create('ProjectionBeta', {
+    id: projectionIds.betaDocument,
+    name: 'Beta document',
+  })
+  await database.create('ProjectionMember', [
+    { alpha: projectionIds.alphaDocument, id: projectionIds.alphaMember, name: 'Alpha member' },
+    { beta: projectionIds.betaDocument, id: projectionIds.betaMember, name: 'Beta member' },
+  ])
+}
+
+test('projects each concrete sibling collection through its own definition', async () => {
+  await withDatabase('reference-visibility-projection-siblings', null, async database => {
+    expect(await database.query('ProjectionDocument', {
+      fields: ['id', 'members', 'members.name'],
+      orderBy: 'id',
+    })).toEqual([
+      {
+        id: projectionIds.alphaDocument,
+        members: {
+          $matched: 1,
+          $total: 1,
+          items: [{ entity: 'ProjectionMember', id: projectionIds.alphaMember, name: 'Alpha member' }],
+        },
+      },
+      {
+        id: projectionIds.betaDocument,
+        members: {
+          $matched: 1,
+          $total: 1,
+          items: [{ entity: 'ProjectionMember', id: projectionIds.betaMember, name: 'Beta member' }],
+        },
+      },
+    ])
+  }, { graph: projectionSiblingGraphWithDocuments, setup: setupProjectionSiblings })
 })

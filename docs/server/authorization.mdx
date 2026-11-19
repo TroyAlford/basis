@@ -195,6 +195,14 @@ const graph = new Graph({
       },
     },
   ],
+  relationships: [{
+    name: 'WorkspaceMembership',
+    between: [
+      { field: 'workspace', target: 'Workspace' },
+      { field: 'user', target: 'User' },
+    ],
+    fields: [],
+  }],
 })
 ```
 

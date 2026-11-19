@@ -86,6 +86,8 @@ interface IdentityProjection {
 interface ProjectedCollectionProjection {
   /** SQL column alias carrying the JSON item array. */
   readonly alias: string,
+  /** SQL column alias carrying branch applicability. */
+  readonly applicableAlias?: string,
   /** Convert the JSON items into the `{ items, $matched, $total }` envelope. */
   readonly hydrate: (row: Record<string, unknown>) => {
     $matched: number,
@@ -102,6 +104,10 @@ interface ProjectedCollectionProjection {
 
 /** Requested paths below one collection navigation. */
 interface ProjectedCollectionSpec {
+  /** Stable branch discriminator used only for generated aliases. */
+  readonly aliasSuffix?: string,
+  /** Condition proving this collection branch applies to the current row. */
+  readonly applicable?: string,
   /** Collection navigation metadata. */
   readonly collection: DerivedCollectionDefinition,
   /** Whether this collection already received a directive path. */
@@ -118,6 +124,8 @@ interface ProjectedCollectionSpec {
   offset?: number,
   /** Requested item ordering. */
   orderBy?: OrderBy,
+  /** Alias of the occurrence owning this concrete branch. */
+  readonly parentAlias?: string,
 }
 
 /** One nested singular reference. */
@@ -480,9 +488,14 @@ class QueryProjection {
               branch.collection,
               branch.parentAlias,
               `${fullName}.$matched#${index}`,
+              branch.applicable,
             )
             this.#consume(plan.work)
-            return this.#collectionMatchedRenderer(plan, directives.filter as string)
+            const renderer = this.#collectionMatchedRenderer(plan, directives.filter as string)
+            if (branch.applicable === 'TRUE') return renderer
+            const applicable = branch.applicable
+            return (bind: (value: BoundScalar) => string) => `(CASE WHEN ${applicable} THEN (` +
+              `${renderer(bind)}) ELSE 0 END)`
           })
           return {
             expression: '',
@@ -498,9 +511,12 @@ class QueryProjection {
             `${fullName}#${index}`,
           )
           this.#consume(plan.work)
-          return this.#collectionCountExpression(
-            plan,
-            `${fullName}\u0000${index}\u0000${branch.parentAlias}`,
+          return this.#guardCount(
+            this.#collectionCountExpression(
+              plan,
+              `${fullName}\u0000${index}\u0000${branch.parentAlias}`,
+            ),
+            branch.applicable,
           )
         })
         const first = counts[0]
@@ -674,18 +690,45 @@ class QueryProjection {
   }
 
   /**
+   * Guard a count expression by one concrete branch applicability condition.
+   * @param count - Unguarded branch count.
+   * @param applicable - Condition proving the branch applies to the current row.
+   * @returns Guarded count forms.
+   */
+  #guardCount(count: CountScope, applicable: string): CountScope {
+    if (applicable === 'TRUE') return count
+    const wrap = (
+      value: string | ((bind: (value: BoundScalar) => string) => string),
+      fallback: 'TRUE' | 'FALSE',
+    ): string | ((bind: (value: BoundScalar) => string) => string) => (
+      typeof value === 'function'
+        ? bind => `(CASE WHEN ${applicable} THEN (${value(bind)}) ELSE ${fallback} END)`
+        : `(CASE WHEN ${applicable} THEN (${value}) ELSE ${fallback} END)`
+    )
+    return {
+      ...count,
+      empty: wrap(count.empty, 'TRUE'),
+      exists: wrap(count.exists, 'FALSE'),
+      expression: `(CASE WHEN ${applicable} THEN (${count.expression === '' ? '0' : count.expression}) ELSE 0 END)`,
+    }
+  }
+
+  /**
    * Build or reuse one collection relation plan.
    * @param collection - Collection navigation.
    * @param parentAlias - Alias of the occurrence owning the collection.
    * @param key - Stable logical collection path.
+   * @param applicable - Condition proving the branch applies to the current row.
    * @returns The reusable relation plan.
    */
   #collectionPlan(
     collection: DerivedCollectionDefinition,
     parentAlias: string,
     key: string,
+    applicable = 'TRUE',
   ): CollectionRelationPlan {
-    const planKey = `${key}\u0000${parentAlias}`
+    const planKey = `${key}\u0000${parentAlias}\u0000${applicable}\u0000${collection.kind}` +
+      `\u0000${JSON.stringify(collection)}`
     const cached = this.#collectionPlans.get(planKey)
     if (cached) return cached
     const resolved = resolveCollectionRelation(collection, value => this.#entities.entity(value))
@@ -712,7 +755,9 @@ class QueryProjection {
       : resolved.target.definition
     const plan: CollectionRelationPlan = {
       collection,
-      condition: sql.condition,
+      condition: applicable === 'TRUE'
+        ? sql.condition
+        : `${sql.condition} AND (${applicable})`,
       parentAlias,
       relation: sql.relation,
       resultType: sql.resultType,
@@ -906,7 +951,7 @@ class QueryProjection {
         throw new Error(`Collection path "${name}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
       }
       if (resolved.kind === 'incompatible') {
-        throw new Error(`Collection path "${name}" has incompatible descendant declarations`)
+        throw new Error(`Collection path "${name}" has incompatible declarations`)
       }
       return undefined
     }
@@ -988,11 +1033,11 @@ class QueryProjection {
     root: boolean,
     applicable = 'TRUE',
   ): CollectionScope {
-    const plan = this.#collectionPlan(resolved.collection, resolved.parentAlias, name)
+    const plan = this.#collectionPlan(resolved.collection, resolved.parentAlias, name, applicable)
     this.#consume(plan.work)
     const relationship = plan.relationship
     const relationshipAlias = plan.relationshipAlias
-    const condition = applicable === 'TRUE' ? plan.condition : `${plan.condition} AND (${applicable})`
+    const condition = plan.condition
     if (root) {
       this.#countFields.set(
         `${name}.$total`,
@@ -1298,17 +1343,32 @@ class QueryProjection {
       throw new Error(`Collection directives must end the path "${rawName}"; use separate child paths`)
     }
     if (rest.length === 1 && rest[0] === '$total') {
-      const collection = node.context.collections.get(name)
-      if (collection) {
-        const key = collectionKey(node.path, collection.name)
-        const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
-        this.#consume(plan.work)
-        const count = this.#collectionCountExpression(plan, `${path}\u0000${node.context.baseAlias}`)
-        if (count.fragment === undefined) {
-          this.#addComputedScalar(node, `${name}.$total`, count.expression)
-        } else {
-          this.#addComputedFragment(node, `${name}.$total`, count.fragment)
+      const branches = this.#resolveCollectionBranches(node.context, name, this.#outerFilterScope())
+      if (branches !== undefined && branches.length > 0) {
+        const counts = branches.map((branch, index) => {
+          const key = collectionKey(node.path, name)
+          const plan = this.#collectionPlan(
+            branch.collection,
+            branch.parentAlias,
+            key,
+          )
+          this.#consume(plan.work)
+          return this.#guardCount(
+            this.#collectionCountExpression(
+              plan,
+              `${path}\u0000${index}\u0000${branch.parentAlias}`,
+            ),
+            branch.applicable,
+          )
+        })
+        const firstCount = counts[0]
+        if (firstCount === undefined) {
+          throw new Error(`Query count path "${path}" has no collection branch`)
         }
+        const expression = counts.length === 1
+          ? firstCount.expression
+          : `(${counts.map(count => (count.expression === '' ? '0' : count.expression)).join(' + ')})`
+        this.#addComputedScalar(node, `${name}.$total`, expression)
         return
       }
       const field = node.context.effective.get(name)
@@ -1348,50 +1408,60 @@ class QueryProjection {
       }
       return
     }
-    const collection = node.context.collections.get(name)
-    if (collection) {
+    const branches = this.#resolveCollectionBranches(node.context, name, this.#outerFilterScope())
+    if (branches !== undefined && branches.length > 0) {
+      const first = branches[0] as ResolvedCollectionBranch
       if (rest.length > 0
-        && collection.kind === 'inverse'
-        && rest[0] === collection.association.forward.name) {
+        && first.collection.kind === 'inverse'
+        && rest[0] === first.collection.association.forward.name) {
         throw new Error(`Reciprocal reference backtracking "${path}"`)
       }
-      const key = collectionKey(node.path, collection.name)
-      let spec = node.projectedSpecs.get(collection.name)
-      if (spec === undefined) {
-        spec = {
-          collection,
-          directivesSeen: false,
-          edgeFields: new Set(),
-          fields: new Set(),
-          filters: new Set(),
-        }
-        node.projectedSpecs.set(collection.name, spec)
-      }
-      if (hasDirectives) {
-        if (spec.directivesSeen) {
-          throw new Error(`Collection "${key}" receives more than one directive path`)
-        }
-        spec.directivesSeen = true
-        if (directives.filter !== undefined) spec.filters.add(directives.filter)
-        if (directives.limit !== undefined) spec.limit = directives.limit
-        if (directives.offset !== undefined) spec.offset = directives.offset
-        if (directives.orderBy !== undefined) spec.orderBy = directives.orderBy
-      }
-      if (rest.length === 0) return
-      if (collection.kind === 'relationship' || collection.kind === 'explicit') {
-        const edge = relationshipProperty(this.#entities, collection, rest[0], path)
-        if (edge !== undefined) {
-          if (rest.length > 1) {
-            throw new Error(`Cannot traverse relationship property "${path}"`)
+      const key = collectionKey(node.path, first.collection.name)
+      for (const [index, branch] of branches.entries()) {
+        const aliasSuffix = branches.length === 1 && branch.applicable === 'TRUE'
+          ? undefined
+          : `__b${index}`
+        const specKey = aliasSuffix === undefined ? branch.collection.name : `${branch.collection.name}${aliasSuffix}`
+        let spec = node.projectedSpecs.get(specKey)
+        if (spec === undefined) {
+          spec = {
+            collection: branch.collection,
+            directivesSeen: false,
+            edgeFields: new Set(),
+            fields: new Set(),
+            filters: new Set(),
+            ...(aliasSuffix === undefined ? {} : { aliasSuffix }),
+            ...(branch.applicable === 'TRUE' ? {} : { applicable: branch.applicable }),
+            parentAlias: branch.parentAlias,
           }
-          if (edge.type === FieldType.Array || edge.type === FieldType.JSON) {
-            throw new Error(`Relationship property "${path}" is not a scalar field`)
-          }
-          spec.edgeFields.add(edge.name)
-          return
+          node.projectedSpecs.set(specKey, spec)
         }
+        if (hasDirectives) {
+          if (spec.directivesSeen) {
+            throw new Error(`Collection "${key}" receives more than one directive path`)
+          }
+          spec.directivesSeen = true
+          if (directives.filter !== undefined) spec.filters.add(directives.filter)
+          if (directives.limit !== undefined) spec.limit = directives.limit
+          if (directives.offset !== undefined) spec.offset = directives.offset
+          if (directives.orderBy !== undefined) spec.orderBy = directives.orderBy
+        }
+        if (rest.length === 0) continue
+        if (branch.collection.kind === 'relationship' || branch.collection.kind === 'explicit') {
+          const edge = relationshipProperty(this.#entities, branch.collection, rest[0], path)
+          if (edge !== undefined) {
+            if (rest.length > 1) {
+              throw new Error(`Cannot traverse relationship property "${path}"`)
+            }
+            if (edge.type === FieldType.Array || edge.type === FieldType.JSON) {
+              throw new Error(`Relationship property "${path}" is not a scalar field`)
+            }
+            spec.edgeFields.add(edge.name)
+            continue
+          }
+        }
+        spec.fields.add(rest.join('.'))
       }
-      spec.fields.add(rest.join('.'))
       return
     }
     if (hasDirectives) {
@@ -1656,7 +1726,11 @@ class QueryProjection {
    */
   #addProjectedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
     const key = collectionKey(node.path, spec.collection.name)
-    const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
+    const plan = this.#collectionPlan(
+      spec.collection,
+      spec.parentAlias ?? node.context.baseAlias,
+      key,
+    )
     this.#consume(plan.work)
     const authored = plan.collection.kind === 'explicit' ? plan.collection : undefined
     const limit = spec.limit !== undefined
@@ -1700,14 +1774,32 @@ class QueryProjection {
       adapter.identityUnique,
     )
     const items = collectionItems(page, orderings)
-    const alias = columnAlias(node.path, spec.collection.name)
+    const alias = columnAlias(
+      node.path,
+      `${spec.collection.name}${spec.aliasSuffix ?? ''}`,
+    )
     const matchedAlias = `${alias}__matched`
     const totalAlias = totalCount === undefined ? matchedAlias : `${alias}__total`
     const lateralAlias = this.#nextAlias('pc')
+    const applicableAlias = spec.applicable === undefined || spec.applicable === 'TRUE'
+      ? undefined
+      : `${alias}__applied`
+    const guardedItems = spec.applicable === undefined || spec.applicable === 'TRUE'
+      ? items
+      : SQL.compose(['(CASE WHEN ', spec.applicable, ' THEN (', items, ") ELSE '[]'::json END)"])
+    const guardedMatched = spec.applicable === undefined || spec.applicable === 'TRUE'
+      ? matchedCount
+      : SQL.compose(['(CASE WHEN ', spec.applicable, ' THEN (', matchedCount, ') ELSE 0 END)'])
+    const guardedTotal = totalCount === undefined || spec.applicable === undefined || spec.applicable === 'TRUE'
+      ? totalCount
+      : SQL.compose(['(CASE WHEN ', spec.applicable, ' THEN (', totalCount, ') ELSE 0 END)'])
     const lateral = SQL.compose([
-      'LEFT JOIN LATERAL (SELECT (', items, ') AS "__items", (', matchedCount,
+      'LEFT JOIN LATERAL (SELECT (', guardedItems, ') AS "__items", (', guardedMatched,
       ') AS "__matched"',
-      totalCount === undefined ? undefined : SQL.compose([', (', totalCount, ') AS "__total"']),
+      guardedTotal === undefined ? undefined : SQL.compose([', (', guardedTotal, ') AS "__total"']),
+      spec.applicable === undefined || spec.applicable === 'TRUE'
+        ? undefined
+        : SQL.compose([', (CASE WHEN ', spec.applicable, ' THEN TRUE ELSE FALSE END) AS "__applied"']),
       ') AS ', quote(lateralAlias), ' ON TRUE',
     ], { startIndex: this.#valueStart + this.values.length })
     this.joins.push(lateral.sql)
@@ -1718,6 +1810,9 @@ class QueryProjection {
       ...(totalCount === undefined
         ? []
         : [`${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`]),
+      ...(applicableAlias === undefined
+        ? []
+        : [`${quote(lateralAlias)}.${quote('__applied')} AS ${quote(applicableAlias)}`]),
     )
     node.projectedCollections.push({
       alias,
@@ -1733,6 +1828,7 @@ class QueryProjection {
           items: entries.map(entry => matched.hydrate(entry as Record<string, unknown>)),
         }
       },
+      ...(applicableAlias === undefined ? {} : { applicableAlias }),
       matchedAlias,
       name: spec.collection.name,
       totalAlias,
@@ -1937,20 +2033,6 @@ class QueryProjection {
       `${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
         `${quote('__child')}.${quote('id')})`,
     ])
-  }
-
-  /**
-   * Select one computed scalar field from a parameterized fragment.
-   * @param node - Projection occurrence.
-   * @param name - Logical computed field name.
-   * @param fragment - Parameterized SQL fragment.
-   */
-  #addComputedFragment(node: ProjectionNode, name: string, fragment: SqlFragment): void {
-    if (node.fieldNames.has(name)) return
-    const start = this.#valueStart + this.values.length
-    const composed = SQL.compose([fragment], { startIndex: start })
-    this.values.push(...composed.values)
-    this.#addComputedScalar(node, name, `(${composed.sql})`)
   }
 
   /**
@@ -2662,6 +2744,30 @@ function columnAlias(path: readonly string[], name: string): string {
 }
 
 /**
+ * Hydrate projected collections, choosing the applicable concrete branch.
+ * @param row - Flat SQL row.
+ * @param node - Projection occurrence.
+ * @param result - Hydration target.
+ */
+function hydrateCollections(
+  row: Record<string, unknown>,
+  node: ProjectionNode,
+  result: Record<string, unknown>,
+): void {
+  const names = new Set<string>()
+  for (const collection of node.projectedCollections) {
+    names.add(collection.name)
+    if (collection.applicableAlias !== undefined && row[collection.applicableAlias] !== true) {
+      continue
+    }
+    result[collection.name] = collection.hydrate(row)
+  }
+  for (const name of names) {
+    if (!(name in result)) result[name] = { $matched: 0, $total: 0, items: [] }
+  }
+}
+
+/**
  * Hydrate one SQL row into the requested root projection.
  * @param row - Flat SQL row.
  * @param node - Root projection node.
@@ -2673,9 +2779,7 @@ function hydrateRoot(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const field of node.fields) result[field.name] = row[field.alias]
-  for (const collection of node.projectedCollections) {
-    result[collection.name] = collection.hydrate(row)
-  }
+  hydrateCollections(row, node, result)
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
@@ -2718,9 +2822,7 @@ function hydrateReference(
     name: row[identity.name],
   }
   for (const field of node.fields) result[field.name] = row[field.alias]
-  for (const collection of node.projectedCollections) {
-    result[collection.name] = collection.hydrate(row)
-  }
+  hydrateCollections(row, node, result)
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
