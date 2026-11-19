@@ -253,3 +253,71 @@ describe('canonical Graph path resolution', () => {
     ])
   })
 })
+
+test('preserves each concrete collection definition for a shared descendant name', () => {
+  const siblingCollections = load({
+    entities: [
+      { fields: [], name: 'Document' },
+      {
+        extends: 'Document',
+        fields: [{
+          cardinality: 'Many',
+          field: 'members',
+          inverse: 'publicDocument',
+          target: 'Member',
+          type: 'Inverse',
+        }],
+        name: 'PublicDocument',
+      },
+      {
+        extends: 'Document',
+        fields: [{
+          cardinality: 'Many',
+          field: 'members',
+          inverse: 'privateDocument',
+          target: 'Member',
+          type: 'Inverse',
+        }],
+        name: 'PrivateDocument',
+      },
+      {
+        fields: [
+          {
+            field: 'publicDocument',
+            inverse: 'members',
+            target: 'PublicDocument',
+            type: 'Entity',
+          },
+          {
+            field: 'privateDocument',
+            inverse: 'members',
+            target: 'PrivateDocument',
+            type: 'Entity',
+          },
+        ],
+        name: 'Member',
+      },
+      {
+        fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+        name: 'SiblingSection',
+      },
+    ],
+  })
+  const start = siblingCollections.entity('SiblingSection')
+  if (!start) throw new Error('missing SiblingSection')
+  const result = resolveGraphPath(siblingCollections, start, 'document.members')
+  if (!('branches' in result)) throw new Error('unexpected resolver failure')
+  expect(result.kind).toBe('collection')
+  expect(result.branches).toHaveLength(2)
+  const collections = result.branches.map(branch => branch.steps.at(-1))
+  expect(collections).toMatchObject([
+    {
+      collection: { reference: { name: 'publicDocument' }, target: 'Member' },
+      guard: { leaves: ['PublicDocument'] },
+    },
+    {
+      collection: { reference: { name: 'privateDocument' }, target: 'Member' },
+      guard: { leaves: ['PrivateDocument'] },
+    },
+  ])
+})

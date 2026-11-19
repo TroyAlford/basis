@@ -635,7 +635,10 @@ function collectCollections(
   const result: { collection: DerivedCollectionDefinition, leaves: string[] }[] = []
   for (const leaf of definitions.concreteDescendants(entity.name)) {
     for (const collection of leaf.collections) {
-      const existing = result.find(candidate => candidate.collection.name === collection.name)
+      const key = `${collection.kind}\u0000${JSON.stringify(collection)}`
+      const existing = result.find(candidate => (
+        `${candidate.collection.kind}\u0000${JSON.stringify(candidate.collection)}` === key
+      ))
       if (existing === undefined) result.push({ collection, leaves: [leaf.name] })
       else existing.leaves.push(leaf.name)
     }

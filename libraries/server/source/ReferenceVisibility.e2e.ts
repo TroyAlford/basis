@@ -349,10 +349,11 @@ const siblingGraph = new Graph({
 
 const siblingIds = {
   alice: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  bob: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   privateDoc: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
   privateSection: '11111111-aaaa-4aaa-8aaa-111111111111',
   privateWorkspace: '33333333-cccc-4ccc-8ccc-333333333333',
-  publicDoc: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  publicDoc: 'abababab-abab-4bab-8bab-abababababab',
   publicSection: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
   publicWorkspace: '22222222-bbbb-4bbb-8bbb-222222222222',
 } as const
@@ -363,14 +364,17 @@ const siblingIds = {
  * @param database - Trusted fixture context.
  */
 async function setupSiblings(database: Parameters<Parameters<typeof withDatabase>[2]>[0]): Promise<void> {
-  await database.create('User', { id: siblingIds.alice, name: 'Alice' })
+  await database.create('User', [
+    { id: siblingIds.alice, name: 'Alice' },
+    { id: siblingIds.bob, name: 'Bob' },
+  ])
   await database.create('Workspace', [
     { id: siblingIds.privateWorkspace, name: 'Private workspace' },
     { id: siblingIds.publicWorkspace, name: 'Public workspace' },
   ])
   await database.sql`
     INSERT INTO "SiblingMembership" ("workspace.id", "user.id")
-    VALUES (${siblingIds.publicWorkspace}, ${siblingIds.alice}), (${siblingIds.privateWorkspace}, ${siblingIds.alice})
+    VALUES (${siblingIds.publicWorkspace}, ${siblingIds.alice}), (${siblingIds.privateWorkspace}, ${siblingIds.bob})
   `
   await database.create('SiblingPublicDocument', {
     code: 'shared',
@@ -391,21 +395,27 @@ async function setupSiblings(database: Parameters<Parameters<typeof withDatabase
 }
 
 test('resolves compatible sibling reference owners in queries and policy', async () => {
-  await withDatabase('reference-visibility-sibling-owners', siblingIds.alice, async database => {
+  await withDatabase('reference-visibility-sibling-owners-alice', siblingIds.alice, async database => {
     expect(await database.query('SiblingDocumentSection', {
       fields: ['id'],
       orderBy: 'id',
       where: 'document.workspace.members $contains (id = $me)',
-    })).toEqual([
-      { id: siblingIds.privateSection },
-      { id: siblingIds.publicSection },
-    ])
+    })).toEqual([{ id: siblingIds.publicSection }])
     expect(await database.query('SiblingDocumentSection', {
       fields: ['id'],
       orderBy: 'id',
-    })).toEqual([
-      { id: siblingIds.privateSection },
-      { id: siblingIds.publicSection },
-    ])
+    })).toEqual([{ id: siblingIds.publicSection }])
+  }, { graph: siblingGraph, setup: setupSiblings })
+
+  await withDatabase('reference-visibility-sibling-owners-bob', siblingIds.bob, async database => {
+    expect(await database.query('SiblingDocumentSection', {
+      fields: ['id'],
+      orderBy: 'id',
+      where: 'document.workspace.members $contains (id = $me)',
+    })).toEqual([{ id: siblingIds.privateSection }])
+    expect(await database.query('SiblingDocumentSection', {
+      fields: ['id'],
+      orderBy: 'id',
+    })).toEqual([{ id: siblingIds.privateSection }])
   }, { graph: siblingGraph, setup: setupSiblings })
 })
