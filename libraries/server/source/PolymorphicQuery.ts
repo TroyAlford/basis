@@ -992,25 +992,13 @@ class QueryProjection {
   collectionScope(name: string): CollectionScope | undefined {
     const cached = this.#collectionScopes.get(name)
     if (cached) return cached
-    if (!this.root.definition.collections.some(collection => collection.name === name)) {
-      const variants = descendantCollectionVariants(this.#entities, this.root.definition, name)
-      const first = variants?.[0]
-      if (variants && first) {
-        const scopes = variants.map(variant => ({
-          guard: `${this.root.rootAlias}.${quote('entity')} IN (` +
-            `${variant.leaves.map(quoteLiteral).join(', ')})`,
-          scope: this.#scopeForCollection(
-            { collection: variant.collection, parentAlias: this.root.baseAlias },
-            `${name}\u0000${variant.leaves.join(',')}`,
-            false,
-          ),
-        }))
-        const [firstScope] = scopes
-        if (!firstScope) return undefined
-        const scope = { ...firstScope.scope, variants: scopes }
-        this.#collectionScopes.set(name, scope)
-        return scope
-      }
+    const declared = this.root.definition.collections.some(collection => collection.name === name)
+    if (declared) {
+      const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
+      if (!resolved) return undefined
+      const scope = this.#scopeForCollection(resolved, name, true)
+      this.#collectionScopes.set(name, scope)
+      return scope
     }
     const canonical = this.#collectionScopeFromPath(name)
     if (canonical) {
