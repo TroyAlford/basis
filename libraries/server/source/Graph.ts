@@ -5,8 +5,7 @@ import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefin
 import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
-import type { DescendantField } from './PathResolution'
-import { abstractEntityView, descendantFields, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { resolveCollectionMember, resolveGraphPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
@@ -642,22 +641,25 @@ export class Graph {
     entity: EntityDefinition,
     name: string,
   ): CollectionFilterScope | undefined {
-    const resolved = resolveCollectionPath(entity, name, {
-      resolve: value => this.#policyEntity(value),
-    })
-    if (!resolved) return undefined
-    if ('kind' in resolved) {
+    const resolved = resolveGraphPath(this.definitions, entity, name)
+    if (!('branches' in resolved)) {
       if (resolved.kind === 'depth') {
         throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
       }
+      if (resolved.kind === 'incompatible') {
+        throw new Error(`Graph: collection path "${name}" has incompatible declarations`)
+      }
       return undefined
     }
-    const target = this.#collectionTarget(resolved.collection)
+    if (resolved.kind !== 'collection') return undefined
+    const collection = resolved.branches[0]?.steps.at(-1)
+    if (collection?.kind !== 'collection') return undefined
+    const target = this.#collectionTarget(collection.collection)
     return {
       array: nested => this.#policyArrayScope(target, nested),
       collection: nested => this.#collectionFilterScope(target, nested),
       definition: target,
-      field: path => this.#collectionField(resolved.collection, target, path),
+      field: path => this.#collectionField(collection.collection, target, path),
     }
   }
 
@@ -692,20 +694,25 @@ export class Graph {
    */
   #policyPathField(entity: EntityDefinition, name: string): QueryFieldDefinition {
     if (name === ACTOR_FIELD_NAME) return { name: ACTOR_FIELD_NAME, type: FieldType.ID }
-    const resolved = resolveFieldPath(entity, name, {
-      resolve: value => this.#policyEntity(value),
-    })
-    if ('kind' in resolved) {
-      const descendant = this.#policyDescendantFieldMeta(entity, name)
-      if (descendant !== undefined) return descendant
+    const resolved = resolveGraphPath(this.definitions, entity, name)
+    if (!('branches' in resolved)) {
       if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
       if (resolved.kind === 'non-reference') {
         throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
       }
+      if (resolved.kind === 'incompatible') {
+        throw new Error(`Graph: descendant field "${name}" has incompatible declarations`)
+      }
       throw new Error(`Graph: reference path "${name}" exceeds the maximum depth`)
     }
+    if (resolved.kind !== 'field') throw new Error(`Graph: field path "${name}" is a collection`)
     if (resolved.identity) {
-      return { name: name.endsWith('.id') ? name : `${name}.id`, type: FieldType.ID }
+      const format = 'format' in resolved.field ? resolved.field.format : undefined
+      return {
+        ...(format === undefined ? {} : { format }),
+        name: name.endsWith('.id') ? name : `${name}.id`,
+        type: FieldType.ID,
+      }
     }
     return resolved.field
   }
@@ -735,6 +742,7 @@ export class Graph {
     path: string,
   ): QueryFieldDefinition {
     const resolved = resolveCollectionMember(collection, target, path, {
+      concreteDescendants: value => this.definitions.concreteDescendants(value),
       resolve: value => this.#policyEntity(value),
     })
     const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
@@ -757,7 +765,7 @@ export class Graph {
     return resolved.field
   }
   /**
-   * Build one field/path resolver for a policy row.
+   * Build one field/path resolver for a policy row through canonical branches.
    * @param entity - Policy entity view where the path starts.
    * @param baseAlias - Alias of the table owning local entity fields, when present.
    * @param rootAlias - Alias of the joined `Entity` root row, when present.
@@ -774,6 +782,12 @@ export class Graph {
     nextAlias: () => string,
     parentId?: string,
   ): (path: string) => { readonly expression: string, readonly field: QueryFieldDefinition } {
+    interface Occurrence {
+      readonly base: string | undefined,
+      readonly entity: EntityDefinition,
+      readonly parent: string | undefined,
+      readonly root: string | undefined,
+    }
     const cache = new Map<string, { readonly expression: string, readonly field: QueryFieldDefinition }>()
     const resolve = (path: string): { readonly expression: string, readonly field: QueryFieldDefinition } => {
       const cached = cache.get(path)
@@ -783,56 +797,73 @@ export class Graph {
         cache.set(path, actor)
         return actor
       }
-      const resolved = resolveFieldPath(entity, path, {
-        resolve: value => this.#policyEntity(value),
-      })
-      if ('kind' in resolved) {
-        const descendant = this.#policyDescendantField(entity, path, baseAlias, parentId)
-        if (descendant !== undefined) {
-          cache.set(path, descendant)
-          return descendant
-        }
+      const resolved = resolveGraphPath(this.definitions, entity, path)
+      if (!('branches' in resolved)) {
         if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
         if (resolved.kind === 'non-reference') {
           throw new Error(`Graph: reference field "${entity.name}.${path}" is not policy-safe`)
         }
+        if (resolved.kind === 'incompatible') {
+          throw new Error(`Graph: descendant field "${path}" has incompatible declarations`)
+        }
         throw new Error(`Graph: reference path "${path}" exceeds the maximum depth`)
       }
-      let current = entity
-      let currentBase = baseAlias
-      let currentRoot = rootAlias
-      let currentParent = parentId
-      for (const hop of resolved.hops) {
-        const expression = this.#policyFieldExpression(
-          hop.field,
-          current,
-          currentBase,
-          currentRoot,
-          currentParent,
-          allowSubqueries,
-          nextAlias,
-        )
-        const target = hop.field.target === 'Entity'
-          ? identityDefinition()
-          : this.#policyEntity(hop.field.target)
-        if (!target) throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
-        current = target
-        currentBase = undefined
-        currentRoot = undefined
-        currentParent = expression
+      if (resolved.kind !== 'field') throw new Error(`Graph: field path "${path}" is a collection`)
+      const rendered = resolved.branches.map(branch => {
+        let current: Occurrence = { base: baseAlias, entity, parent: parentId, root: rootAlias }
+        const occurrences: Occurrence[] = [current]
+        const guards: string[] = []
+        let expression: string | undefined
+        for (const step of branch.steps) {
+          if (step.guard) {
+            const occurrence = occurrences[step.guard.occurrence]
+            if (occurrence === undefined) throw new Error(`Graph: policy path "${path}" has an invalid guard`)
+            guards.push(this.#policyBranchGuard(occurrence, step.guard.leaves, nextAlias))
+          }
+          if (step.kind === 'reference') {
+            expression = this.#policyFieldExpression(
+              step.field,
+              current.entity,
+              current.base,
+              current.root,
+              current.parent,
+              allowSubqueries,
+              nextAlias,
+            )
+            const target = step.field.target === 'Entity'
+              ? identityDefinition()
+              : this.#policyEntity(step.field.target)
+            if (target === undefined) throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
+            current = { base: undefined, entity: target, parent: expression, root: undefined }
+            occurrences.push(current)
+            continue
+          }
+          if (step.kind === 'field') {
+            expression = this.#policyFieldExpression(
+              step.field,
+              current.entity,
+              current.base,
+              current.root,
+              current.parent,
+              true,
+              nextAlias,
+            )
+            continue
+          }
+          throw new Error(`Graph: field path "${path}" is a collection`)
+        }
+        if (expression === undefined) throw new Error(`Graph: field path "${path}" has no terminal expression`)
+        return { condition: guards.join(' AND '), expression }
+      })
+      const expression = rendered.length === 1 && rendered[0]?.condition === ''
+        ? rendered[0].expression
+        : `(CASE ${rendered.map(branch => (
+          `WHEN ${branch.condition === '' ? 'TRUE' : branch.condition} THEN ${branch.expression}`
+        )).join(' ')} ELSE NULL END)`
+      const result = {
+        expression,
+        field: { ...resolved.field, name: path } as QueryFieldDefinition,
       }
-      const expression = this.#policyFieldExpression(
-        resolved.terminal,
-        current,
-        currentBase,
-        currentRoot,
-        currentParent,
-        true,
-        nextAlias,
-      )
-      const result = resolved.identity
-        ? { expression, field: { name: path, type: FieldType.ID as const } }
-        : { expression, field: { ...resolved.terminal, name: path } as QueryFieldDefinition }
       cache.set(path, result)
       return result
     }
@@ -874,15 +905,6 @@ export class Graph {
       : baseAlias !== undefined
         ? `${baseAlias}.${quoteIdentifier('id')}`
         : parentId
-    if (field.owner === 'Entity' && field.name === 'entity' && entity.abstract && identity !== undefined) {
-      const leaves = this.definitions.concreteDescendants(entity.name)
-      const branches = leaves.map(leaf => (
-        `WHEN EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf.name)} __policy_entity ` +
-        `WHERE __policy_entity.${quoteIdentifier('id')} = ${identity}) ` +
-        `THEN ${literal(leaf.name)}`
-      ))
-      return `(CASE ${branches.join(' ')} ELSE NULL END)`
-    }
     if (!allowSubqueries) {
       throw new Error(`Graph: inherited policy field "${entity.name}.${field.name}" requires a helper`)
     }
@@ -895,7 +917,8 @@ export class Graph {
   }
 
   /**
-   * Build the correlated SQL scope for one authorization collection.
+   * Build the correlated SQL scope for one authorization collection through
+   * every compatible concrete branch.
    * @param entity - Entity whose collection is referenced.
    * @param name - Collection navigation or dotted reference path.
    * @param parentAlias - Alias of the resource row being authorized.
@@ -916,28 +939,111 @@ export class Graph {
     nextPolicyFieldAlias: () => string,
     depth = 0,
   ): CollectionScope | undefined {
-    const resolved = resolveCollectionPath(entity, name, {
-      resolve: value => this.#policyEntity(value),
-    })
-    if (!resolved) return undefined
-    if ('kind' in resolved) {
+    const resolved = resolveGraphPath(this.definitions, entity, name)
+    if (!('branches' in resolved)) {
       if (resolved.kind === 'depth') {
         throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
       }
+      if (resolved.kind === 'incompatible') {
+        throw new Error(`Graph: collection path "${name}" has incompatible declarations`)
+      }
       return undefined
     }
-    const collection = resolved.collection
+    if (resolved.kind !== 'collection') return undefined
+    interface PolicyOccurrence {
+      readonly base: string | undefined,
+      readonly entity: EntityDefinition,
+      readonly parent: string | undefined,
+      readonly root: string | undefined,
+    }
+    const branches = resolved.branches.flatMap(branch => {
+      let current: PolicyOccurrence = {
+        base: baseAlias,
+        entity,
+        parent: parentAlias === baseAlias ? undefined : parentAlias,
+        root: rootAlias,
+      }
+      const occurrences: PolicyOccurrence[] = [current]
+      const guards: string[] = []
+      let collection: DerivedCollectionDefinition | undefined
+      for (const step of branch.steps) {
+        if (step.guard) {
+          const occurrence = occurrences[step.guard.occurrence]
+          if (occurrence === undefined) return []
+          guards.push(this.#policyBranchGuard(occurrence, step.guard.leaves, nextPolicyFieldAlias))
+        }
+        if (step.kind === 'reference') {
+          const expression = this.#policyFieldExpression(
+            step.field,
+            current.entity,
+            current.base,
+            current.root,
+            current.parent,
+            allowSubqueries,
+            nextPolicyFieldAlias,
+          )
+          const target = step.field.target === 'Entity'
+            ? identityDefinition()
+            : this.#policyEntity(step.field.target)
+          if (target === undefined) return []
+          current = { base: undefined, entity: target, parent: expression, root: undefined }
+          occurrences.push(current)
+          continue
+        }
+        if (step.kind === 'collection') {
+          collection = step.collection
+          continue
+        }
+        return []
+      }
+      if (collection === undefined) return []
+      return [{
+        applicable: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+        collection,
+        parentId: this.#policyOccurrenceIdentity(current),
+      }]
+    })
+    if (branches.length === 0) return undefined
+    const scopes = branches.map(branch => this.#collectionSqlScopeBranch(
+      branch.collection,
+      name,
+      branch.parentId,
+      branch.applicable,
+      allowSubqueries,
+      nextPolicyFieldAlias,
+      depth,
+    ))
+    const first = scopes[0]
+    if (first === undefined) return undefined
+    return scopes.length === 1 ? first : { ...first, branches: scopes }
+  }
+
+  /**
+   * Build one authorization collection scope from one concrete branch.
+   * @param collection - Resolved collection navigation.
+   * @param name - Collection navigation or dotted reference path.
+   * @param parentId - Identity expression of the branch's collection owner.
+   * @param applicable - Condition proving the branch applies to the current row.
+   * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextPolicyFieldAlias - Allocator for one collision-free subquery alias.
+   * @param depth - Number of nested collection scopes.
+   * @returns Collection scope for the branch.
+   */
+  #collectionSqlScopeBranch(
+    collection: DerivedCollectionDefinition,
+    name: string,
+    parentId: string,
+    applicable: string,
+    allowSubqueries: boolean,
+    nextPolicyFieldAlias: () => string,
+    depth: number,
+  ): CollectionScope {
     const record = collection.kind === 'explicit' && collection.targetEndpoint === undefined
     const target = this.#collectionTarget(collection)
     const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
     const relationshipAlias = `__policy_${suffix}_rel`
     const targetAlias = `__policy_${suffix}_target`
     const rootAliasName = `__policy_${suffix}_root`
-    const prefix = resolved.prefix
-    const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries, nextPolicyFieldAlias)
-    const parentId = prefix === ''
-      ? `${parentAlias}.${quoteIdentifier('id')}`
-      : row(prefix).expression
     const relation = resolveCollectionRelation(collection, value => this.#policyEntity(value))
     const sql = collectionSqlRelation(this.definitions, relation, parentId, {
       relationship: relationshipAlias,
@@ -965,6 +1071,7 @@ export class Graph {
     const resolve = (path: string): QueryFieldDefinition => {
       const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
       const member = resolveCollectionMember(collection, target, normalized, {
+        concreteDescendants: value => this.definitions.concreteDescendants(value),
         resolve: value => this.#policyEntity(value),
       })
       if ('kind' in member) {
@@ -1013,6 +1120,7 @@ export class Graph {
       )
     }
     return {
+      applicable,
       array: nested => {
         try {
           const result = resolver(nested)
@@ -1031,7 +1139,7 @@ export class Graph {
         }
       },
       collection: nestedCollection,
-      condition: sql.condition,
+      condition: applicable === 'TRUE' ? sql.condition : `${sql.condition} AND (${applicable})`,
       definition: target,
       expression: field => {
         const expression = expressions.get(field.name)
@@ -1043,6 +1151,54 @@ export class Graph {
       predicate: sql.predicate,
       relation: sql.relation,
     }
+  }
+
+  /**
+   * Render one concrete-type guard for a policy occurrence.
+   * @param occurrence - Source occurrence to guard.
+   * @param occurrence.base - Local table alias, when present.
+   * @param occurrence.parent - Correlated identity expression, when present.
+   * @param occurrence.root - Universal root alias, when present.
+   * @param leaves - Concrete type names valid for the branch.
+   * @param nextAlias - Allocator for one collision-free subquery alias.
+   * @returns SQL condition.
+   */
+  #policyBranchGuard(
+    occurrence: {
+      readonly base: string | undefined,
+      readonly parent: string | undefined,
+      readonly root: string | undefined,
+    },
+    leaves: readonly string[],
+    nextAlias: () => string,
+  ): string {
+    const guards = leaves.map(leaf => {
+      const alias = nextAlias()
+      return `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${alias} ` +
+        `WHERE ${alias}.${quoteIdentifier('id')} = ${this.#policyOccurrenceIdentity(occurrence)})`
+    })
+    return guards.length === 1 ? guards[0] as string : `(${guards.join(' OR ')})`
+  }
+
+  /**
+   * Return the universal identity for one policy occurrence.
+   * @param occurrence - Policy occurrence.
+   * @param occurrence.base - Local table alias, when present.
+   * @param occurrence.parent - Correlated identity expression, when present.
+   * @param occurrence.root - Universal root alias, when present.
+   * @returns Identity expression.
+   */
+  #policyOccurrenceIdentity(
+    occurrence: {
+      readonly base: string | undefined,
+      readonly parent: string | undefined,
+      readonly root: string | undefined,
+    },
+  ): string {
+    if (occurrence.root !== undefined) return `${occurrence.root}.${quoteIdentifier('id')}`
+    if (occurrence.base !== undefined) return `${occurrence.base}.${quoteIdentifier('id')}`
+    if (occurrence.parent !== undefined) return occurrence.parent
+    throw new Error('Graph: policy occurrence has no row identity')
   }
 
   #createHelperFunctions(): PhysicalFunction[] {
@@ -1339,8 +1495,12 @@ export class Graph {
     if (!entity) return true
     return filterFieldNames(grant.predicate).some(name => {
       if (name === ACTOR_FIELD_NAME) return false
-      const field = entity.effectiveFields.find(candidate => candidate.name === name.split('.', 1)[0])
-      return !field || field.owner !== grant.target
+      const resolved = resolveGraphPath(this.definitions, entity, name)
+      if (!('branches' in resolved)) return true
+      return resolved.branches.some(branch => branch.steps.some(step => {
+        if (step.kind === 'collection') return true
+        return step.field.owner !== grant.target
+      }))
     })
   }
 
@@ -1548,159 +1708,10 @@ export class Graph {
     return []
   }
 
-  /**
-   * Build the policy view of an abstract entity, including compatible
-   * descendant-only fields and the universal Entity discriminator.
-   * @param entity - Abstract entity definition.
-   * @returns Effective fields safe for policy path resolution.
-   */
-  #abstractPolicyFields(entity: EntityDefinition): readonly EffectiveFieldDefinition[] {
-    return abstractEntityView(this.definitions, entity).effectiveFields
-  }
-
-  /**
-   * Return the shared descendant-field index for one abstract entity.
-   * @param entity - Abstract entity.
-   * @returns Descendant fields keyed by logical name.
-   */
-  #policyDescendantFields(entity: EntityDefinition): ReadonlyMap<string, DescendantField> {
-    return descendantFields(this.definitions, entity)
-  }
-
-  /**
-   * Resolve one scalar descendant-only field's metadata.
-   * @param entity - Entity where the path starts.
-   * @param path - Dotted field path.
-   * @returns The terminal field, or undefined.
-   */
-  #policyDescendantFieldMeta(entity: EntityDefinition, path: string): QueryFieldDefinition | undefined {
-    const segments = path.split('.')
-    if (segments.length < 2) return undefined
-    let current = entity
-    for (let index = 0; index < segments.length - 1; index += 1) {
-      const segment = segments[index] as string
-      const field = current.effectiveFields.find(candidate => candidate.name === segment)
-      if (field === undefined) {
-        if (!current.abstract) return undefined
-        const descendant = this.#policyDescendantFields(current).get(segment)
-        if (descendant === undefined || segments.length !== index + 2) return undefined
-        return { name: path, type: descendant.type } as QueryFieldDefinition
-      }
-      if (field.type !== FieldType.Entity) return undefined
-      current = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target) as EntityDefinition
-    }
-    if (!current.abstract) return undefined
-    const terminal = segments[segments.length - 1] as string
-    const descendant = this.#policyDescendantFields(current).get(terminal)
-    if (descendant === undefined) return undefined
-    if (descendant.contracts.size > 1) {
-      throw new Error(`Graph: descendant field "${path}" has incompatible declarations`)
-    }
-    return { name: path, type: descendant.type } as QueryFieldDefinition
-  }
-
-  /**
-   * Resolve one scalar path through a descendant-only field variant.
-   * @param entity - Entity where the path starts.
-   * @param path - Dotted field path.
-   * @param baseAlias - Base alias, when present.
-   * @param parentId - Parent identity expression.
-   * @returns A resolved expression, or undefined when the path is not a direct descendant terminal.
-   */
-  #policyDescendantField(
-    entity: EntityDefinition,
-    path: string,
-    baseAlias: string | undefined,
-    parentId: string | undefined,
-  ): { readonly expression: string, readonly field: QueryFieldDefinition } | undefined {
-    const segments = path.split('.')
-    if (segments.length < 2) return undefined
-    let current = entity
-    let base = baseAlias
-    let identity = parentId
-    let prefix = ''
-    for (let index = 0; index < segments.length - 1; index += 1) {
-      const segment = segments[index] as string
-      prefix = prefix === '' ? segment : `${prefix}.${segment}`
-      const field = current.effectiveFields.find(candidate => candidate.name === segment)
-      if (field === undefined) {
-        if (!current.abstract) return undefined
-        const descendants = this.#policyDescendantFields(current)
-        const descendant = descendants.get(segment)
-        if (descendant === undefined) return undefined
-        // Only direct descendant scalar terminals are supported by this branch.
-        if (segments.length !== index + 2 || descendant.variants.length === 0) return undefined
-        const reference = identity ?? (base === undefined ? undefined : `${base}.${quoteIdentifier('id')}`)
-        if (reference === undefined) return undefined
-        const terminal = segments[index + 1] as string
-        if (terminal !== descendant.name) return undefined
-        const branches: string[] = []
-        for (const variant of descendant.variants) {
-          if (variant.field.type === FieldType.Entity) return undefined
-          const owner = quoteIdentifier(variant.owner)
-          const aliasName = `__policy_${branches.length}`
-          const value = `(SELECT ${quoteIdentifier(variant.field.name)} FROM ${owner} ${aliasName} ` +
-            `WHERE ${aliasName}.${quoteIdentifier('id')} = ${reference})`
-          const leafChecks = variant.leaves.map(leaf => (
-            `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${aliasName}_l ` +
-            `WHERE ${aliasName}_l.${quoteIdentifier('id')} = ${reference})`
-          ))
-          branches.push(`WHEN ${leafChecks.join(' OR ')} THEN ${value}`)
-        }
-        return {
-          expression: `(CASE ${branches.join(' ')} ELSE NULL END)`,
-          field: { name: path, type: descendant.type } as QueryFieldDefinition,
-        }
-      }
-      if (field.type !== FieldType.Entity) return undefined
-      const target = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target)
-      if (target === undefined) return undefined
-      const owner = base === undefined ? identity : `${base}.${quoteIdentifier(field.column)}`
-      base = undefined
-      identity = owner
-      current = target
-    }
-    if (!current.abstract) return undefined
-    const terminal = segments[segments.length - 1] as string
-    const descendant = this.#policyDescendantFields(current).get(terminal)
-    if (descendant === undefined || descendant.variants.length === 0) return undefined
-    if (descendant.contracts.size > 1) {
-      throw new Error(`Graph: descendant field "${path}" has incompatible declarations`)
-    }
-    const reference = identity
-    if (reference === undefined) return undefined
-    const branches: string[] = []
-    for (const variant of descendant.variants) {
-      if (variant.field.type === FieldType.Entity) return undefined
-      const owner = quoteIdentifier(variant.owner)
-      const aliasName = `__policy_${branches.length}`
-      const value = `(SELECT ${quoteIdentifier(variant.field.name)} FROM ${owner} ${aliasName} ` +
-        `WHERE ${aliasName}.${quoteIdentifier('id')} = ${reference})`
-      const leafChecks = variant.leaves.map(leaf => (
-        `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${aliasName}_l ` +
-        `WHERE ${aliasName}_l.${quoteIdentifier('id')} = ${reference})`
-      ))
-      branches.push(`WHEN ${leafChecks.join(' OR ')} THEN ${value}`)
-    }
-    return {
-      expression: `(CASE ${branches.join(' ')} ELSE NULL END)`,
-      field: { name: path, type: descendant.type } as QueryFieldDefinition,
-    }
-  }
-
   #policyEntity(name: string): EntityDefinition | undefined {
     if (name === 'Entity') return identityDefinition()
     const entity = this.definitions.entity(name)
-    if (entity) {
-      const effectiveFields = entity.abstract
-        ? this.#abstractPolicyFields(entity)
-        : entity.effectiveFields
-      return {
-        ...entity,
-        effectiveFields,
-        fields: effectiveFields,
-      }
-    }
+    if (entity) return entity
     const relationship = this.definitions.relationship(name)
     if (!relationship) return undefined
     const fields = [

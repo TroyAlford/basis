@@ -146,6 +146,55 @@ Graph predicates are normalized when the graph loads and compiled into PostgreSQ
 
 The Graph mutation verbs (`db.create`, `db.edit`, `db.delete`, `db.upsert`) run on the same restricted application pool with the request's `actor.id`. The agreed two-gate rule applies: every create, update, and delete additionally requires `read` on the affected or resulting row, while PostgreSQL's action-specific policies determine whether the write itself is allowed. `edit` and `delete` select through the canonical filter compiler, then PostgreSQL re-checks every write and returns only the rows the actor may actually mutate. Counts therefore exclude unauthorized matches without disclosing that they exist. A create denied by the read or create policy fails as an authorization error; uniqueness, reference, check, and inheritance violations fail as constraint errors. Mixed `db.tx` callbacks keep the same actor across native SQL and mutation verbs.
 
+## Predicates over abstract references
+
+Security predicates use the ordinary Graph path language. They do not have a separate authorization path resolver, inheritance rule, or delegated evaluator. When a path crosses an abstract reference, the same concrete-branch resolver used by `db.query` expands it and the authorization compiler renders those branches with their physical owners and concrete guards.
+
+```ts
+const graph = new Graph({
+  entities: [
+    { name: 'Workspace', fields: [] },
+    {
+      name: 'Document',
+      fields: [{
+        cardinality: 'Many', field: 'sections', inverse: 'document',
+        target: 'Section', type: 'Inverse',
+      }],
+    },
+    {
+      extends: 'Document', name: 'PublicDocument',
+      fields: [{ field: 'code', type: 'String' }],
+      security: { [Action.Read]: Security.Public },
+    },
+    {
+      extends: 'Document', name: 'PrivateDocument',
+      fields: [
+        { field: 'code', type: 'String' },
+        { field: 'workspace', target: 'Workspace', type: 'Entity' },
+      ],
+      security: {
+        [Action.Read]: { where: 'workspace.members $contains (id = $me)' },
+      },
+    },
+    {
+      name: 'Section',
+      fields: [{ field: 'document', inverse: 'sections', target: 'Document', type: 'Entity' }],
+      security: {
+        [Action.Read]: [
+          { role: 'admin' },
+          { where: "document.entity = 'PublicDocument'" },
+          { where: 'document.workspace.members $contains (id = $me)' },
+        ],
+      },
+    },
+  ],
+})
+```
+
+`Section.document.workspace.members` is a normal predicate path. The resolver produces a guarded `PrivateDocument` branch for the workspace traversal; the `PublicDocument` branch has no such path and cannot be selected. `document.entity = 'PublicDocument'` reads the universal discriminator through its actual root field. The same predicate in `db.query` has exactly the same meaning.
+
+This is row authorization, not permission inheritance. `Section` does not inherit `Document`'s rules automatically, and a matching `Document` row does not grant any write. Each declaration remains explicit, every write still requires its own matching create/update/delete rule, and `PrivateDocument` and `PublicDocument` can carry independent policies. A nullable reference or an absent descendant path is nonmatching; it is never treated as an unguarded or empty match. Compatible sibling fields and references are resolved branch by branch; incompatible declarations fail graph construction rather than being guessed per row.
+
 ## Relationship membership predicates
 
 Graph roles are global role memberships. A resource-specific membership is ordinary Graph relationship data, not another global role. Declare the relationship and grant access through its collection navigation:

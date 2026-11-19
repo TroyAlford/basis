@@ -52,8 +52,17 @@ export interface SQLPredicate {
 
 /** Scoped relation used to evaluate one collection comparison. */
 export interface CollectionScope {
+  /** Condition proving this branch applies to the current owner row. */
+  readonly applicable?: string,
   /** Nested native-array navigations available to members. */
   readonly array?: (name: string, parent?: QueryScope) => ArrayScope | undefined,
+  /**
+   * Concrete branches for one polymorphic collection path.
+   *
+   * A collection predicate is satisfied when any applicable branch matches;
+   * `$empty` negates existence across all branches as one condition.
+   */
+  readonly branches?: readonly CollectionScope[],
   /** Nested collection navigations available to members. */
   readonly collection?: (name: string, parent?: QueryScope) => CollectionScope | undefined,
   /** Correlated join condition against the root occurrence. */
@@ -380,13 +389,47 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
+      if (collection.branches !== undefined && collection.branches.length > 0) {
+        const branches = collection.branches
+        if (collectionFilter.operator === Operator.Comparison.Empty) {
+          const checks = branches.map(branch => {
+            const authored = branch.predicate === undefined
+              ? ''
+              : ` AND (${bindFragment(branch.predicate, bind)})`
+            branch.consume?.(branch.work ?? 1)
+            return `EXISTS (SELECT 1 FROM ${branch.relation} WHERE ${branch.condition}${authored})`
+          })
+          const applicable = branches.map(branch => `(${branch.applicable ?? 'TRUE'})`).join(' OR ')
+          return `((${applicable}) AND NOT (${checks.join(' OR ')}))`
+        }
+        if (collectionFilter.operator !== Operator.Comparison.Contains) {
+          throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
+        }
+        if (collectionFilter.filters.length === 0) {
+          throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
+        }
+        const requirements = collectionFilter.filters.map(requirement => {
+          const checks = branches.map(branch => {
+            const inner = compile(requirement, branch)
+            branch.consume?.(branch.work ?? 1)
+            const predicate = branch.predicate === undefined
+              ? ''
+              : ` AND (${bindFragment(branch.predicate, bind)})`
+            return `EXISTS (SELECT 1 FROM ${branch.relation} WHERE ` +
+              `${branch.condition}${predicate} AND (${inner}))`
+          })
+          return `(${checks.join(' OR ')})`
+        })
+        return requirements.join(' AND ')
+      }
       if (collectionFilter.operator === Operator.Comparison.Empty) {
         const authored = collection.predicate === undefined
           ? ''
           : ` AND (${bindFragment(collection.predicate, bind)})`
         collection.consume?.(collection.work ?? 1)
-        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition}${authored})`
+        const applicable = collection.applicable ?? 'TRUE'
+        return `((${applicable}) AND NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+          `${collection.condition}${authored}))`
       }
       if (collectionFilter.operator !== Operator.Comparison.Contains) {
         throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)

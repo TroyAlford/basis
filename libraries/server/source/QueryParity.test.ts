@@ -333,3 +333,140 @@ describe('Query parity gate', () => {
     })).toThrow('non-empty filters')
   })
 })
+
+const descendantDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'members', target: 'User', type: 'Collection', via: 'Membership[workspace = @].user' },
+      ],
+      name: 'Workspace',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { cardinality: 'Many', field: 'sections', inverse: 'document', target: 'Section', type: 'Inverse' },
+      ],
+      name: 'Document',
+    },
+    {
+      extends: 'Document',
+      fields: [
+        { field: 'workspace', target: 'Workspace', type: 'Entity' },
+        { field: 'code', type: 'String' },
+      ],
+      name: 'PublicDocument',
+    },
+    {
+      extends: 'Document',
+      fields: [
+        { field: 'workspace', target: 'Workspace', type: 'Entity' },
+        { field: 'code', type: 'String' },
+      ],
+      name: 'PrivateDocument',
+    },
+    {
+      fields: [
+        { field: 'document', inverse: 'sections', target: 'Document', type: 'Entity' },
+        { field: 'title', type: 'String' },
+      ],
+      name: 'Section',
+    },
+    {
+      fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+      name: 'SiblingSection',
+    },
+  ],
+  relationships: [{
+    between: [
+      { field: 'workspace', target: 'Workspace' },
+      { field: 'user', target: 'User' },
+    ],
+    fields: [],
+    name: 'Membership',
+  }],
+}))
+
+/**
+ * Compile one descendant-query fixture.
+ * @param entity - Entity being queried.
+ * @param where - Source predicate.
+ * @returns The compiled query.
+ */
+function descendantQuery(entity: string, where: string) {
+  return compileEntityQuery(descendantDefinitions, entity, { fields: ['id'], where })
+}
+
+describe('canonical descendant query gate', () => {
+  test('compiles an abstract-reference collection predicate in string and structured forms', () => {
+    const sourceQuery = descendantQuery('Section', 'document.workspace.members $contains (id = $me)')
+    const structuredQuery = compileEntityQuery(descendantDefinitions, 'Section', {
+      fields: ['id'],
+      where: {
+        field: 'document.workspace.members',
+        filters: [{ field: 'id', operator: Operator.Comparison.Equal, value: '$me' }],
+        operator: Operator.Comparison.Contains,
+      },
+    })
+    expect(sourceQuery).toEqual(structuredQuery)
+    expect(sourceQuery.sql).toContain('"Membership"')
+    expect(sourceQuery.sql).toContain('"PrivateDocument"')
+    expect(sourceQuery.sql).toContain('"PublicDocument"')
+    expect(sourceQuery.sql).toContain('"entity"')
+  })
+
+  test('compiles universal discriminator, sibling scalar, and empty collection paths', () => {
+    expect(descendantQuery('Section', "document.entity = 'PublicDocument'").sql)
+      .toContain('"entity"')
+    const codes = descendantQuery('SiblingSection', "document.code = 'shared'")
+    expect(codes.sql).toContain('"PublicDocument"')
+    expect(codes.sql).toContain('"PrivateDocument"')
+    expect(descendantQuery('Section', 'document.workspace.members $empty').sql)
+      .toContain('NOT (')
+  })
+
+  test('uses each compatible sibling owner for a reference path', () => {
+    const query = descendantQuery('SiblingSection', 'document.workspace.id = $me')
+    expect(query.sql).toContain('"PublicDocument"')
+    expect(query.sql).toContain('"PrivateDocument"')
+  })
+
+  test('rejects incompatible sibling declarations', () => {
+    const incompatible = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [], name: 'Document' },
+        { extends: 'Document', fields: [{ field: 'code', type: 'String' }], name: 'PublicDocument' },
+        { extends: 'Document', fields: [{ field: 'code', type: 'Number' }], name: 'PrivateDocument' },
+        { fields: [{ field: 'document', target: 'Document', type: 'Entity' }], name: 'Section' },
+      ],
+    }))
+    expect(() => compileEntityQuery(incompatible, 'Section', {
+      fields: ['id'],
+      where: "document.code = 'shared'",
+    })).toThrow(/incompatible descendant declarations/)
+  })
+
+  test('does not select a field from a descendant that lacks the path', () => {
+    const missing = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [], name: 'Document' },
+        { extends: 'Document', fields: [{ field: 'code', type: 'String' }], name: 'PublicDocument' },
+        {
+          extends: 'Document',
+          fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+          name: 'PrivateDocument',
+        },
+        { fields: [], name: 'Workspace' },
+        { fields: [{ field: 'document', target: 'Document', type: 'Entity' }], name: 'Section' },
+      ],
+    }))
+    const query = compileEntityQuery(missing, 'Section', {
+      fields: ['id'],
+      where: 'document.workspace.id = $me',
+    })
+    expect(query.sql).toContain('"PrivateDocument"')
+    expect(query.sql).not.toContain('"PublicDocument"')
+  })
+})

@@ -8,12 +8,35 @@ export const MAX_GRAPH_PATH_DEPTH = 8
 export type PathFailure =
   | { readonly entity: string, readonly kind: 'unknown', readonly path: string }
   | { readonly entity: string, readonly kind: 'non-reference', readonly path: string, readonly segment: string }
+  | { readonly entity: string, readonly kind: 'incompatible', readonly path: string, readonly segment: string }
   | { readonly kind: 'depth', readonly path: string }
 
 /** Entity lookup used while resolving a path. */
 export interface PathResolutionOptions {
+  /** Return concrete descendants, when the caller has the full definition model. */
+  readonly concreteDescendants?: (name: string) => readonly EntityDefinition[],
   /** Resolve one entity by name. */
   readonly resolve: (name: string) => EntityDefinition | undefined,
+}
+
+/** The minimal canonical definitions required to resolve a Graph path. */
+export interface GraphPathDefinitions {
+  /** Return concrete descendants in canonical order. */
+  concreteDescendants(name: string): readonly EntityDefinition[],
+  /** Resolve one entity by name. */
+  entity(name: string): EntityDefinition | undefined,
+}
+
+/**
+ * Adapt caller lookups to the canonical path-resolution definitions.
+ * @param options - Caller entity and descendant lookups.
+ * @returns Canonical resolver definitions.
+ */
+function graphPathDefinitions(options: PathResolutionOptions): GraphPathDefinitions {
+  return {
+    concreteDescendants: name => options.concreteDescendants?.(name) ?? [],
+    entity: name => options.resolve(name),
+  }
 }
 
 /** One traversed singular reference. */
@@ -68,54 +91,36 @@ export function resolveFieldPath(
   path: string,
   options: PathResolutionOptions,
 ): FieldPathResolution | PathFailure {
-  const segments = path.split('.')
-  if (segments.some(segment => segment.length === 0)) {
-    return { entity: entity.name, kind: 'unknown', path }
+  const resolved = resolveGraphPath(graphPathDefinitions(options), entity, path)
+  if (!('branches' in resolved)) return resolved
+  if (resolved.kind !== 'field') {
+    return { entity: entity.name, kind: 'non-reference', path, segment: path.split('.').pop() ?? path }
   }
+  const branch = resolved.branches[0]
+  if (branch === undefined) return { entity: entity.name, kind: 'unknown', path }
   const hops: FieldPathHop[] = []
-  let current = entity
   let logical = ''
-  for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index] as string
-    logical = logical === '' ? segment : `${logical}.${segment}`
-    const field = current.effectiveFields.find(candidate => candidate.name === segment)
-    if (!field) return { entity: current.name, kind: 'unknown', path }
-    if (field.type !== FieldType.Entity) {
-      return { entity: current.name, kind: 'non-reference', path, segment }
+  let terminal: EffectiveFieldDefinition | undefined
+  let identityField: EffectiveFieldDefinition | undefined
+  for (const step of branch.steps) {
+    if (step.kind === 'reference') {
+      logical = logical === '' ? step.field.name : `${logical}.${step.field.name}`
+      if (terminal === undefined) hops.push({ field: step.field, path: logical })
+      identityField = step.field
+      terminal = undefined
+      continue
     }
-    if (index === segments.length - 2 && segments[segments.length - 1] === 'id') {
-      return {
-        field: { name: path, type: FieldType.ID },
-        hops,
-        identity: true,
-        segments,
-        terminal: field,
-      }
-    }
-    if (hops.length >= MAX_GRAPH_PATH_DEPTH) return { kind: 'depth', path }
-    hops.push({ field, path: logical })
-    const target = field.target === 'Entity' ? identityDefinition() : options.resolve(field.target)
-    if (!target) return { entity: current.name, kind: 'unknown', path }
-    current = target
+    if (step.kind === 'field') terminal = step.field
   }
-  const terminalName = segments[segments.length - 1] as string
-  const terminal = current.effectiveFields.find(candidate => candidate.name === terminalName)
-  if (!terminal) return { entity: current.name, kind: 'unknown', path }
-  if (terminal.type === FieldType.Entity) {
-    return {
-      field: { name: path, type: FieldType.ID },
-      hops,
-      identity: true,
-      segments,
-      terminal,
-    }
-  }
+  const terminalField = terminal ?? identityField ?? identityDefinition().effectiveFields
+    .find(field => field.name === (path.split('.').pop() ?? 'id'))
+  if (terminalField === undefined) return { entity: entity.name, kind: 'unknown', path }
   return {
-    field: { ...terminal, name: path },
+    field: resolved.field,
     hops,
-    identity: false,
-    segments,
-    terminal,
+    identity: resolved.identity,
+    segments: path.split('.'),
+    terminal: terminalField,
   }
 }
 
@@ -131,22 +136,26 @@ export function resolveCollectionPath(
   path: string,
   options: PathResolutionOptions,
 ): CollectionPathResolution | PathFailure | undefined {
-  const direct = entity.collections.find(collection => collection.name === path)
-  if (direct) return { collection: direct, owner: entity, prefix: '' }
-  const segments = path.split('.')
-  if (segments.some(segment => segment.length === 0)) {
-    return { entity: entity.name, kind: 'unknown', path }
+  const resolved = resolveGraphPath(graphPathDefinitions(options), entity, path)
+  if (!('branches' in resolved)) {
+    if (resolved.kind === 'unknown') return undefined
+    return resolved
   }
-  const prefix = segments.slice(0, -1).join('.')
-  const resolved = resolveFieldPath(entity, prefix, options)
-  if ('kind' in resolved) return resolved
-  if (resolved.terminal.type !== FieldType.Entity) return undefined
-  const owner = resolved.terminal.target === 'Entity'
-    ? identityDefinition()
-    : options.resolve(resolved.terminal.target)
-  if (!owner) return { entity: entity.name, kind: 'unknown', path }
-  const collection = owner.collections.find(candidate => candidate.name === segments[segments.length - 1])
-  return collection ? { collection, owner, prefix } : undefined
+  if (resolved.kind !== 'collection') return undefined
+  const branch = resolved.branches[0]
+  if (branch === undefined) return undefined
+  const collectionStep = branch.steps.at(-1)
+  if (collectionStep?.kind !== 'collection') return undefined
+  const references = branch.steps.filter(step => step.kind === 'reference')
+  const prefix = references.map(step => (step.kind === 'reference' ? step.field.name : '')).join('.')
+  let owner = entity
+  for (const step of references) {
+    if (step.kind !== 'reference') continue
+    const target = step.field.target === 'Entity' ? identityDefinition() : options.resolve(step.field.target)
+    if (target === undefined) return { entity: owner.name, kind: 'unknown', path }
+    owner = target
+  }
+  return { collection: collectionStep.collection, owner, prefix }
 }
 
 /**
@@ -353,4 +362,283 @@ export function abstractEntityView(
     }
   }
   return { ...entity, effectiveFields: fields, fields }
+}
+
+/** A concrete-type guard attached to one traversal occurrence. */
+export interface ConcreteGuard {
+  /** Concrete types for which this branch is valid. */
+  readonly leaves: readonly string[],
+  /** Index of the source entity occurrence in this traversal. */
+  readonly occurrence: number,
+}
+
+/** One step in a canonical Graph path traversal. */
+export type GraphPathStep =
+  | {
+    readonly field: EntityReferenceFieldDefinition & { readonly owner: string },
+    readonly guard?: ConcreteGuard,
+    readonly kind: 'reference',
+  }
+  | {
+    readonly field: EffectiveFieldDefinition,
+    readonly guard?: ConcreteGuard,
+    readonly kind: 'field',
+  }
+  | {
+    readonly collection: DerivedCollectionDefinition,
+    readonly guard?: ConcreteGuard,
+    readonly kind: 'collection',
+  }
+
+/** One concrete branch of a canonical Graph path. */
+export interface GraphPathBranch {
+  readonly steps: readonly GraphPathStep[],
+}
+
+/** The canonical result of resolving one Graph path. */
+export type ResolvedGraphPath =
+  | {
+    readonly branches: readonly GraphPathBranch[],
+    readonly field: QueryFieldDefinition,
+    readonly identity: boolean,
+    readonly kind: 'field',
+  }
+  | {
+    readonly branches: readonly GraphPathBranch[],
+    readonly kind: 'collection',
+  }
+
+/**
+ * Cast one effective reference field for a traversal step.
+ * @param field - Effective reference field.
+ * @returns The reference-field step payload.
+ */
+function referenceStep(field: EffectiveFieldDefinition): Extract<GraphPathStep, { kind: 'reference' }>['field'] {
+  return field as EntityReferenceFieldDefinition & { readonly owner: string }
+}
+
+/**
+ * Resolve one canonical Graph path through concrete descendant branches.
+ * @param definitions - Canonical definitions and concrete-descendant lookup.
+ * @param start - Entity where traversal starts.
+ * @param path - Dotted field, reference, or collection path.
+ * @returns The canonical field/collection branches or a failure.
+ */
+export function resolveGraphPath(
+  definitions: GraphPathDefinitions,
+  start: EntityDefinition,
+  path: string,
+): ResolvedGraphPath | PathFailure {
+  const segments = path.split('.')
+  if (segments.some(segment => segment.length === 0)) {
+    return { entity: start.name, kind: 'unknown', path }
+  }
+  interface State {
+    readonly entity: EntityDefinition,
+    readonly occurrence: number,
+    readonly steps: readonly GraphPathStep[],
+  }
+  const expand = (state: State, index: number): ResolvedGraphPath | PathFailure => {
+    if (index >= segments.length) {
+      return {
+        branches: [{ steps: state.steps }],
+        field: { name: path, type: FieldType.ID },
+        identity: true,
+        kind: 'field',
+      }
+    }
+    const name = segments[index] as string
+    const rest = segments.slice(index + 1)
+    const collection = state.entity.collections.find(candidate => candidate.name === name)
+    if (collection !== undefined && rest.length === 0) {
+      return { branches: [{ steps: [...state.steps, { collection, kind: 'collection' }] }], kind: 'collection' }
+    }
+    const field = state.entity.effectiveFields.find(candidate => candidate.name === name)
+    if (field !== undefined) {
+      const ownerField = { ...field, owner: field.owner } as EffectiveFieldDefinition
+      if (rest.length === 0) {
+        if (field.type === FieldType.Entity) {
+          const target = field.target === 'Entity' ? identityDefinition() : definitions.entity(field.target)
+          return {
+            branches: [{ steps: [...state.steps, { field: referenceStep(ownerField), kind: 'reference' }] }],
+            field: {
+              ...(target?.idFormat === undefined ? {} : { format: target.idFormat }),
+              name: path,
+              type: FieldType.ID,
+            },
+            identity: true,
+            kind: 'field',
+          }
+        }
+        return {
+          branches: [{ steps: [...state.steps, { field: ownerField, kind: 'field' }] }],
+          field: { ...field, name: path } as QueryFieldDefinition,
+          identity: false,
+          kind: 'field',
+        }
+      }
+      if (field.type !== FieldType.Entity) {
+        return { entity: state.entity.name, kind: 'non-reference', path, segment: name }
+      }
+      if (rest.length === 1 && rest[0] === 'id') {
+        const target = field.target === 'Entity' ? identityDefinition() : definitions.entity(field.target)
+        return {
+          branches: [{ steps: [...state.steps, { field: referenceStep(ownerField), kind: 'reference' }] }],
+          field: {
+            ...(target?.idFormat === undefined ? {} : { format: target.idFormat }),
+            name: path,
+            type: FieldType.ID,
+          },
+          identity: true,
+          kind: 'field',
+        }
+      }
+      if (state.occurrence >= MAX_GRAPH_PATH_DEPTH) return { kind: 'depth', path }
+      const target = field.target === 'Entity' ? identityDefinition() : definitions.entity(field.target)
+      if (target === undefined) return { entity: state.entity.name, kind: 'unknown', path }
+      return expand({
+        entity: target,
+        occurrence: state.occurrence + 1,
+        steps: [...state.steps, { field: referenceStep(ownerField), kind: 'reference' }],
+      }, index + 1)
+    }
+    if (name === 'entity') {
+      const root = identityDefinition().effectiveFields.find(candidate => candidate.name === 'entity')
+      if (root === undefined) return { entity: state.entity.name, kind: 'unknown', path }
+      if (rest.length !== 0) return { entity: state.entity.name, kind: 'non-reference', path, segment: name }
+      return {
+        branches: [{ steps: [...state.steps, { field: root, kind: 'field' }] }],
+        field: { ...root, name: path } as QueryFieldDefinition,
+        identity: false,
+        kind: 'field',
+      }
+    }
+    if (!state.entity.abstract) return { entity: state.entity.name, kind: 'unknown', path }
+    const descendants = descendantFields(definitions, state.entity)
+    const descendant = descendants.get(name)
+    if (descendant !== undefined) {
+      if (descendant.contracts.size > 1) {
+        return { entity: state.entity.name, kind: 'incompatible', path, segment: name }
+      }
+      const branches: GraphPathBranch[] = []
+      const collectionBranches: GraphPathBranch[] = []
+      let expandedCollection = false
+      let expandedField: { readonly field: QueryFieldDefinition, readonly identity: boolean } | undefined
+      for (const variant of descendant.variants) {
+        const guard = { leaves: variant.leaves, occurrence: state.occurrence } as const
+        if (rest.length === 0) {
+          if (variant.field.type === FieldType.Entity) {
+            branches.push({
+              steps: [...state.steps, {
+                field: referenceStep(variant.field),
+                guard,
+                kind: 'reference',
+              }],
+            })
+            const target = variant.field.target === 'Entity'
+              ? identityDefinition()
+              : definitions.entity(variant.field.target)
+            expandedField ??= {
+              field: {
+                ...(target?.idFormat === undefined ? {} : { format: target.idFormat }),
+                name: path,
+                type: FieldType.ID,
+              },
+              identity: true,
+            }
+          } else {
+            branches.push({
+              steps: [...state.steps, { field: variant.field, guard, kind: 'field' }],
+            })
+            expandedField ??= { field: { ...variant.field, name: path }, identity: false }
+          }
+          continue
+        }
+        if (variant.field.type !== FieldType.Entity) {
+          return { entity: state.entity.name, kind: 'non-reference', path, segment: name }
+        }
+        if (state.occurrence >= MAX_GRAPH_PATH_DEPTH) return { kind: 'depth', path }
+        const target = variant.field.target === 'Entity'
+          ? identityDefinition()
+          : definitions.entity(variant.field.target)
+        if (target === undefined) continue
+        const expanded = expand({
+          entity: target,
+          occurrence: state.occurrence + 1,
+          steps: [...state.steps, {
+            field: referenceStep(variant.field),
+            guard,
+            kind: 'reference',
+          }],
+        }, index + 1)
+        if (!('branches' in expanded)) {
+          if (expanded.kind === 'incompatible' || expanded.kind === 'depth') return expanded
+          continue
+        }
+        if (expanded.kind === 'collection') {
+          expandedCollection = true
+          collectionBranches.push(...expanded.branches)
+        } else {
+          branches.push(...expanded.branches)
+          expandedField ??= { field: expanded.field, identity: expanded.identity }
+        }
+      }
+      if (expandedCollection) {
+        if (branches.length > 0) return { entity: state.entity.name, kind: 'unknown', path }
+        return { branches: collectionBranches, kind: 'collection' }
+      }
+      if (branches.length === 0 || expandedField === undefined) {
+        return { entity: state.entity.name, kind: 'unknown', path }
+      }
+      return {
+        branches,
+        field: { ...expandedField.field, name: path } as QueryFieldDefinition,
+        identity: expandedField.identity,
+        kind: 'field',
+      }
+    }
+    const descendantCollections = state.entity.abstract
+      ? collectCollections(definitions, state.entity).filter(candidate => candidate.collection.name === name)
+      : []
+    if (descendantCollections.length > 0 && rest.length === 0) {
+      const contracts = new Set(descendantCollections.map(candidate => {
+        const candidateCollection = candidate.collection
+        return `${candidateCollection.target}:${candidateCollection.kind}`
+      }))
+      if (contracts.size > 1) return { entity: state.entity.name, kind: 'incompatible', path, segment: name }
+      return {
+        branches: descendantCollections.map(candidate => ({
+          steps: [...state.steps, {
+            collection: candidate.collection,
+            guard: { leaves: candidate.leaves, occurrence: state.occurrence },
+            kind: 'collection',
+          }],
+        })),
+        kind: 'collection',
+      }
+    }
+    return { entity: state.entity.name, kind: 'unknown', path }
+  }
+  return expand({ entity: start, occurrence: 0, steps: [] }, 0)
+}
+
+/**
+ * Collect descendant collections by name with their concrete leaves.
+ * @param definitions - Canonical definitions.
+ * @param entity - Abstract entity being inspected.
+ * @returns Collection declarations with their concrete leaves.
+ */
+function collectCollections(
+  definitions: GraphPathDefinitions,
+  entity: EntityDefinition,
+): { readonly collection: DerivedCollectionDefinition, readonly leaves: readonly string[] }[] {
+  const result: { collection: DerivedCollectionDefinition, leaves: string[] }[] = []
+  for (const leaf of definitions.concreteDescendants(entity.name)) {
+    for (const collection of leaf.collections) {
+      const existing = result.find(candidate => candidate.collection.name === collection.name)
+      if (existing === undefined) result.push({ collection, leaves: [leaf.name] })
+      else existing.leaves.push(leaf.name)
+    }
+  }
+  return result
 }

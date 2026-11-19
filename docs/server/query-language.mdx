@@ -33,6 +33,30 @@ No input form gets its own executor or database path. A query is either compiled
 
 Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, nested and composed collection comparisons over inverse and named N:M navigations, native Array/opaque JSON operations, the `$me` actor sentinel, and field-to-field comparison operands.
 
+## Abstract references and concrete branches
+
+A path may cross an abstract entity reference. The canonical path resolver expands that reference into every compatible concrete descendant branch, keeps each declaration's physical owner, and attaches a concrete-type guard to the branch. `db.query` and Graph security predicates consume that same resolution; only their SQL rendering differs.
+
+For example, given an abstract `Document` with `PublicDocument` and `PrivateDocument` descendants, and `PrivateDocument.workspace → Workspace.members`:
+
+```ts
+where: 'document.workspace.members $contains (id = $me)'
+```
+
+The `PrivateDocument` branch traverses `Section.document → PrivateDocument → workspace → Workspace.members`. The `PublicDocument` branch has no matching traversal and is omitted. It can never read a field that only another sibling declares.
+
+Compatible sibling declarations keep every branch, even when the fields have different physical owners:
+
+```ts
+// Both concrete documents declare String code and workspace → Workspace.
+where: "document.code = 'shared'"
+where: 'document.workspace.members $contains (id = $me)'
+```
+
+Each branch reads its own owner table and is guarded by its concrete type. The same field name with an incompatible scalar contract or reference target is rejected deterministically at compile time rather than resolved row by row. A path that exists on no concrete descendant is unknown and fails before execution.
+
+The universal `entity` discriminator is available on every abstract path (`document.entity = 'PublicDocument'`). A nullable abstract reference does not match a descendant path, and a descendant that lacks the collection does not match `$empty` vacuously: the whole predicate is false for that concrete branch. These rules apply identically to `$contains`, `$empty`, counts, and ordinary projections.
+
 ## Input forms
 
 Structured shorthand is a single equality:

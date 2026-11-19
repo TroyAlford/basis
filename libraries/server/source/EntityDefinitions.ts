@@ -1365,6 +1365,27 @@ function validateConstraintFilter(
 }
 
 /**
+ * Return concrete descendants from a resolved entity lookup.
+ * @param entities - Resolved entities keyed by name.
+ * @param name - Ancestor name.
+ * @returns Concrete descendants in lookup order.
+ */
+function constraintDescendants(
+  entities: ReadonlyMap<string, EntityDefinition>,
+  name: string,
+): readonly EntityDefinition[] {
+  return [...entities.values()].filter(entity => {
+    if (entity.abstract) return false
+    let current: EntityDefinition | undefined = entity
+    while (current !== undefined) {
+      if (current.name === name) return true
+      current = entities.get(current.parent)
+    }
+    return false
+  })
+}
+
+/**
  * Resolve one logical field or reference path for a validation constraint.
  * @param entity - Occurrence where traversal starts.
  * @param entities - Resolved entities keyed by name, including `Entity`.
@@ -1377,7 +1398,10 @@ function constraintField(
   name: string,
 ): QueryFieldDefinition {
   if (name === ACTOR_FIELD_NAME) return ACTOR_FIELD
-  const resolved = resolveFieldPath(entity, name, { resolve: value => entities.get(value) })
+  const resolved = resolveFieldPath(entity, name, {
+    concreteDescendants: value => constraintDescendants(entities, value),
+    resolve: value => entities.get(value),
+  })
   if ('kind' in resolved) {
     if (resolved.kind === 'unknown') {
       const segment = name.split('.').pop() ?? name
@@ -1408,7 +1432,10 @@ function constraintCollection(
   if (entity.effectiveFields.some(field => field.name === name && field.type === FieldType.Array)) {
     return undefined
   }
-  const resolved = resolveCollectionPath(entity, name, { resolve: value => entities.get(value) })
+  const resolved = resolveCollectionPath(entity, name, {
+    concreteDescendants: value => constraintDescendants(entities, value),
+    resolve: value => entities.get(value),
+  })
   if (!resolved) return undefined
   if ('kind' in resolved) {
     throw invalid(`validation collection "${entity.name}.${name}" is not a valid collection path`)
@@ -1438,6 +1465,7 @@ function constraintCollectionField(
   path: string,
 ): QueryFieldDefinition {
   const resolved = resolveCollectionMember(collection, target, path, {
+    concreteDescendants: value => constraintDescendants(entities, value),
     resolve: value => entities.get(value),
   })
   if ('kind' in resolved) {

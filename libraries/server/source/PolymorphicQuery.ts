@@ -3,7 +3,7 @@ import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
 import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
 import type { DescendantField } from './PathResolution'
-import { abstractEntityView, descendantFields, resolveCollectionPath, resolveFieldPath, universalDescendantFields } from './PathResolution'
+import { descendantFields, resolveGraphPath, universalDescendantFields } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
@@ -196,6 +196,18 @@ interface EntityContext {
   readonly rootOnly: boolean,
   /** Effective singular inverse navigations exposed by this occurrence. */
   readonly singularNavigations: ReadonlyMap<string, DerivedSingularDefinition>,
+}
+
+/** One concrete collection-owner branch for a canonical Graph path. */
+interface ResolvedCollectionBranch {
+  /** Condition proving the branch applies to the current row. */
+  readonly applicable: string,
+  /** Collection navigation reached by this branch. */
+  readonly collection: DerivedCollectionDefinition,
+  /** Occurrence owning the collection. */
+  readonly context: EntityContext,
+  /** Alias of the occurrence owning the collection. */
+  readonly parentAlias: string,
 }
 
 /** One reusable collection relation and its correlated condition. */
@@ -426,7 +438,6 @@ class QueryProjection {
    * @param segments - Remaining path segments.
    * @param fullName - Full logical filter path.
    * @param contextKey - Stable logical prefix used for shared joins.
-   * @param depth - Number of reference hops already traversed.
    * @param scope - Local SQL join sink for this resolution scope.
    * @returns The SQL expression, scalar field, and identity classification.
    */
@@ -435,7 +446,6 @@ class QueryProjection {
     segments: readonly string[],
     fullName: string,
     contextKey = '',
-    depth = 0,
     scope: FilterJoinScope = this.#outerFilterScope(),
   ): {
     count?: CountScope,
@@ -447,6 +457,75 @@ class QueryProjection {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
     const rest = segments.slice(1)
+    const countIndex = segments.findIndex(value => value === '$total' || value === '$matched')
+    if (countIndex > 0 && countIndex === segments.length - 1) {
+      const marker = segments[countIndex] as string
+      const collectionSegments = [...segments.slice(0, countIndex)]
+      const raw = collectionSegments[collectionSegments.length - 1] as string
+      const directives = parseCollectionDirectives(raw)
+      if (directives.limit !== undefined
+        || directives.offset !== undefined
+        || directives.orderBy !== undefined) {
+        throw new Error(
+          `Collection ${marker} does not accept limit, offset, or orderBy directives`,
+        )
+      }
+      collectionSegments[collectionSegments.length - 1] = directives.name
+      const collectionName = collectionSegments.join('.')
+      const branches = this.#resolveCollectionBranches(context, collectionName, scope)
+      if (branches && branches.length > 0) {
+        if (marker === '$matched' && directives.filter !== undefined) {
+          const renderers = branches.map((branch, index) => {
+            const plan = this.#collectionPlan(
+              branch.collection,
+              branch.parentAlias,
+              `${fullName}.$matched#${index}`,
+            )
+            this.#consume(plan.work)
+            return this.#collectionMatchedRenderer(plan, directives.filter as string)
+          })
+          return {
+            expression: '',
+            field: { name: fullName, type: FieldType.Number },
+            identity: false,
+            render: bind => `(${renderers.map(renderer => renderer(bind)).join(' + ')})`,
+          }
+        }
+        const counts = branches.map((branch, index) => {
+          const plan = this.#collectionPlan(
+            branch.collection,
+            branch.parentAlias,
+            `${fullName}#${index}`,
+          )
+          this.#consume(plan.work)
+          return this.#collectionCountExpression(
+            plan,
+            `${fullName}\u0000${index}\u0000${branch.parentAlias}`,
+          )
+        })
+        const first = counts[0]
+        if (first === undefined) throw new Error(`Query count path "${fullName}" has no collection branch`)
+        if (counts.length === 1) {
+          return {
+            count: first,
+            expression: '',
+            field: { name: fullName, type: FieldType.Number },
+            identity: false,
+          }
+        }
+        const expression = `(${counts.map(count => (count.expression === '' ? '0' : count.expression)).join(' + ')})`
+        return {
+          count: {
+            empty: `${expression} = 0`,
+            exists: `${expression} > 0`,
+            expression,
+          },
+          expression: '',
+          field: { name: fullName, type: FieldType.Number },
+          identity: false,
+        }
+      }
+    }
     if (rest.length === 1 && (rest[0] === '$total' || rest[0] === '$matched')) {
       const directives = parseCollectionDirectives(segment)
       if (directives.limit !== undefined
@@ -501,160 +580,97 @@ class QueryProjection {
       }
       throw new Error(`Query count path "${fullName}" requires a collection or native array field`)
     }
-    const field = context.effective.get(segment)
-    if (field) {
-      if (rest.length === 0) {
-        if (field.type === FieldType.Entity) {
-          const target = this.#entities.entity(field.target)
-          const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-          return {
-            expression: `${sourceAlias}.${quote(field.column)}`,
-            field: {
-              ...(target?.idFormat ? { format: target.idFormat } : {}),
-              name: fullName,
-              type: FieldType.ID,
-            },
-            identity: true,
-          }
-        }
-        return {
-          expression: this.#expression(context, field, false, false, scope),
-          field: (fullName.includes('.') ? { ...field, name: fullName } : field) as QueryFieldDefinition,
-          identity: false,
-        }
-      }
-      if (field.type !== FieldType.Entity) {
-        throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
-      }
-      if (rest.length === 1 && rest[0] === 'id') {
-        const target = this.#entities.entity(field.target)
-        const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-        return {
-          expression: `${sourceAlias}.${quote(field.column)}`,
-          field: {
-            ...(target?.idFormat ? { format: target.idFormat } : {}),
-            name: fullName,
-            type: FieldType.ID,
-          },
-          identity: true,
-        }
-      }
-      if (depth >= MAX_REFERENCE_DEPTH) {
-        throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-      }
-      const childKey = contextKey === '' ? segment : `${contextKey}.${segment}`
-      const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-      const targetOccurrence = this.#filterTarget(field, sourceAlias, childKey, scope)
-      return this.#resolveFilterPath(targetOccurrence, rest, fullName, childKey, depth + 1, scope)
-    }
-
-    const descendant = context.descendants.get(segment)
-    if (!descendant) throw new Error(`Unknown field "${context.definition.name}.${segment}"`)
-    if (descendant.contracts.size > 1) {
-      throw new Error(`Descendant field "${context.definition.name}.${segment}" has incompatible declarations`)
-    }
-    if (rest.length === 0) {
-      if (descendant.type === FieldType.Entity) {
-        if (depth >= MAX_REFERENCE_DEPTH) {
-          throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-        }
-        const branches = descendant.variants.map(variant => {
-          const owner = this.#ownerAlias(context, variant.owner, true, scope)
-          const variantKey = `${contextKey}.${segment}#${variant.owner}`
-          const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey, scope)
-          const leaves = variant.leaves.map(quoteLiteral).join(', ')
-          return `WHEN ${this.#ensureRoot(context, scope)}.${quote('entity')} IN (${leaves}) ` +
-            `THEN ${targetOccurrence.rootAlias}.${quote('id')}`
-        })
-        const targetField = descendant.variants[0]?.field
-        const target = targetField?.type === FieldType.Entity ? this.#entities.entity(targetField.target) : undefined
-        return {
-          expression: `CASE ${branches.join(' ')} ELSE NULL END`,
-          field: {
-            ...(target?.idFormat ? { format: target.idFormat } : {}),
-            name: fullName,
-            type: FieldType.ID,
-          },
-          identity: true,
-        }
-      }
-      const variant = descendant.variants[0]
-      if (!variant) throw new Error(`Descendant field "${context.definition.name}.${segment}" has no declaration`)
-      return {
-        expression: this.#descendantExpression(context, descendant, scope),
-        field: { ...variant.field, name: fullName } as QueryFieldDefinition,
-        identity: false,
-      }
-    }
-    if (descendant.type !== FieldType.Entity) {
-      throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
-    }
-    if (depth >= MAX_REFERENCE_DEPTH) {
-      throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-    }
-    const root = this.#ensureRoot(context, scope)
-    let resolvedField: QueryFieldDefinition | undefined
-    let resolvedIdentity = false
-    let resolvedCount: CountScope | undefined
-    const branches = descendant.variants.map(variant => {
-      const owner = this.#ownerAlias(context, variant.owner, true, scope)
-      const variantKey = `${contextKey}.${segment}#${variant.owner}`
-      const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey, scope)
-      const resolved = this.#resolveFilterPath(targetOccurrence, rest, fullName, variantKey, depth + 1, scope)
-      resolvedIdentity = resolved.identity
-      if (resolved.count) resolvedCount = resolved.count
-      if (!resolvedField) resolvedField = resolved.field
-      else if (
-        resolvedField.type !== resolved.field.type
-        || ('format' in resolvedField ? resolvedField.format : undefined) !==
-          ('format' in resolved.field ? resolved.field.format : undefined)
-      ) {
-        throw new Error(`Filter path "${fullName}" has incompatible descendant declarations`)
-      }
-      const leaves = variant.leaves.map(quoteLiteral).join(', ')
-      const branchExpression = resolved.count?.expression ?? resolved.expression
-      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${branchExpression}`
-    })
-    if (!resolvedField) throw new Error(`Filter path "${fullName}" has no descendant declaration`)
-    const expression = `CASE ${branches.join(' ')} ELSE NULL END`
-    if (resolvedCount) {
-      return {
-        count: {
-          empty: `COALESCE((${expression}), 0) = 0`,
-          exists: `COALESCE((${expression}), 0) > 0`,
-          expression,
-        },
-        expression,
-        field: { ...resolvedField, name: fullName },
-        identity: resolvedIdentity,
-      }
-    }
-    return {
-      expression,
-      field: { ...resolvedField, name: fullName },
-      identity: resolvedIdentity,
-    }
+    return this.#resolveCanonicalFilterPath(context, segments, fullName, contextKey, scope)
   }
 
   /**
-   * Build the conditional expression for one descendant scalar field.
-   * @param context - Occurrence exposing the descendant.
-   * @param descendant - Descendant field metadata.
-   * @param scope - Local SQL join sink for this resolution scope.
-   * @returns SQL expression selecting the field value by concrete leaf.
+   * Render one canonical Graph field path through its concrete branches.
+   * @param context - Occurrence where traversal starts.
+   * @param segments - Path segments.
+   * @param fullName - Full logical path.
+   * @param contextKey - Stable logical prefix used for shared joins.
+   * @param scope - Local SQL join sink.
+   * @returns The rendered scalar expression and terminal metadata.
    */
-  #descendantExpression(
+  #resolveCanonicalFilterPath(
     context: EntityContext,
-    descendant: DescendantField,
-    scope: FilterJoinScope = this.#outerFilterScope(),
-  ): string {
-    const root = this.#ensureRoot(context, scope)
-    const branches = descendant.variants.map(variant => {
-      const owner = this.#ownerAlias(context, variant.owner, true, scope)
-      const leaves = variant.leaves.map(quoteLiteral).join(', ')
-      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${owner}.${quote(variant.field.name)}`
+    segments: readonly string[],
+    fullName: string,
+    contextKey: string,
+    scope: FilterJoinScope,
+  ): {
+    expression: string,
+    field: QueryFieldDefinition,
+    identity: boolean,
+  } {
+    const resolved = resolveGraphPath(this.#entities, context.definition, segments.join('.'))
+    if (!('branches' in resolved)) {
+      if (resolved.kind === 'non-reference') {
+        throw new Error(`Filter path "${fullName}" traverses non-reference field "${resolved.segment}"`)
+      }
+      if (resolved.kind === 'incompatible') {
+        throw new Error(`Filter path "${fullName}" has incompatible descendant declarations`)
+      }
+      if (resolved.kind === 'depth') {
+        throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+      }
+      throw new Error(`Unknown field "${context.definition.name}.${segments[0] ?? fullName}"`)
+    }
+    if (resolved.kind !== 'field') {
+      throw new Error(`Filter path "${fullName}" is a collection navigation`)
+    }
+    this.#consume(segments.length)
+    const rendered = resolved.branches.map((branch, branchIndex) => {
+      let current = context
+      const occurrences: EntityContext[] = [context]
+      const guards: string[] = []
+      let expression: string | undefined
+      let reference: string | undefined
+      for (const [index, step] of branch.steps.entries()) {
+        if (step.guard) {
+          const guardContext = occurrences[step.guard.occurrence]
+          if (guardContext === undefined) throw new Error(`Filter path "${fullName}" has an invalid guard`)
+          const leaves = step.guard.leaves.map(quoteLiteral).join(', ')
+          guards.push(
+            `${this.#ensureRoot(guardContext, scope)}.${quote('entity')} IN (${leaves})`,
+          )
+        }
+        if (step.kind === 'reference') {
+          const sourceAlias = this.#ownerAlias(current, step.field.owner, step.guard !== undefined, scope)
+          reference = `${sourceAlias}.${quote(step.field.column)}`
+          if (index === branch.steps.length - 1 && resolved.identity) {
+            expression = reference
+            continue
+          }
+          const key = step.guard === undefined
+            ? (contextKey === '' ? step.field.name : `${contextKey}.${step.field.name}`)
+            : `${contextKey}.${step.field.name}#${step.field.owner}#${branchIndex}`
+          current = this.#filterTarget(step.field, sourceAlias, key, scope)
+          occurrences.push(current)
+          continue
+        }
+        if (step.kind === 'field') {
+          expression = this.#expression(current, step.field, step.guard !== undefined, false, scope)
+          continue
+        }
+        throw new Error(`Filter path "${fullName}" is a collection navigation`)
+      }
+      if (expression === undefined) {
+        if (resolved.identity && reference !== undefined) expression = reference
+        else throw new Error(`Filter path "${fullName}" has no terminal expression`)
+      }
+      return { condition: guards.join(' AND '), expression }
     })
-    return `CASE ${branches.join(' ')} ELSE NULL END`
+    const expression = rendered.length === 1 && rendered[0]?.condition === ''
+      ? rendered[0].expression
+      : `CASE ${rendered.map(branch => (
+        `WHEN ${branch.condition === '' ? 'TRUE' : branch.condition} THEN ${branch.expression}`
+      )).join(' ')} ELSE NULL END`
+    return {
+      expression,
+      field: { ...resolved.field, name: fullName } as QueryFieldDefinition,
+      identity: resolved.identity,
+    }
   }
 
   /**
@@ -864,62 +880,96 @@ class QueryProjection {
   collectionScope(name: string): CollectionScope | undefined {
     const cached = this.#collectionScopes.get(name)
     if (cached) return cached
-    const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
-    if (!resolved) return undefined
-    const scope = this.#scopeForCollection(resolved, name, true)
+    const resolved = this.#resolveCollectionBranches(this.root, name, this.#outerFilterScope())
+    if (!resolved || resolved.length === 0) return undefined
+    const scope = this.#scopeForCollectionBranches(resolved, name, true)
     this.#collectionScopes.set(name, scope)
     return scope
   }
 
   /**
-   * Resolve a collection navigation relative to one occurrence, including
-   * composed singular-reference prefixes.
+   * Resolve a collection navigation relative to one occurrence through every
+   * compatible concrete branch.
    * @param context - Occurrence where the path starts.
    * @param name - Collection navigation or dotted reference path.
    * @param sink - Local join sink for reference traversal.
-   * @returns The collection and its parent occurrence, or undefined when absent.
+   * @returns The resolved collection branches, or undefined when absent.
    */
-  #resolveCollectionPath(
+  #resolveCollectionBranches(
     context: EntityContext,
     name: string,
     sink: FilterJoinScope,
-  ): { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string } | undefined {
-    const resolved = resolveCollectionPath(abstractEntityView(this.#entities, context.definition), name, {
-      resolve: value => {
-        const entity = this.#entities.entity(value)
-        return entity === undefined ? undefined : abstractEntityView(this.#entities, entity)
-      },
-    })
-    if (!resolved) return undefined
-    if ('kind' in resolved) {
+  ): ResolvedCollectionBranch[] | undefined {
+    const resolved = resolveGraphPath(this.#entities, context.definition, name)
+    if (!('branches' in resolved)) {
       if (resolved.kind === 'depth') {
         throw new Error(`Collection path "${name}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
       }
+      if (resolved.kind === 'incompatible') {
+        throw new Error(`Collection path "${name}" has incompatible descendant declarations`)
+      }
       return undefined
     }
-    if (resolved.prefix === '') {
-      return { collection: resolved.collection, context, parentAlias: context.baseAlias }
-    }
-    const prefix = resolveFieldPath(
-      abstractEntityView(this.#entities, context.definition),
-      resolved.prefix,
-      {
-        resolve: value => {
-          const entity = this.#entities.entity(value)
-          return entity === undefined ? undefined : abstractEntityView(this.#entities, entity)
-        },
-      },
-    )
-    if ('kind' in prefix) return undefined
-    let current = context
-    for (const hop of prefix.hops) {
-      const sourceAlias = this.#ownerAlias(current, hop.field.owner, false, sink)
-      current = this.#filterTarget(hop.field, sourceAlias, hop.path, sink)
-    }
-    if (prefix.terminal.type !== FieldType.Entity) return undefined
-    const sourceAlias = this.#ownerAlias(current, prefix.terminal.owner, false, sink)
-    const owner = this.#filterTarget(prefix.terminal, sourceAlias, resolved.prefix, sink)
-    return { collection: resolved.collection, context: owner, parentAlias: owner.baseAlias }
+    if (resolved.kind !== 'collection') return undefined
+    return resolved.branches.flatMap((branch, branchIndex) => {
+      let current = context
+      const occurrences: EntityContext[] = [context]
+      const guards: string[] = []
+      let collection: DerivedCollectionDefinition | undefined
+      for (const step of branch.steps) {
+        if (step.guard) {
+          const guardContext = occurrences[step.guard.occurrence]
+          if (guardContext === undefined) return []
+          const leaves = step.guard.leaves.map(quoteLiteral).join(', ')
+          guards.push(`${this.#ensureRoot(guardContext, sink)}.${quote('entity')} IN (${leaves})`)
+        }
+        if (step.kind === 'reference') {
+          const sourceAlias = this.#ownerAlias(current, step.field.owner, step.guard !== undefined, sink)
+          const key = step.guard === undefined
+            ? (name === '' ? step.field.name : `${name}.${step.field.name}`)
+            : `${name}.${step.field.name}#${step.field.owner}#${branchIndex}`
+          current = this.#filterTarget(step.field, sourceAlias, key, sink)
+          occurrences.push(current)
+          continue
+        }
+        if (step.kind === 'collection') {
+          collection = step.collection
+          continue
+        }
+        return []
+      }
+      if (collection === undefined) return []
+      return [{
+        applicable: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+        collection,
+        context: current,
+        parentAlias: current.baseAlias,
+      }]
+    })
+  }
+
+  /**
+   * Build one scope from every compatible collection-owner branch.
+   * @param resolved - Resolved collection branches.
+   * @param name - Stable logical collection path.
+   * @param root - Whether this is a root-level collection.
+   * @returns The combined collection scope.
+   */
+  #scopeForCollectionBranches(
+    resolved: readonly ResolvedCollectionBranch[],
+    name: string,
+    root: boolean,
+  ): CollectionScope {
+    const scopes = resolved.map(branch => this.#scopeForCollection(
+      branch,
+      name,
+      branch === resolved[0] && root,
+      branch.applicable,
+    ))
+    if (scopes.length === 1) return scopes[0] as CollectionScope
+    const first = scopes[0]
+    if (first === undefined) throw new Error(`Collection "${name}" has no resolved branch`)
+    return { ...first, branches: scopes }
   }
 
   /**
@@ -929,18 +979,20 @@ class QueryProjection {
    * @param resolved.parentAlias - Alias of the occurrence owning the collection.
    * @param name - Stable logical collection path.
    * @param root - Whether this is a root-level collection.
+   * @param applicable - Condition proving the branch applies to the current row.
    * @returns The collection scope.
    */
   #scopeForCollection(
     resolved: { collection: DerivedCollectionDefinition, parentAlias: string },
     name: string,
     root: boolean,
+    applicable = 'TRUE',
   ): CollectionScope {
     const plan = this.#collectionPlan(resolved.collection, resolved.parentAlias, name)
     this.#consume(plan.work)
     const relationship = plan.relationship
     const relationshipAlias = plan.relationshipAlias
-    const condition = plan.condition
+    const condition = applicable === 'TRUE' ? plan.condition : `${plan.condition} AND (${applicable})`
     if (root) {
       this.#countFields.set(
         `${name}.$total`,
@@ -951,6 +1003,7 @@ class QueryProjection {
       const recordScope = this.#recordScope(plan)
       const endpoints = new Set(plan.relationship?.between.map(endpoint => endpoint.field) ?? [])
       return {
+        applicable,
         array: nested => {
           const field = recordScope.field(nested)
           if (field.type !== FieldType.Array) return undefined
@@ -1040,17 +1093,20 @@ class QueryProjection {
       }
       const segments = path.split('.')
       if (segments.some(segment => segment.length === 0)) throw new Error(`Invalid filter path "${path}"`)
-      const result = this.#resolveFilterPath(context, segments, path, '', 0, sink)
+      const result = this.#resolveFilterPath(context, segments, path, '', sink)
       resolvedFields.set(path, result.field)
       expressions.set(path, result.expression)
       if (result.identity) identities.add(path)
       return result.field
     }
     const scope: CollectionScope = {
+      applicable,
       array: nested => this.#arrayScopeFor(context, nested, sink),
       collection: nested => {
-        const inner = this.#resolveCollectionPath(context, nested, sink)
-        return inner ? this.#scopeForCollection(inner, `${name}.${nested}`, false) : undefined
+        const inner = this.#resolveCollectionBranches(context, nested, sink)
+        return inner && inner.length > 0
+          ? this.#scopeForCollectionBranches(inner, `${name}.${nested}`, false)
+          : undefined
       },
       condition,
       consume: units => this.#consume(units),
@@ -1128,7 +1184,7 @@ class QueryProjection {
     try {
       const segments = name.split('.')
       if (segments.some(segment => segment.length === 0)) return undefined
-      const result = this.#resolveFilterPath(context, segments, name, '', 0, sink)
+      const result = this.#resolveFilterPath(context, segments, name, '', sink)
       if (result.field.type !== FieldType.Array) return undefined
       return {
         consume: units => this.#consume(units),
@@ -1195,7 +1251,7 @@ class QueryProjection {
     if (segments.some(segment => segment.length === 0)) {
       throw new Error(`Invalid filter path "${name}"`)
     }
-    const resolved = this.#resolveFilterPath(this.root, segments, name, '', 0)
+    const resolved = this.#resolveFilterPath(this.root, segments, name, '')
     if (resolved.render) this.#filterRenders.set(name, resolved.render)
     else if (resolved.count) this.#countFields.set(name, resolved.count)
     else this.#filterExpressions.set(name, resolved.expression)
