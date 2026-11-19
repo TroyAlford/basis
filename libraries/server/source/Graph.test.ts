@@ -76,6 +76,16 @@ describe('Graph', () => {
     })).toThrow('reserved for the universal identity root')
   })
 
+  test('rejects incompatible descendant field contracts without policy or query access', () => {
+    expect(() => new Graph({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'String' }], name: 'C' },
+      ],
+    })).toThrow('incompatible field contract "foo" in hierarchy "A"')
+  })
+
   test('constructs typed and JSON authoring equivalently', () => {
     const document = {
       entities: [

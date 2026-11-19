@@ -1699,4 +1699,188 @@ describe('EntityDefinitions', () => {
       enums: { AccessLevel: { viewer: 'View.' } },
     })).toThrow('default "View." is not a value of enum "AccessLevel"')
   })
+
+  test('accepts compatible descendant field contracts', () => {
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'C' },
+      ],
+    })).not.toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+        { extends: 'A', fields: [], name: 'C' },
+      ],
+    })).not.toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'foo', type: 'Number' }], name: 'Left' },
+        { fields: [{ field: 'foo', type: 'String' }], name: 'Right' },
+      ],
+    })).not.toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ default: 1, field: 'foo', type: 'Number' }], name: 'B' },
+        { extends: 'A', fields: [{ default: 2, field: 'foo', type: 'Number' }], name: 'C' },
+      ],
+    })).not.toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ field: 'foo', target: 'User', type: 'Entity' }], name: 'B' },
+        {
+          extends: 'A',
+          fields: [{ field: 'foo', nullable: true, target: 'User', type: 'Entity' }],
+          name: 'C',
+        },
+        { fields: [], name: 'User' },
+      ],
+    })).not.toThrow()
+  })
+
+  test('rejects incompatible scalar, array, reference, and enum contracts', () => {
+    const hierarchy = (bFields: readonly unknown[], cFields: readonly unknown[], extra: readonly unknown[] = []) => ({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: bFields, name: 'B' },
+        { extends: 'A', fields: cFields, name: 'C' },
+        ...extra,
+      ],
+    })
+    expect(() => load(hierarchy(
+      [{ field: 'foo', type: 'Number' }],
+      [{ field: 'foo', type: 'String' }],
+    ))).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load(hierarchy(
+      [{ field: 'foo', target: 'User', type: 'Entity' }],
+      [{ field: 'foo', target: 'Workspace', type: 'Entity' }],
+      [
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Workspace' },
+      ],
+    ))).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load(hierarchy(
+      [{ field: 'foo', nullable: false, target: 'User', type: 'Entity' }],
+      [{ field: 'foo', target: 'User', type: 'Entity' }],
+      [{ fields: [], name: 'User' }],
+    ))).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+        { extends: 'B', fields: [], name: 'D' },
+        { extends: 'A', fields: [{ field: 'foo', type: 'String' }], name: 'C' },
+      ],
+    })).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load(hierarchy(
+      [{ field: 'foo', items: { type: 'Number' }, type: 'Array' }],
+      [{ field: 'foo', items: { type: 'String' }, type: 'Array' }],
+    ))).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load(hierarchy(
+      [{ field: 'foo', nullable: true, type: 'String' }],
+      [{ field: 'foo', type: 'String' }],
+    ))).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load(hierarchy(
+      [{ field: 'foo', items: { format: 'UUID', type: 'ID' }, type: 'Array' }],
+      [{ field: 'foo', items: { format: 'Snowflake', type: 'ID' }, type: 'Array' }],
+    ))).toThrow('incompatible field contract "foo" in hierarchy "A"')
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        { extends: 'A', fields: [{ enum: 'First', field: 'foo', type: 'Enum' }], name: 'B' },
+        { extends: 'A', fields: [{ enum: 'Second', field: 'foo', type: 'Enum' }], name: 'C' },
+      ],
+      enums: {
+        First: { one: 'One.' },
+        Second: { two: 'Two.' },
+      },
+    })).toThrow('incompatible field contract "foo" in hierarchy "A"')
+  })
+
+  test('accepts compatible sibling collections and rejects conflicting result targets', () => {
+    const compatible = {
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        {
+          extends: 'A',
+          fields: [{
+            cardinality: 'Many',
+            field: 'members',
+            inverse: 'b',
+            target: 'User',
+            type: 'Inverse',
+          }],
+          name: 'B',
+        },
+        { extends: 'A', fields: [], name: 'C' },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'b', inverse: 'members', target: 'B', type: 'Entity' },
+          ],
+          name: 'User',
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'c', inverse: 'members', target: 'C' },
+          { field: 'user', inverse: 'users', target: 'User' },
+        ],
+        fields: [],
+        name: 'CMembership',
+      }],
+    }
+    expect(() => load(compatible)).not.toThrow()
+    expect(() => load({
+      ...compatible,
+      entities: [
+        ...compatible.entities,
+        { fields: [], name: 'Workspace' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'c', inverse: 'members', target: 'C' },
+          { field: 'workspace', inverse: 'memberships', target: 'Workspace' },
+        ],
+        fields: [],
+        name: 'CWorkspaceMembership',
+      }],
+    })).toThrow('incompatible field contract "members" in hierarchy "A"')
+  })
+
+  test('rejects incompatible singular inverse contracts', () => {
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
+        {
+          extends: 'A',
+          fields: [{ cardinality: 'One', field: 'owner', inverse: 'b', target: 'User', type: 'Inverse' }],
+          name: 'B',
+        },
+        {
+          extends: 'A',
+          fields: [{
+            cardinality: 'One',
+            field: 'owner',
+            inverse: 'c',
+            target: 'Workspace',
+            type: 'Inverse',
+          }],
+          name: 'C',
+        },
+        {
+          fields: [{ field: 'b', inverse: 'owner', target: 'B', type: 'Entity' }],
+          name: 'User',
+        },
+        {
+          fields: [{ field: 'c', inverse: 'owner', target: 'C', type: 'Entity' }],
+          name: 'Workspace',
+        },
+      ],
+    })).toThrow('incompatible field contract "owner" in hierarchy "A"')
+  })
 })

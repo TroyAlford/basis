@@ -1164,6 +1164,7 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
     collections: navigations.collections.get(entity.name) ?? [],
     singularNavigations: navigations.singular.get(entity.name) ?? [],
   }))
+  validateDescendantContracts(entities)
   const byResolved = new Map<string, EntityDefinition>(entities.map(entity => [entity.name, entity]))
   byResolved.set('Entity', identity)
   return {
@@ -2331,6 +2332,179 @@ function validateAncestry(
       if (columnOwner) {
         throw invalid(`physical column "${column}" is already owned by "${columnOwner}"`)
       }
+    }
+  }
+}
+
+/** One logical field source compared across concrete descendants. */
+type LogicalFieldSource =
+  | DerivedCollectionDefinition
+  | DerivedSingularDefinition
+  | EffectiveFieldDefinition
+  | InverseFieldDefinition
+
+/**
+ * Return one field's logical contract, excluding physical ownership and source details.
+ * @param source - Effective field or derived navigation.
+ * @returns A deterministic contract signature.
+ */
+function logicalFieldContract(source: LogicalFieldSource): string {
+  if ('kind' in source) {
+    if (source.kind === 'inverse-one') return `singular:${source.target}`
+    const resultKind = source.kind === 'explicit' && source.targetEndpoint === undefined
+      ? 'record'
+      : 'entity'
+    return `collection:${resultKind}:${source.target}`
+  }
+  if (source.type === FieldType.Inverse) {
+    return source.cardinality === 'One'
+      ? `singular:${source.target}`
+      : `collection:entity:${source.target}`
+  }
+  if (source.type === FieldType.Entity) {
+    return `reference:${source.target}:${referenceNullability(source)}`
+  }
+  if (source.type === FieldType.Array) {
+    return `array:${source.items.type}:${source.items.format ?? ''}:${scalarNullability(source)}`
+  }
+  if (source.type === FieldType.JSON) return `json:${scalarNullability(source)}`
+  if (source.type === FieldType.Enum) {
+    return `enum:${source.enum}:${scalarNullability(source)}`
+  }
+  return `scalar:${source.type}:${source.format ?? ''}:${scalarNullability(source)}`
+}
+
+/**
+ * Return one entity's effective logical contracts by field name.
+ * @param entity - Concrete entity.
+ * @returns Contract signatures keyed by logical field name.
+ */
+function entityFieldContracts(entity: EntityDefinition): ReadonlyMap<string, string> {
+  const contracts = new Map<string, string>()
+  for (const field of entity.effectiveFields) {
+    contracts.set(field.name, logicalFieldContract(field))
+  }
+  for (const collection of entity.collections) {
+    if (!contracts.has(collection.name)) {
+      contracts.set(collection.name, logicalFieldContract(collection))
+    }
+  }
+  for (const singular of entity.singularNavigations) {
+    if (!contracts.has(singular.name)) {
+      contracts.set(singular.name, logicalFieldContract(singular))
+    }
+  }
+  for (const inverse of entity.inverseFields) {
+    if (!contracts.has(inverse.name)) {
+      contracts.set(inverse.name, logicalFieldContract(inverse))
+    }
+  }
+  return contracts
+}
+
+/**
+ * Normalize scalar field nullability.
+ * @param field - Scalar-like field.
+ * @param field.nullable - Whether the field accepts null.
+ * @returns `nullable` or `required`.
+ */
+function scalarNullability(field: { readonly nullable?: boolean }): string {
+  return field.nullable === true ? 'nullable' : 'required'
+}
+
+/**
+ * Normalize reference nullability; references are optional when unspecified.
+ * @param field - Entity reference field.
+ * @param field.nullable - Whether the reference accepts null.
+ * @returns `nullable` or `required`.
+ */
+function referenceNullability(field: EntityReferenceFieldDefinition): string {
+  return (field.nullable ?? true) ? 'nullable' : 'required'
+}
+
+/**
+ * Return one entity's authored ancestry depth.
+ * @param entity - Entity being measured.
+ * @param byName - Resolved entities by name.
+ * @returns Number of authored ancestors.
+ */
+function entityDepth(
+  entity: EntityDefinition,
+  byName: ReadonlyMap<string, EntityDefinition>,
+): number {
+  let depth = 0
+  let current = entity
+  while (current.parent !== 'Entity') {
+    const parent = byName.get(current.parent)
+    if (!parent) break
+    depth += 1
+    current = parent
+  }
+  return depth
+}
+
+/**
+ * Whether an entity is one ancestor or descends from it.
+ * @param entity - Candidate concrete entity.
+ * @param ancestor - Authored ancestor name.
+ * @param byName - Resolved entities by name.
+ * @returns `true` when the entity belongs to the hierarchy.
+ */
+function isDescendantOrSelf(
+  entity: EntityDefinition,
+  ancestor: string,
+  byName: ReadonlyMap<string, EntityDefinition>,
+): boolean {
+  let current: EntityDefinition | undefined = entity
+  while (current !== undefined && current.name !== 'Entity') {
+    if (current.name === ancestor) return true
+    current = byName.get(current.parent)
+  }
+  return false
+}
+
+/**
+ * Reject incompatible same-named field contracts inside one authored hierarchy.
+ *
+ * The synthetic universal `Entity` root is not an authored hierarchy. Unrelated
+ * top-level entity families may reuse a field name with different contracts.
+ * @param entities - Resolved entities with effective fields and navigations.
+ * @throws {Error} When concrete descendants disagree on one logical contract.
+ */
+function validateDescendantContracts(entities: readonly EntityDefinition[]): void {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const concrete = entities.filter(entity => !entity.abstract)
+  const ancestors = entities
+    .map((entity, index) => ({ depth: entityDepth(entity, byName), entity, index }))
+    .sort((left, right) => right.depth - left.depth || left.index - right.index)
+
+  for (const { entity: ancestor } of ancestors) {
+    const descendants = concrete.filter(entity => (
+      isDescendantOrSelf(entity, ancestor.name, byName)
+    ))
+    if (descendants.length < 2) continue
+
+    const byField = new Map<string, Map<string, string[]>>()
+    for (const descendant of descendants) {
+      for (const [name, contract] of entityFieldContracts(descendant)) {
+        const variants = byField.get(name) ?? new Map<string, string[]>()
+        const owners = variants.get(contract) ?? []
+        owners.push(descendant.name)
+        variants.set(contract, owners)
+        byField.set(name, variants)
+      }
+    }
+
+    for (const name of [...byField.keys()].sort()) {
+      const variants = byField.get(name) as Map<string, string[]>
+      if (variants.size < 2) continue
+      const details = [...variants.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([contract, owners]) => `${owners.join(', ')} declares ${contract}`)
+        .join('; ')
+      throw invalid(
+        `incompatible field contract "${name}" in hierarchy "${ancestor.name}": ${details}`,
+      )
     }
   }
 }
