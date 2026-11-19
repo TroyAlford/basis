@@ -250,6 +250,39 @@ function decodeReturnTo(value: string | null): string | null {
 }
 
 /**
+ * Resolve the public request origin after a reverse proxy.
+ * @param request - The incoming request.
+ * @returns The request URL with forwarded host and protocol, when present.
+ */
+function publicRequestURL(request: Request): URL {
+  const url = new URL(request.url)
+  const host = firstHeader(request, 'x-forwarded-host') ?? request.headers.get('host')
+  const protocol = firstHeader(request, 'x-forwarded-proto')?.toLowerCase()
+  if (host) {
+    try {
+      const publicHost = new URL(`http://${host}`)
+      url.hostname = publicHost.hostname
+      url.port = publicHost.port
+    } catch {
+      // Keep the request URL when a proxy supplies an invalid host.
+    }
+  }
+  if (protocol === 'http' || protocol === 'https') url.protocol = `${protocol}:`
+  return url
+}
+
+/**
+ * Read the first value of a comma-separated request header.
+ * @param request - The incoming request.
+ * @param name - Header name.
+ * @returns The first trimmed value, or null.
+ */
+function firstHeader(request: Request, name: string): string | null {
+  const value = request.headers.get(name)
+  return value?.split(',')[0]?.trim() || null
+}
+
+/**
  * Accept a relative path on the current origin, or an absolute URL on the
  * current origin or an explicitly trusted application domain.
  * @param value - Candidate return target.
@@ -268,7 +301,7 @@ function safeReturnTo(
     if (code <= 0x20 || code === 0x7f) return null
   }
 
-  const base = new URL(request.url)
+  const base = publicRequestURL(request)
   let target: URL
   try {
     target = new URL(value, base)

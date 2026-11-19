@@ -168,6 +168,26 @@ describe('OAuth login', () => {
     }
   })
 
+  test('uses the forwarded public origin for absolute return targets', () => {
+    const capture = captureSetCookie()
+    try {
+      const returnTo = 'https://www.example.com/done'
+      const request = {
+        headers: new Headers({
+          'x-forwarded-host': 'api.example.com',
+          'x-forwarded-proto': 'https',
+        }),
+        url: `http://127.0.0.1:4321/api/oauth/login?returnTo=${encodeURIComponent(returnTo)}`,
+      } as Request
+      flow().login(request)
+
+      const returnCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
+      expect(decodeURIComponent(cookieValue(returnCookie))).toBe(returnTo)
+    } finally {
+      capture.restore()
+    }
+  })
+
   test('does not store an external or protocol-relative return target', () => {
     for (const target of [
       'https://evil.test/steal',
