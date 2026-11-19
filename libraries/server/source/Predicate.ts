@@ -115,13 +115,18 @@ const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
 ])
 
 /**
- * Scalar field types that support membership comparisons.
+ * Whether a field supports the scalar membership operator.
  *
- * Stored as wire names because this module participates in a cycle with
- * `EntityDefinitions`; evaluating `FieldType` during module initialization is
- * not safe.
+ * Evaluated at call time rather than module initialization because this module
+ * participates in a cycle with `EntityDefinitions`.
+ * @param field - Candidate query field.
+ * @returns `true` for String, Enum, and ID fields.
  */
-const IN_FIELD_TYPES = new Set<string>(['Enum', 'ID', 'String'])
+export function isMembershipField(field: QueryFieldDefinition): boolean {
+  return field.type === FieldType.Enum
+    || field.type === FieldType.ID
+    || field.type === FieldType.String
+}
 
 /**
  * Normalize structured and source-level shorthand into canonical predicates.
@@ -613,7 +618,7 @@ function inOperand(field: QueryFieldDefinition, raw: unknown): unknown {
   if (field.name === ACTOR_FIELD_NAME) {
     throw new Error('Query operand for "$me" must compare actor presence with null')
   }
-  if (!IN_FIELD_TYPES.has(field.type)) {
+  if (!isMembershipField(field)) {
     throw new Error(`Query operator "${Operator.Comparison.In}" is not valid for field "${field.name}"`)
   }
   if (!Array.isArray(raw)) {

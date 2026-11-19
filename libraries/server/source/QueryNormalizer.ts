@@ -2,7 +2,7 @@ import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } fr
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ArrayResolver, CollectionResolver, Filter } from './Predicate'
-import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, isMembershipField, Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
@@ -118,6 +118,9 @@ function comparison(
   if (node.operator === Operator.Comparison.Empty) return Predicate.empty(entity, field)
 
   if (node.operator === Operator.Comparison.In) {
+    if (!isMembershipField(field)) {
+      throw new Error(`Query operator "${node.operator}" is not valid for field "${node.field}"`)
+    }
     assertValues(node, 1)
     const list = node.values[0]
     if (list?.kind !== 'array') {

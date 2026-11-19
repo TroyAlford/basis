@@ -147,6 +147,16 @@ describe('Query parity gate', () => {
         structured: { field: 'score', operator: Operator.Comparison.In, value: [1, 2] },
       },
       {
+        message: 'not valid for field',
+        source: "tags $in ['a']",
+        structured: { field: 'tags', operator: Operator.Comparison.In, value: ['a'] },
+      },
+      {
+        message: 'not valid for field',
+        source: "payload $in ['a']",
+        structured: { field: 'payload', operator: Operator.Comparison.In, value: ['a'] },
+      },
+      {
         message: 'must compare actor presence with null',
         source: `$me $in ['${identity}']`,
         structured: {
