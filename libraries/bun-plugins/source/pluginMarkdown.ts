@@ -20,11 +20,10 @@ const MERMAID_FENCE = /^`{3,}\s*mermaid\b/m
 
 /**
  * The import that makes `<Mermaid>` resolve to the component, not a missing
- * reference. This uses the consumer-facing `basis/react` specifier — the same
- * one every Basis consumer imports — which resolves in this repository and in a
- * consuming install alike, so the plugin never guesses at the package name.
+ * reference. Mermaid is an opt-in entrypoint so the main `basis/react` barrel
+ * never pulls `beautiful-mermaid`/`elkjs` into a page that has no diagrams.
  */
-const MERMAID_IMPORT = "import { Mermaid } from 'basis/react'\n\n"
+const MERMAID_IMPORT = "import { Mermaid } from 'basis/react/mermaid'\n\n"
 
 /** Options for the Markdown/MDX loader. */
 export interface MarkdownPluginOptions {

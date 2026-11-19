@@ -97,7 +97,7 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
           <h2>Basic Usage</h2>
           <p>Pass the diagram source as the component’s text:</p>
           {Code.format(`
-        import { Mermaid } from 'basis/react'
+        import { Mermaid } from 'basis/react/mermaid'
 
         <Mermaid>{\`flowchart TD
           A[Start] --> B{Ready?}
@@ -132,7 +132,8 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
             <Mermaid theme="diagram-dusk">{FLOWCHART}</Mermaid>
           </div>
           {Code.format(`
-            import { Mermaid, Theme } from 'basis/react'
+            import { Theme } from 'basis/react'
+            import { Mermaid } from 'basis/react/mermaid'
 
             <Theme
               name="diagram-dusk"

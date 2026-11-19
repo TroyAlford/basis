@@ -2,6 +2,13 @@
   "license": "MIT",
   "name": "basis",
   "private": true,
+  "sideEffects": [
+    "**/*.styles.ts",
+    "**/*.css",
+    "**/*.scss",
+    "**/*.less",
+    "**/*.sass"
+  ],
   "version": "1.0.0",
   "bin": {
     "basis": "./consumer/cli.ts"
@@ -17,6 +24,7 @@
     "./package.json": "./package.json",
     "./react": "./consumer/react.ts",
     "./react/icons": "./consumer/react-icons.ts",
+    "./react/mermaid": "./consumer/react-mermaid.ts",
     "./review": "./consumer/review.ts",
     "./serve": "./consumer/serve.ts",
     "./server": "./consumer/server.ts",
