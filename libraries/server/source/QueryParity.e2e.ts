@@ -170,6 +170,46 @@ const eligibilityEntities = [
     ],
     name: 'Member',
   },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      {
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'owner',
+        target: 'TeamMember',
+        type: 'Inverse',
+      },
+    ],
+    name: 'Owner',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'owner', inverse: 'members', target: 'Owner', type: 'Entity' },
+    ],
+    name: 'TeamMember',
+  },
+  {
+    extends: 'TeamMember',
+    fields: [{
+      cardinality: 'Many',
+      field: 'tickets',
+      inverse: 'admin',
+      target: 'Ticket',
+      type: 'Inverse',
+    }],
+    name: 'AdminTeamMember',
+  },
+  { extends: 'TeamMember', fields: [], name: 'GuestTeamMember' },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'title', type: 'String' },
+      { field: 'admin', inverse: 'tickets', target: 'AdminTeamMember', type: 'Entity' },
+    ],
+    name: 'Ticket',
+  },
 ]
 const eligibilityDefinitions = EntityDefinitions.load(JSON.stringify({ entities: eligibilityEntities }))
 const eligibilityDefinitionsReversed = EntityDefinitions.load(JSON.stringify({
@@ -201,6 +241,13 @@ const eligibilityPrivateDocTwo = '00000000-0000-4000-8000-000000000313'
 const eligibilityWorkspaceOne = '00000000-0000-4000-8000-000000000321'
 const eligibilityWorkspaceTwo = '00000000-0000-4000-8000-000000000322'
 const eligibilityMemberOne = '00000000-0000-4000-8000-000000000331'
+const eligibilityOwnerOne = '00000000-0000-4000-8000-000000000341'
+const eligibilityOwnerTwo = '00000000-0000-4000-8000-000000000342'
+const eligibilityAdminOne = '00000000-0000-4000-8000-000000000351'
+const eligibilityAdminTwo = '00000000-0000-4000-8000-000000000352'
+const eligibilityGuestOne = '00000000-0000-4000-8000-000000000353'
+const eligibilityGuestTwo = '00000000-0000-4000-8000-000000000354'
+const eligibilityTicketOne = '00000000-0000-4000-8000-000000000361'
 
 /** One source/structured parity case. */
 interface ParityCase {
@@ -367,7 +414,14 @@ async function seedEligibility(
       (${eligibilityPrivateDocTwo}, 'Private Document Two', 'PrivateDocument'),
       (${eligibilityWorkspaceOne}, 'Workspace One', 'Workspace'),
       (${eligibilityWorkspaceTwo}, 'Workspace Two', 'Workspace'),
-      (${eligibilityMemberOne}, 'Member One', 'Member')
+      (${eligibilityMemberOne}, 'Member One', 'Member'),
+      (${eligibilityOwnerOne}, 'Owner One', 'Owner'),
+      (${eligibilityOwnerTwo}, 'Owner Two', 'Owner'),
+      (${eligibilityAdminOne}, 'Admin One', 'AdminTeamMember'),
+      (${eligibilityAdminTwo}, 'Admin Two', 'AdminTeamMember'),
+      (${eligibilityGuestOne}, 'Guest One', 'GuestTeamMember'),
+      (${eligibilityGuestTwo}, 'Guest Two', 'GuestTeamMember'),
+      (${eligibilityTicketOne}, 'Urgent', 'Ticket')
   `
   await database.sql`
     INSERT INTO "A" ("id", "label")
@@ -418,6 +472,30 @@ async function seedEligibility(
   await database.sql`
     INSERT INTO "Member" ("id", "workspace.id")
     VALUES (${eligibilityMemberOne}, ${eligibilityWorkspaceOne})
+  `
+  await database.sql`
+    INSERT INTO "Owner" ("id")
+    VALUES (${eligibilityOwnerOne}), (${eligibilityOwnerTwo})
+  `
+  await database.sql`
+    INSERT INTO "TeamMember" ("id", "owner.id")
+    VALUES
+      (${eligibilityAdminOne}, ${eligibilityOwnerOne}),
+      (${eligibilityAdminTwo}, ${eligibilityOwnerOne}),
+      (${eligibilityGuestOne}, ${eligibilityOwnerOne}),
+      (${eligibilityGuestTwo}, ${eligibilityOwnerTwo})
+  `
+  await database.sql`
+    INSERT INTO "AdminTeamMember" ("id")
+    VALUES (${eligibilityAdminOne}), (${eligibilityAdminTwo})
+  `
+  await database.sql`
+    INSERT INTO "GuestTeamMember" ("id")
+    VALUES (${eligibilityGuestOne}), (${eligibilityGuestTwo})
+  `
+  await database.sql`
+    INSERT INTO "Ticket" ("id", "title", "admin.id")
+    VALUES (${eligibilityTicketOne}, 'Urgent', ${eligibilityAdminOne})
   `
   await database.sql`
     INSERT INTO "PrivateDocument" ("id", "secret", "workspace.id")
@@ -1113,10 +1191,71 @@ describe('Query parity gate', () => {
           expected: [eligibilitySection2],
           where: 'document.workspace.members.$total > 0',
         },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: `document.workspace.members[id = '${eligibilityMemberOne}'].$matched >= 1`,
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: `document.workspace.members[id = '${eligibilityMemberOne}'].$matched = 0`,
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: "members $contains (tickets $contains (title = 'Urgent'))",
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: 'members $contains (tickets $empty)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerTwo],
+          where: "NOT(members $contains (tickets $contains (title = 'Urgent')))",
+        },
       ] as const
       for (const queryCase of eligibilityCases) {
         expect(await ids(queryCase.entity, queryCase.where)).toEqual([...queryCase.expected])
       }
+
+      const nestedStructured = await queryEntity<{ id: string }>(
+        database.sql,
+        eligibilityDefinitions,
+        'Owner',
+        {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where: {
+            field: 'members',
+            filters: [{
+              field: 'tickets',
+              filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Urgent' }],
+              operator: Operator.Comparison.Contains,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        },
+      )
+      expect(nestedStructured.map(row => row.id)).toEqual([eligibilityOwnerOne])
+
+      const matchedPath = `document.workspace.members[id = '${eligibilityMemberOne}'].$matched`
+      const matchedStructured = await queryEntity<{ id: string }>(
+        database.sql,
+        eligibilityDefinitions,
+        'Section',
+        {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where: { field: matchedPath, operator: Operator.Comparison.GreaterThanOrEqual, value: 1 },
+        },
+      )
+      expect(matchedStructured.map(row => row.id)).toEqual([eligibilitySection2])
+
       await expect(queryEntity(database.sql, eligibilityDefinitions, 'A', {
         fields: ['id'],
         where: 'missing = 1',
