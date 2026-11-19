@@ -57,6 +57,7 @@ const eligibilityEntities = [
     extends: 'A',
     fields: [
       { field: 'foo', nullable: true, type: 'Number' },
+      { field: 'scores', items: { type: 'Number' }, type: 'Array' },
       { cardinality: 'Many', field: 'items', inverse: 'ownerB', target: 'Item', type: 'Inverse' },
     ],
     name: 'B',
@@ -615,6 +616,20 @@ describe('Query parity gate', () => {
     expect(compile('items.$total = 0').values).toEqual(['B', 'C'])
     expect(compile("items[title = 'match'].$matched >= 1").values)
       .toEqual(['B', 'C', 'match', 'match', 1])
+
+    const scores = compile('scores.$total = 0')
+    expect(scores.values).toEqual(['B'])
+    expect(scores.sql).toContain('cardinality')
+    expect(compile('NOT(scores.$total > 0)').values).toEqual(['B'])
+    expect(compile('scores.$total = 0')).toEqual(compileEntityQuery(
+      eligibilityDefinitions,
+      'A',
+      {
+        fields: ['id'],
+        limit: null,
+        where: { field: 'scores.$total', operator: Operator.Comparison.Equal, value: 0 },
+      },
+    ))
 
     const reversed = compile('foo = 7', eligibilityDefinitionsReversed)
     expect([...reversed.values.slice(0, 2)].sort()).toEqual(['B', 'C'])

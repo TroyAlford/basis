@@ -92,6 +92,7 @@ const eligibilityEntities = [
     extends: 'A',
     fields: [
       { field: 'foo', nullable: true, type: 'Number' },
+      { field: 'scores', items: { type: 'Number' }, type: 'Array' },
       {
         cardinality: 'Many',
         field: 'items',
@@ -143,8 +144,31 @@ const eligibilityEntities = [
   { extends: 'Document', fields: [], name: 'PublicDocument' },
   {
     extends: 'Document',
-    fields: [{ field: 'secret', type: 'String' }],
+    fields: [
+      { field: 'secret', type: 'String' },
+      { field: 'workspace', target: 'Workspace', type: 'Entity' },
+    ],
     name: 'PrivateDocument',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      {
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'workspace',
+        target: 'Member',
+        type: 'Inverse',
+      },
+    ],
+    name: 'Workspace',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+    ],
+    name: 'Member',
   },
 ]
 const eligibilityDefinitions = EntityDefinitions.load(JSON.stringify({ entities: eligibilityEntities }))
@@ -174,6 +198,9 @@ const eligibilitySection3 = '00000000-0000-4000-8000-000000000303'
 const eligibilityPublicDoc = '00000000-0000-4000-8000-000000000311'
 const eligibilityPrivateDoc = '00000000-0000-4000-8000-000000000312'
 const eligibilityPrivateDocTwo = '00000000-0000-4000-8000-000000000313'
+const eligibilityWorkspaceOne = '00000000-0000-4000-8000-000000000321'
+const eligibilityWorkspaceTwo = '00000000-0000-4000-8000-000000000322'
+const eligibilityMemberOne = '00000000-0000-4000-8000-000000000331'
 
 /** One source/structured parity case. */
 interface ParityCase {
@@ -337,7 +364,10 @@ async function seedEligibility(
       (${eligibilitySection3}, 'Section 3', 'Section'),
       (${eligibilityPublicDoc}, 'Public Document', 'PublicDocument'),
       (${eligibilityPrivateDoc}, 'Private Document', 'PrivateDocument'),
-      (${eligibilityPrivateDocTwo}, 'Private Document Two', 'PrivateDocument')
+      (${eligibilityPrivateDocTwo}, 'Private Document Two', 'PrivateDocument'),
+      (${eligibilityWorkspaceOne}, 'Workspace One', 'Workspace'),
+      (${eligibilityWorkspaceTwo}, 'Workspace Two', 'Workspace'),
+      (${eligibilityMemberOne}, 'Member One', 'Member')
   `
   await database.sql`
     INSERT INTO "A" ("id", "label")
@@ -351,8 +381,11 @@ async function seedEligibility(
       (${eligibilityD1}, 'd')
   `
   await database.sql`
-    INSERT INTO "B" ("id", "foo")
-    VALUES (${eligibilityB1}, 7), (${eligibilityB2}, ${null}), (${eligibilityB3}, 8)
+    INSERT INTO "B" ("id", "foo", "scores")
+    VALUES
+      (${eligibilityB1}, 7, ARRAY [1, 2]::DOUBLE PRECISION[]),
+      (${eligibilityB2}, ${null}, ARRAY []::DOUBLE PRECISION[]),
+      (${eligibilityB3}, 8, ARRAY [3]::DOUBLE PRECISION[])
   `
   await database.sql`
     INSERT INTO "C" ("id", "foo")
@@ -379,8 +412,20 @@ async function seedEligibility(
     VALUES (${eligibilityPublicDoc})
   `
   await database.sql`
-    INSERT INTO "PrivateDocument" ("id", "secret")
-    VALUES (${eligibilityPrivateDoc}, 's'), (${eligibilityPrivateDocTwo}, 't')
+    INSERT INTO "Workspace" ("id")
+    VALUES (${eligibilityWorkspaceOne}), (${eligibilityWorkspaceTwo})
+  `
+  await database.sql`
+    INSERT INTO "Member" ("id", "workspace.id")
+    VALUES (${eligibilityMemberOne}, ${eligibilityWorkspaceOne})
+  `
+  await database.sql`
+    INSERT INTO "PrivateDocument" ("id", "secret", "workspace.id")
+    VALUES (${eligibilityPrivateDoc}, 's', ${eligibilityWorkspaceOne})
+  `
+  await database.sql`
+    INSERT INTO "PrivateDocument" ("id", "secret", "workspace.id")
+    VALUES (${eligibilityPrivateDocTwo}, 't', ${eligibilityWorkspaceTwo})
   `
   await database.sql`
     INSERT INTO "Section" ("id", "document.id")
@@ -1014,6 +1059,21 @@ describe('Query parity gate', () => {
           where: "items[title = 'match'].$matched >= 1",
         },
         {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB3],
+          where: 'scores.$total > 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB2],
+          where: 'scores.$total = 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB2],
+          where: 'NOT(scores.$total > 0)',
+        },
+        {
           entity: 'Section',
           expected: [eligibilitySection2],
           where: "document.secret = 's'",
@@ -1027,6 +1087,31 @@ describe('Query parity gate', () => {
           entity: 'Section',
           expected: [eligibilitySection1],
           where: "document.code = 'pub'",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: `document.workspace.members $contains (id = '${eligibilityMemberOne}')`,
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: 'document.workspace.members $empty',
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: `NOT(document.workspace.members $contains (id = '${eligibilityMemberOne}'))`,
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: 'document.workspace.members.$total = 0',
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: 'document.workspace.members.$total > 0',
         },
       ] as const
       for (const queryCase of eligibilityCases) {

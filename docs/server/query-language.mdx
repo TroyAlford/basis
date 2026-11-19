@@ -96,6 +96,43 @@ Grouping inside one `$contains` ties every conjunct to the same member occurrenc
 
 Source errors retain lexer/parser offsets. Current normalizer errors throw the first diagnostic with its source offset; the accepted end-state remains fail-closed for every diagnostic and never executes a partially normalized query.
 
+## Polymorphic descendant eligibility (implemented)
+
+An abstract query may filter or project fields declared only on some concrete descendants. A field predicate is structurally applicable only on concrete types that possess or inherit that field. Absence is never interpreted as `NULL`, empty, zero, or `false`.
+
+Given an authored hierarchy `A -> B(foo), C(foo), D`, `where: 'foo = 7'` lowers to an ordinary guarded predicate:
+
+```ts
+{
+  operator: '$and',
+  filters: [
+    { field: 'entity', operator: '$in', value: ['B', 'C'] },
+    { field: 'foo', operator: '$eq', value: 7 },
+  ],
+}
+```
+
+The same rule applies to every operator:
+
+- `foo = null` matches only B/C rows whose `foo` is actually `NULL`; D is excluded.
+- `NOT(foo = 7)` lowers to `entity $in ['B', 'C'] AND NOT(foo = 7)`. It never negates the guard itself, so D cannot become a match through negation.
+- `OR` preserves each operand's eligibility independently. If one operand uses an inherited field, the OR is applicable everywhere; only the descendant-only branch carries a guard.
+- Field-to-field comparisons require both referenced fields to exist on the row's concrete type.
+- Reference paths resolve each occurrence independently. For `Section.document.workspace.members`, eligibility for `workspace` applies to the referenced `document.entity` occurrence, not to `Section.entity`.
+- Compatible sibling collections retain their own physical relationship definitions. A descriptor on one sibling cannot read rows belonging to another sibling's relationship.
+- Sibling declaration order does not affect results.
+
+Collection and count predicates use the same eligibility:
+
+- `$contains`, `$empty`, and normalized `$all` match only on concrete types that expose the collection.
+- An applicable empty collection differs from an inapplicable collection: `$empty` is true for the former and false for the latter.
+- `collection.$total`, `collection.$matched`, and native-array `array.$total` are non-null Number predicates. They retain the owning collection/array field's concrete eligibility.
+- Filtered `$matched` paths keep their authored filter parameters and binding order.
+
+Generated eligibility guards are ordinary canonical comparisons, not provenance-carrying nodes. An identical `document.entity $in [...]` filter behaves the same whether a caller authored it, a lowerer generated it, or it was copied or deserialized.
+
+Limits and exclusions: predicate traversal supports stored singular `Entity` references, inverse/relationship collections, and the count suffixes above, with the existing maximum of eight singular-reference hops. Derived `inverse-one` singular navigations remain projection-only and are not yet predicate traversal paths. Incompatible same-named sibling field contracts fail during Graph construction, as documented on the [database authoring page](./database.mdx#authored-hierarchy-validation).
+
 ## Implemented scalar operators
 
 The following code block is the current executable contract. Each entry pairs the structured and string spelling of the same canonical filter.

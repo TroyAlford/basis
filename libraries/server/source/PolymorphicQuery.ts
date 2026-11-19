@@ -2,7 +2,7 @@ import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
 import { Constraint, FieldType, identityDefinition } from './EntityDefinitions'
-import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { resolveCollectionPath, resolveFieldPath, resolvePredicatePath } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
 import { arrayItemField, Predicate } from './Predicate'
@@ -543,6 +543,27 @@ class QueryProjection {
       if (directives.filter !== undefined) {
         throw new Error(`Collection filter "${fullName}" requires a collection navigation`)
       }
+      const descendantCount = context.descendants.get(directives.name)
+      if (descendantCount?.type === FieldType.Array) {
+        const branches = descendantCount.variants.map(variant => {
+          const owner = this.#ownerAlias(context, variant.owner, true, scope)
+          this.#consume()
+          const leaves = variant.leaves.map(quoteLiteral).join(', ')
+          return `WHEN ${context.rootAlias}.${quote('entity')} IN (${leaves}) ` +
+            `THEN COALESCE(cardinality(${owner}.${quote(variant.field.name)}), 0)`
+        })
+        const expression = `(CASE ${branches.join(' ')} ELSE 0 END)`
+        return {
+          count: {
+            empty: `${expression} = 0`,
+            exists: `${expression} > 0`,
+            expression,
+          },
+          expression: '',
+          field: { name: fullName, type: FieldType.Number },
+          identity: false,
+        }
+      }
       const countField = context.effective.get(directives.name)
       if (countField?.type === FieldType.Array) {
         const expression = this.#arrayCountExpression(context, countField, scope)
@@ -944,11 +965,76 @@ class QueryProjection {
         return scope
       }
     }
+    const canonical = this.#collectionScopeFromPath(name)
+    if (canonical) {
+      this.#collectionScopes.set(name, canonical)
+      return canonical
+    }
     const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
     if (!resolved) return undefined
     const scope = this.#scopeForCollection(resolved, name, true)
     this.#collectionScopes.set(name, scope)
     return scope
+  }
+
+  /**
+   * Build collection scopes from canonical per-occurrence physical variants.
+   * @param name - Logical collection path.
+   * @returns Variant-aware scope, or undefined when the path is not a collection.
+   */
+  #collectionScopeFromPath(name: string): CollectionScope | undefined {
+    const resolved = resolvePredicatePath(this.root.definition, name, {
+      definitions: this.#entities,
+    })
+    if ('kind' in resolved) return undefined
+    if (!('kind' in resolved.terminal)) return undefined
+    if (resolved.variants.length === 0) return undefined
+    const sink = this.#outerFilterScope()
+    const scopes = resolved.variants.map((variant, index) => {
+      let current = this.root
+      let prefix = ''
+      let terminal: DerivedCollectionDefinition | undefined
+      const occurrences = new Map<string, string>([['', this.root.rootAlias]])
+      for (const field of variant.fields) {
+        if ('kind' in field) {
+          terminal = field
+          break
+        }
+        if (field.type !== FieldType.Entity) return undefined
+        const sourceAlias = this.#ownerAlias(current, field.owner, true, sink)
+        current = this.#filterTarget(
+          field,
+          sourceAlias,
+          `${name}\u0000${index}\u0000${prefix}`,
+          sink,
+        )
+        prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
+        occurrences.set(prefix, current.rootAlias)
+      }
+      if (!terminal) return undefined
+      const scope = this.#scopeForCollection(
+        { collection: terminal, parentAlias: current.baseAlias },
+        `${name}\u0000${index}`,
+        false,
+      )
+      const guards = variant.restrictions.map(restriction => {
+        const prefixName = restriction.path === 'entity'
+          ? ''
+          : restriction.path.slice(0, -'.entity'.length)
+        const alias = occurrences.get(prefixName)
+        return alias === undefined
+          ? undefined
+          : `${alias}.${quote('entity')} IN (` +
+            `${restriction.entityTypes.map(quoteLiteral).join(', ')})`
+      }).filter(guard => guard !== undefined)
+      return {
+        guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+        scope,
+      }
+    }).filter(scope => scope !== undefined)
+    const [first] = scopes
+    if (!first) return undefined
+    return { ...first.scope, variants: scopes }
   }
 
   /**
