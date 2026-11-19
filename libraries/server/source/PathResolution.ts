@@ -1,5 +1,8 @@
-import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, EntityReferenceFieldDefinition, QueryFieldDefinition } from './EntityDefinitions'
+import type { DerivedCollectionDefinition, EffectiveFieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition, EntityReferenceFieldDefinition } from './EntityDefinitions'
+import type { EntityDefinitions, QueryFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
+import { logicalFieldContract } from './EntityDefinitions'
 
 /** Maximum singular-reference hops in one Graph path. */
 export const MAX_GRAPH_PATH_DEPTH = 8
@@ -8,6 +11,12 @@ export const MAX_GRAPH_PATH_DEPTH = 8
 export type PathFailure =
   | { readonly entity: string, readonly kind: 'unknown', readonly path: string }
   | { readonly entity: string, readonly kind: 'non-reference', readonly path: string, readonly segment: string }
+  | {
+    readonly contracts: readonly string[],
+    readonly entity: string,
+    readonly kind: 'ambiguous',
+    readonly path: string,
+  }
   | { readonly kind: 'depth', readonly path: string }
 
 /** Entity lookup used while resolving a path. */
@@ -54,6 +63,42 @@ export interface CollectionMemberResolution {
   readonly field: QueryFieldDefinition,
   /** Whether the member is a named-relationship-owned property. */
   readonly relationshipProperty: boolean,
+}
+
+/** Concrete entity types eligible at one reference occurrence. */
+export interface ConcreteEligibility {
+  /** Concrete entity names that possess or inherit the resolved field. */
+  readonly entityTypes: readonly string[],
+  /** Zero is the query root; each reference hop adds one occurrence. */
+  readonly occurrence: number,
+  /** Logical path to the occurrence's entity discriminator. */
+  readonly path: string,
+}
+
+/** One physical sequence used to bind a resolved predicate path. */
+export interface PhysicalPathVariant {
+  /** Effective fields, references, and terminal collection in traversal order. */
+  readonly fields: readonly (DerivedCollectionDefinition | EffectiveFieldDefinition)[],
+  /** Concrete-type restrictions that select this sequence. */
+  readonly restrictions: readonly ConcreteEligibility[],
+}
+
+/** One canonical predicate path with applicability and physical variants. */
+export interface ResolvedPredicatePath {
+  /** Concrete eligibility restrictions, one per applicable occurrence. */
+  readonly eligibility: readonly ConcreteEligibility[],
+  /** Original logical path. */
+  readonly path: string,
+  /** Terminal value field or collection. */
+  readonly terminal: DerivedCollectionDefinition | QueryFieldDefinition,
+  /** Physical sequences retained for SQL binding. */
+  readonly variants: readonly PhysicalPathVariant[],
+}
+
+/** Entity metadata used to resolve polymorphic predicate paths. */
+export interface PredicatePathOptions {
+  /** Canonical entity definitions, including concrete descendants. */
+  readonly definitions: EntityDefinitions,
 }
 
 /**
@@ -181,6 +226,394 @@ export function resolveCollectionMember(
   const resolved = resolveFieldPath(target, normalized, options)
   if ('kind' in resolved) return resolved
   return { field: resolved.field, relationshipProperty: false }
+}
+
+/** One in-progress predicate-path traversal. */
+interface PredicateTraversalState {
+  /** Current occurrence entity. */
+  readonly current: EntityDefinition,
+  /** Physical sequence accumulated so far. */
+  readonly fields: readonly (DerivedCollectionDefinition | EffectiveFieldDefinition)[],
+  /** Logical path to the current occurrence. */
+  readonly logicalPath: string,
+  /** Current occurrence index. */
+  readonly occurrence: number,
+  /** Singular reference hops traversed so far. */
+  readonly referenceHops: number,
+  /** Concrete eligibility accumulated so far. */
+  readonly restrictions: readonly ConcreteEligibility[],
+  /** Terminal field or collection, set only on completion. */
+  readonly terminal?: DerivedCollectionDefinition | QueryFieldDefinition,
+}
+
+/** Successful result of resolving one path segment. */
+interface PredicateSegmentResolution {
+  /** Traversal states that survive this segment. */
+  readonly states: readonly PredicateTraversalState[],
+}
+
+/**
+ * Resolve one predicate path with concrete eligibility and physical variants.
+ * @param entity - Entity where the path starts.
+ * @param path - Logical field, reference, or collection path.
+ * @param options - Canonical entity definitions.
+ * @returns The resolved path metadata, or a failure.
+ */
+export function resolvePredicatePath(
+  entity: EntityDefinition,
+  path: string,
+  options: PredicatePathOptions,
+): ResolvedPredicatePath | PathFailure {
+  const segments = path.split('.')
+  if (segments.length === 0 || segments.some(segment => segment.length === 0)) {
+    return { entity: entity.name, kind: 'unknown', path }
+  }
+
+  let states: PredicateTraversalState[] = [{
+    current: entity,
+    fields: [],
+    logicalPath: '',
+    occurrence: 0,
+    referenceHops: 0,
+    restrictions: [],
+  }]
+
+  for (const [index, segment] of segments.entries()) {
+    const isLast = index === segments.length - 1
+    const next: PredicateTraversalState[] = []
+    let failure: PathFailure | undefined
+    for (const state of states) {
+      const resolved = resolvePredicateSegment(state, segment, isLast, path, options)
+      if ('kind' in resolved) {
+        failure = failure ?? resolved
+      } else {
+        next.push(...resolved.states)
+      }
+    }
+    if (next.length === 0) {
+      return failure ?? { entity: entity.name, kind: 'unknown', path }
+    }
+    states = next
+  }
+
+  const terminal = states[0]?.terminal
+  if (terminal === undefined) return { entity: entity.name, kind: 'unknown', path }
+  return {
+    eligibility: mergeEligibility(states.flatMap(state => state.restrictions)),
+    path,
+    terminal,
+    variants: buildPhysicalVariants(states),
+  }
+}
+
+/**
+ * Resolve one segment across every surviving traversal state.
+ * @param state - Current traversal state.
+ * @param segment - Current segment.
+ * @param isLast - Whether this is the terminal segment.
+ * @param path - Original full path.
+ * @param options - Canonical entity definitions.
+ * @returns Survivor states or a failure.
+ */
+function resolvePredicateSegment(
+  state: PredicateTraversalState,
+  segment: string,
+  isLast: boolean,
+  path: string,
+  options: PredicatePathOptions,
+): PathFailure | PredicateSegmentResolution {
+  const field = state.current.effectiveFields.find(candidate => candidate.name === segment)
+  const collection = state.current.collections.find(candidate => candidate.name === segment)
+  if (field && collection) {
+    return {
+      contracts: [logicalFieldContract(field), logicalFieldContract(collection)],
+      entity: state.current.name,
+      kind: 'ambiguous',
+      path,
+    }
+  }
+  if (collection) return resolveDeclaredCollection(state, collection, segment, isLast, path)
+  if (field) return resolveDeclaredField(state, field, segment, isLast, path, options)
+  return resolveDescendantSegment(state, segment, isLast, path, options)
+}
+
+/**
+ * Resolve one field declared or inherited at the current occurrence.
+ * @param state - Current traversal state.
+ * @param field - Effective field.
+ * @param segment - Current segment.
+ * @param isLast - Whether this is the terminal segment.
+ * @param path - Original full path.
+ * @param options - Canonical entity definitions.
+ * @returns Survivor states or a failure.
+ */
+function resolveDeclaredField(
+  state: PredicateTraversalState,
+  field: EffectiveFieldDefinition,
+  segment: string,
+  isLast: boolean,
+  path: string,
+  options: PredicatePathOptions,
+): PathFailure | PredicateSegmentResolution {
+  if (field.type === FieldType.Entity) {
+    if (isLast) {
+      return {
+        states: [{
+          ...state,
+          fields: [...state.fields, field],
+          terminal: { name: path, type: FieldType.ID },
+        }],
+      }
+    }
+    if (state.referenceHops >= MAX_GRAPH_PATH_DEPTH) return { kind: 'depth', path }
+    const target = field.target === 'Entity' ? identityDefinition() : options.definitions.entity(field.target)
+    if (!target) return { entity: state.current.name, kind: 'unknown', path }
+    return {
+      states: [{
+        ...state,
+        current: target,
+        fields: [...state.fields, field],
+        logicalPath: joinPath(state.logicalPath, segment),
+        occurrence: state.occurrence + 1,
+        referenceHops: state.referenceHops + 1,
+      }],
+    }
+  }
+  if (!isLast) {
+    return { entity: state.current.name, kind: 'non-reference', path, segment }
+  }
+  return {
+    states: [{
+      ...state,
+      fields: [...state.fields, field],
+      terminal: { ...field, name: path },
+    }],
+  }
+}
+
+/**
+ * Resolve one collection declared or inherited at the current occurrence.
+ * @param state - Current traversal state.
+ * @param collection - Derived collection.
+ * @param segment - Current segment.
+ * @param isLast - Whether this is the terminal segment.
+ * @param path - Original full path.
+ * @returns Survivor states or a failure.
+ */
+function resolveDeclaredCollection(
+  state: PredicateTraversalState,
+  collection: DerivedCollectionDefinition,
+  segment: string,
+  isLast: boolean,
+  path: string,
+): PathFailure | PredicateSegmentResolution {
+  if (!isLast) {
+    return { entity: state.current.name, kind: 'non-reference', path, segment }
+  }
+  return {
+    states: [{
+      ...state,
+      fields: [...state.fields, collection],
+      terminal: collection,
+    }],
+  }
+}
+
+/**
+ * Resolve one descendant-only segment across concrete descendants.
+ * @param state - Current traversal state.
+ * @param segment - Current segment.
+ * @param isLast - Whether this is the terminal segment.
+ * @param path - Original full path.
+ * @param options - Canonical entity definitions.
+ * @returns Survivor states or a failure.
+ */
+function resolveDescendantSegment(
+  state: PredicateTraversalState,
+  segment: string,
+  isLast: boolean,
+  path: string,
+  options: PredicatePathOptions,
+): PathFailure | PredicateSegmentResolution {
+  const candidates: {
+    readonly source: DerivedCollectionDefinition | EffectiveFieldDefinition,
+    readonly type: EntityDefinition,
+  }[] = []
+  for (const type of options.definitions.concreteDescendants(state.current.name)) {
+    const collection = type.collections.find(candidate => candidate.name === segment)
+    if (collection) {
+      candidates.push({ source: collection, type })
+      continue
+    }
+    const field = type.effectiveFields.find(candidate => candidate.name === segment)
+    if (field) candidates.push({ source: field, type })
+  }
+  if (candidates.length === 0) {
+    return { entity: state.current.name, kind: 'unknown', path }
+  }
+  if (state.current.name === 'Entity') {
+    const contracts = [...new Set(candidates.map(candidate => logicalFieldContract(candidate.source)))]
+    if (contracts.length > 1) {
+      return { contracts, entity: 'Entity', kind: 'ambiguous', path }
+    }
+  }
+
+  const states: PredicateTraversalState[] = []
+  let sawNonReference = false
+  for (const candidate of candidates) {
+    const restrictions = [...state.restrictions, {
+      entityTypes: [candidate.type.name],
+      occurrence: state.occurrence,
+      path: occurrencePath(state),
+    }]
+    if ('kind' in candidate.source) {
+      if (isLast) {
+        states.push({
+          ...state,
+          fields: [...state.fields, candidate.source],
+          restrictions,
+          terminal: candidate.source,
+        })
+      } else {
+        sawNonReference = true
+      }
+      continue
+    }
+    const field = candidate.source
+    if (field.type === FieldType.Entity) {
+      if (isLast) {
+        states.push({
+          ...state,
+          fields: [...state.fields, field],
+          restrictions,
+          terminal: { name: path, type: FieldType.ID },
+        })
+        continue
+      }
+      if (state.referenceHops >= MAX_GRAPH_PATH_DEPTH) return { kind: 'depth', path }
+      const target = field.target === 'Entity' ? identityDefinition() : options.definitions.entity(field.target)
+      if (!target) return { entity: candidate.type.name, kind: 'unknown', path }
+      states.push({
+        ...state,
+        current: target,
+        fields: [...state.fields, field],
+        logicalPath: joinPath(state.logicalPath, segment),
+        occurrence: state.occurrence + 1,
+        referenceHops: state.referenceHops + 1,
+        restrictions,
+      })
+      continue
+    }
+    if (!isLast) {
+      sawNonReference = true
+      continue
+    }
+    states.push({
+      ...state,
+      fields: [...state.fields, field],
+      restrictions,
+      terminal: { ...field, name: path },
+    })
+  }
+  if (states.length === 0) {
+    return sawNonReference
+      ? { entity: state.current.name, kind: 'non-reference', path, segment }
+      : { entity: state.current.name, kind: 'unknown', path }
+  }
+  return { states }
+}
+
+/**
+ * Merge eligibility entries by occurrence and path.
+ * @param entries - Eligibility entries to merge.
+ * @returns Deterministic deduplicated eligibility.
+ */
+function mergeEligibility(entries: readonly ConcreteEligibility[]): ConcreteEligibility[] {
+  const merged = new Map<string, { entityTypes: string[], occurrence: number, path: string }>()
+  for (const entry of entries) {
+    const key = `${entry.occurrence}\u0000${entry.path}`
+    const existing = merged.get(key) ?? {
+      entityTypes: [],
+      occurrence: entry.occurrence,
+      path: entry.path,
+    }
+    for (const type of entry.entityTypes) {
+      if (!existing.entityTypes.includes(type)) existing.entityTypes.push(type)
+    }
+    merged.set(key, existing)
+  }
+  return [...merged.values()]
+    .map(entry => ({
+      entityTypes: entry.entityTypes,
+      occurrence: entry.occurrence,
+      path: entry.path,
+    }))
+    .sort((left, right) => left.occurrence - right.occurrence || left.path.localeCompare(right.path))
+}
+
+/**
+ * Group terminal traversal states by physical sequence.
+ * @param states - Completed traversal states.
+ * @returns Physical variants with merged restrictions.
+ */
+function buildPhysicalVariants(states: readonly PredicateTraversalState[]): PhysicalPathVariant[] {
+  const variants = new Map<string, {
+    readonly fields: readonly (DerivedCollectionDefinition | EffectiveFieldDefinition)[],
+    readonly restrictions: ConcreteEligibility[],
+  }>()
+  for (const state of states) {
+    const key = state.fields.map(physicalDefinitionKey).join('\u0000>\u0000')
+    const variant = variants.get(key) ?? { fields: state.fields, restrictions: [] }
+    variant.restrictions.push(...state.restrictions)
+    variants.set(key, variant)
+  }
+  return [...variants.values()].map(variant => ({
+    fields: variant.fields,
+    restrictions: mergeEligibility(variant.restrictions),
+  }))
+}
+
+/**
+ * Return the discriminator path for one traversal occurrence.
+ * @param state - Traversal state.
+ * @returns `entity` for the root, otherwise `<referencePath>.entity`.
+ */
+function occurrencePath(state: PredicateTraversalState): string {
+  return state.occurrence === 0 ? 'entity' : `${state.logicalPath}.entity`
+}
+
+/**
+ * Join one logical path segment.
+ * @param prefix - Existing path prefix.
+ * @param segment - New segment.
+ * @returns The joined path.
+ */
+function joinPath(prefix: string, segment: string): string {
+  return prefix === '' ? segment : `${prefix}.${segment}`
+}
+
+/**
+ * Build a stable physical identity for one traversal definition.
+ * @param source - Effective field or derived collection.
+ * @returns A stable key for grouping variants.
+ */
+function physicalDefinitionKey(source: DerivedCollectionDefinition | EffectiveFieldDefinition): string {
+  if ('kind' in source) {
+    if (source.kind === 'explicit') {
+      return `explicit:${source.owner}:${source.name}:${source.relationship.name}:` +
+        `${source.target}:${source.targetEndpoint?.field ?? ''}:${source.via}`
+    }
+    if (source.kind === 'relationship') {
+      return `relationship:${source.relationship.name}:${source.endpoint}:${source.name}:${source.target}`
+    }
+    return `inverse:${source.association.forwardOwner}:${source.association.forward.name}:` +
+      `${source.name}:${source.target}`
+  }
+  const target = 'target' in source ? source.target : ''
+  const column = 'column' in source ? source.column : ''
+  const items = 'items' in source ? `${source.items.type}:${source.items.format ?? ''}` : ''
+  const format = 'format' in source ? source.format ?? '' : ''
+  return `field:${source.owner}:${source.name}:${source.type}:${target}:${column}:${items}:${format}`
 }
 
 /**
