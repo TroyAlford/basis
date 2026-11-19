@@ -1050,6 +1050,7 @@ class QueryProjection {
    * @param name - Logical collection path.
    * @param sink - Local join sink for reference traversal.
    * @returns Variant-aware scope, or undefined when the path is not a collection.
+   * @throws {Error} When a canonical variant cannot be compiled as a collection.
    */
   #canonicalCollectionScope(
     context: EntityContext,
@@ -1059,64 +1060,18 @@ class QueryProjection {
     const resolved = resolvePredicatePath(context.definition, name, {
       definitions: this.#entities,
     })
-    if ('kind' in resolved) return undefined
-    if (!('kind' in resolved.terminal)) return undefined
-    if (resolved.variants.length === 0) {
-      throw new Error(`Predicate path "${name}" resolved without physical collection variants`)
-    }
-    const scopes = resolved.variants.map((variant, index) => {
-      let current = context
-      let prefix = ''
-      let terminal: DerivedCollectionDefinition | undefined
-      const occurrences = new Map<string, string>([['', context.rootAlias]])
-      for (const field of variant.fields) {
-        if ('kind' in field) {
-          terminal = field
-          break
-        }
-        if (field.type !== FieldType.Entity) {
-          throw new Error(
-            `Predicate path "${name}" contains non-reference field "${field.name}" ` +
-            'before its collection terminal',
-          )
-        }
-        const sourceAlias = this.#ownerAlias(current, field.owner, true, sink)
-        const nextPrefix = prefix === '' ? field.name : `${prefix}.${field.name}`
-        current = this.#filterTarget(
-          field,
-          sourceAlias,
-          this.#filterJoinKey(current, nextPrefix, field, sourceAlias, resolved.variants.length),
-          sink,
-        )
-        prefix = nextPrefix
-        occurrences.set(prefix, current.rootAlias)
-      }
-      if (!terminal) {
+    if ('kind' in resolved || !('kind' in resolved.terminal)) return undefined
+    const scopes = this.#canonicalBranches(context, name, resolved, sink).map((branch, index) => {
+      const terminal = branch.variant.fields.at(-1)
+      if (!terminal || !('kind' in terminal)) {
         throw new Error(`Predicate path "${name}" resolved without a collection terminal`)
       }
-      const scope = this.#scopeForCollection(
-        { collection: terminal, parentAlias: current.baseAlias },
-        `${name}\u0000${index}`,
-      )
-      const guards = variant.restrictions.map(restriction => {
-        const prefixName = restriction.path === 'entity'
-          ? ''
-          : restriction.path.slice(0, -'.entity'.length)
-        const alias = prefixName === ''
-          ? this.#ensureRoot(context, sink)
-          : occurrences.get(prefixName)
-        if (alias === undefined) {
-          throw new Error(
-            `Predicate path "${name}" restriction "${restriction.path}" ` +
-            'has no physical occurrence',
-          )
-        }
-        return `${alias}.${quote('entity')} IN (` +
-          `${restriction.entityTypes.map(quoteLiteral).join(', ')})`
-      })
       return {
-        guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
-        scope,
+        guard: this.#canonicalBranchGuard(context, name, branch, sink),
+        scope: this.#scopeForCollection(
+          { collection: terminal, parentAlias: branch.context.baseAlias },
+          `${name}\u0000${index}`,
+        ),
       }
     })
     const [first] = scopes
@@ -1175,8 +1130,10 @@ class QueryProjection {
     const context: EntityContext = plan.targetAlias === undefined
       ? rootContext(this.#entities, rootAlias)
       : targetContext(this.#entities, plan.target, plan.targetAlias, rootAlias)
+    const counts = new Map<string, CountScope>()
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
+    const renders = new Map<string, (bind: (value: BoundScalar) => string) => string>()
     const resolvedFields = new Map<string, QueryFieldDefinition>()
     const joins: string[] = []
     const sink: FilterJoinScope = {
@@ -1239,6 +1196,8 @@ class QueryProjection {
       const result = this.#resolveFilterPath(context, path, sink)
       resolvedFields.set(path, result.field)
       expressions.set(path, result.expression)
+      if (result.count) counts.set(path, result.count)
+      if (result.render) renders.set(path, result.render)
       if (result.identity) identities.add(path)
       return result.field
     }
@@ -1248,12 +1207,26 @@ class QueryProjection {
       condition,
       consume: units => this.#consume(units),
       definition: plan.target,
-      expression: field => {
+      expression: (field, bind) => {
+        const render = renders.get(field.name)
+        if (render) {
+          if (!bind) throw new Error(`Collection count field "${field.name}" requires a value binder`)
+          return render(bind)
+        }
+        const count = counts.get(field.name)
+        if (count) {
+          if (bind && count.render) return count.render(bind)
+          if (count.expression === '') {
+            throw new Error(`Collection count field "${field.name}" requires a value binder`)
+          }
+          return count.expression
+        }
         const expression = expressions.get(field.name)
         if (!expression) throw new Error(`Unresolved collection field "${field.name}"`)
         return expression
       },
       field: resolve,
+      filterCount: path => counts.get(path),
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
       predicate: plan.predicate,
       get relation() { return [plan.relation, ...joins].join(' ') },

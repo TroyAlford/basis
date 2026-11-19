@@ -192,13 +192,16 @@ const eligibilityEntities = [
   },
   {
     extends: 'TeamMember',
-    fields: [{
-      cardinality: 'Many',
-      field: 'tickets',
-      inverse: 'admin',
-      target: 'Ticket',
-      type: 'Inverse',
-    }],
+    fields: [
+      {
+        cardinality: 'Many',
+        field: 'tickets',
+        inverse: 'admin',
+        target: 'Ticket',
+        type: 'Inverse',
+      },
+      { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+    ],
     name: 'AdminTeamMember',
   },
   { extends: 'TeamMember', fields: [], name: 'GuestTeamMember' },
@@ -486,8 +489,10 @@ async function seedEligibility(
       (${eligibilityGuestTwo}, ${eligibilityOwnerTwo})
   `
   await database.sql`
-    INSERT INTO "AdminTeamMember" ("id")
-    VALUES (${eligibilityAdminOne}), (${eligibilityAdminTwo})
+    INSERT INTO "AdminTeamMember" ("id", "scores")
+    VALUES
+      (${eligibilityAdminOne}, ARRAY [1, 2]::DOUBLE PRECISION[]),
+      (${eligibilityAdminTwo}, ARRAY []::DOUBLE PRECISION[])
   `
   await database.sql`
     INSERT INTO "GuestTeamMember" ("id")
@@ -1210,6 +1215,26 @@ describe('Query parity gate', () => {
           entity: 'Owner',
           expected: [eligibilityOwnerOne],
           where: 'members $contains (tickets $empty)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: 'members $contains (scores.$total > 0)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: 'members $contains (tickets.$total > 0)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: "members $contains (tickets[title = 'Urgent'].$matched > 0)",
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: "members $contains (tickets[title = 'Missing'].$matched = 0)",
         },
         {
           entity: 'Owner',

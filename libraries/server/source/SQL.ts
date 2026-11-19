@@ -64,9 +64,14 @@ export interface CollectionScope {
   /** Related item entity definition. */
   readonly definition: EntityDefinition,
   /** Render one inner field expression. */
-  readonly expression: (field: QueryFieldDefinition) => string,
+  readonly expression: (
+    field: QueryFieldDefinition,
+    bind?: (value: BoundScalar) => string,
+  ) => string,
   /** Resolve one inner field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
+  /** Optional count expression metadata for inner count paths. */
+  readonly filterCount?: (name: string) => CountScope | undefined,
   /** Classify terminal reference identities inside the collection. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
   /** Authored source predicate applied to the collection relation. */
