@@ -372,7 +372,7 @@ const collectionComparisons = [
 
 - `$contains` (`~=`) is existential: at least one related item satisfies the requirement.
 - `$not $contains` is the only "none" form. There is no `$none`, `$any`, `$some`, or `$notContains` operator. `pets !$contains (P)` composes the same negation.
-- `$all` is universal: every related item satisfies its one member predicate, true for zero items. It normalizes to the shared counterexample form `Not(Contains(Not(P)))`; there is no separate universal execution engine.
+- `$all` is universal: every related item satisfies its one member predicate, true for zero items. It preserves the canonical `All` collection operator; eligibility lowering guards the member predicate and SQL compiles `NOT EXISTS` over members that fail that guarded predicate. It is not equivalent to an authored `Not(Contains(Not(P)))`; there is no separate universal execution engine.
 - `$empty` tests zero related items. On a relationship navigation, `$eq null` is invalid; `pets !$empty` means at least one related item, independent of any inner predicate.
 - `pets $contains [(P), (Q)]` means `Contains(P) AND Contains(Q)`. P and Q may be satisfied by different items. `pets $contains (P $and Q)` means one item satisfies both. `pets $contains (P $or Q)` means one item satisfies either. Empty bracketed requirement lists are rejected.
 - A structured `filters` array contains independent requirements. A one-item `filters` array containing an `$and`, `$or`, or `$not` tree applies that whole tree to one member. `$all` accepts exactly one member predicate.
@@ -641,7 +641,7 @@ Explicit exclusions for this contract:
 
 - `QueryLexer` and `QueryParser` own field, scoped `@` member, comparison, logical, grouping, collection-comparison, and first-class Array/JSON literal syntax and source spans.
 
-- `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It lowers `$all` to the shared counterexample canonical form.
+- `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It preserves `$all` as the canonical `All` collection operator for eligibility lowering and SQL compilation.
 
 - `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection/array member validation, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
 

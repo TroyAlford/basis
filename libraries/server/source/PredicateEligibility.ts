@@ -104,12 +104,12 @@ function analyzeLogical(
   filter: LogicalFilter,
   memberScope?: MemberScope,
 ): InternalAnalysis {
+  const children = filter.filters.map(child => (
+    analyzeInternal(definitions, startEntity, child, memberScope)
+  ))
   if (filter.operator === Operator.Logical.Not) {
-    const universal = analyzeUniversal(definitions, startEntity, filter)
-    if (universal !== undefined) return universal
-    const childFilter = filter.filters[0]
-    if (!childFilter) throw new Error('Query logical NOT requires exactly one filter')
-    const child = analyzeInternal(definitions, startEntity, childFilter, memberScope)
+    const child = children[0]
+    if (!child) throw new Error('Query logical NOT requires exactly one filter')
     const match = notFilter(child.match)
     return {
       applicable: child.applicable,
@@ -118,9 +118,6 @@ function analyzeLogical(
     }
   }
 
-  const children = filter.filters.map(child => (
-    analyzeInternal(definitions, startEntity, child, memberScope)
-  ))
   if (filter.operator === Operator.Logical.Or) {
     return {
       applicable: orApplicability(children.map(child => child.applicable)),
@@ -136,72 +133,6 @@ function analyzeLogical(
 }
 
 /**
- * Analyze the canonical universal quantifier pattern `Not(Contains(Not(P)))`.
- *
- * Ordinary negation keeps a member's eligibility guard outside the negation,
- * so an inapplicable member never satisfies `Not(P)`. Universal quantification
- * needs the opposite behavior: the counterexample is the negation of the
- * fully guarded member predicate, so a member that cannot satisfy `P` still
- * counts as a counterexample.
- * @param definitions - Canonical entity definitions.
- * @param startEntity - Entity where the universal is rooted.
- * @param filter - Outer NOT group.
- * @returns The lowered universal, or `undefined` when the pattern does not apply.
- * @throws {Error} When a detected universal cannot be resolved.
- */
-function analyzeUniversal(
-  definitions: EntityDefinitions,
-  startEntity: EntityDefinition,
-  filter: LogicalFilter,
-): InternalAnalysis | undefined {
-  if (filter.filters.length !== 1) return undefined
-  const contains = filter.filters[0]
-  if (!contains || !isCollectionFilter(contains)) return undefined
-  if (contains.operator !== Operator.Comparison.Contains || contains.filters.length !== 1) {
-    return undefined
-  }
-  const inner = contains.filters[0]
-  if (!inner || !isLogicalNot(inner) || inner.filters.length !== 1) return undefined
-  const predicate = inner.filters[0]
-  if (!predicate) return undefined
-
-  const resolved = resolvePredicatePath(startEntity, contains.field, { definitions })
-  if ('kind' in resolved) {
-    throw new Error(`Predicate path "${contains.field}" cannot be resolved: ${resolved.kind}`)
-  }
-  const terminal = resolved.terminal
-  let counterexample: Filter
-  if (!('kind' in terminal)) {
-    if (terminal.type !== FieldType.Array) {
-      throw new Error(`Predicate path "${contains.field}" is not a collection or native array`)
-    }
-    counterexample = notFilter(predicate)
-  } else {
-    const member = definitions.entity(terminal.target)
-    if (member === undefined) {
-      counterexample = notFilter(predicate)
-    } else {
-      const scope: MemberScope = 'relationship' in terminal
-        ? { relationshipPrefix: `${lowerFirst(terminal.relationship.name)}.` }
-        : {}
-      const child = analyzeInternal(definitions, member, predicate, scope)
-      counterexample = notFilter(child.guarded)
-    }
-  }
-  const exists: CollectionFilter = {
-    field: contains.field,
-    filters: [counterexample],
-    operator: Operator.Comparison.Contains,
-  }
-  const applicable = eligibilityFilters(resolved.eligibility)
-  return {
-    applicable,
-    guarded: guard(applicable, notFilter(exists)),
-    match: filter,
-  }
-}
-
-/**
  * Analyze one collection filter and its member requirements.
  * @param definitions - Canonical entity definitions.
  * @param startEntity - Entity where the collection is rooted.
@@ -213,9 +144,6 @@ function analyzeCollection(
   startEntity: EntityDefinition,
   filter: CollectionFilter,
 ): InternalAnalysis {
-  if (filter.operator === Operator.Collection.All) {
-    throw new Error(`Query operator "${filter.operator}" must be normalized before eligibility analysis`)
-  }
   const resolved = resolvePredicatePath(startEntity, filter.field, { definitions })
   if ('kind' in resolved) {
     throw new Error(`Predicate path "${filter.field}" cannot be resolved: ${resolved.kind}`)
@@ -478,24 +406,6 @@ function isLogicalAnd(filter: Filter): filter is LogicalFilter {
  */
 function isLogicalOr(filter: Filter): filter is LogicalFilter {
   return !('field' in filter) && filter.operator === Operator.Logical.Or
-}
-
-/**
- * Whether a filter is a logical NOT group.
- * @param filter - Candidate filter.
- * @returns `true` for a NOT group.
- */
-function isLogicalNot(filter: Filter): filter is LogicalFilter {
-  return !('field' in filter) && filter.operator === Operator.Logical.Not
-}
-
-/**
- * Whether a filter is a collection comparison.
- * @param filter - Candidate filter.
- * @returns `true` for a collection comparison.
- */
-function isCollectionFilter(filter: Filter): filter is CollectionFilter {
-  return 'field' in filter && 'filters' in filter
 }
 
 /**

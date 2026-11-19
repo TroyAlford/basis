@@ -1221,6 +1221,91 @@ describe('Query parity gate', () => {
         expect(await ids(queryCase.entity, queryCase.where)).toEqual([...queryCase.expected])
       }
 
+      const parityCases = [
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1],
+          source: 'foo = 7',
+          structured: { field: 'foo', operator: Operator.Comparison.Equal, value: 7 },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB2, eligibilityB3, eligibilityC2, eligibilityC3],
+          source: 'NOT(foo = 7)',
+          structured: {
+            filters: [{ field: 'foo', operator: Operator.Comparison.Equal, value: 7 }],
+            operator: Operator.Logical.Not,
+          },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          source: 'items $empty',
+          structured: { field: 'items', operator: Operator.Comparison.Empty },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          source: 'items.$total = 0',
+          structured: { field: 'items.$total', operator: Operator.Comparison.Equal, value: 0 },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB3],
+          source: 'scores.$total > 0',
+          structured: {
+            field: 'scores.$total',
+            operator: Operator.Comparison.GreaterThan,
+            value: 0,
+          },
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          source: "document.secret = 's'",
+          structured: { 'document.secret': 's' },
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          source: `document.workspace.members $contains (id = '${eligibilityMemberOne}')`,
+          structured: {
+            field: 'document.workspace.members',
+            filters: [{
+              field: 'id',
+              operator: Operator.Comparison.Equal,
+              value: eligibilityMemberOne,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          source: 'document.workspace.members $empty',
+          structured: {
+            field: 'document.workspace.members',
+            operator: Operator.Comparison.Empty,
+          },
+        },
+      ] as const
+      for (const queryCase of parityCases) {
+        const sourceRows = await ids(queryCase.entity, queryCase.source)
+        const structuredRows = await queryEntity<{ id: string }>(
+          database.sql,
+          eligibilityDefinitions,
+          queryCase.entity,
+          {
+            fields: ['id'],
+            limit: null,
+            orderBy: 'id',
+            where: queryCase.structured,
+          },
+        )
+        expect(structuredRows.map(row => row.id)).toEqual(sourceRows)
+        expect(sourceRows).toEqual([...queryCase.expected])
+      }
+
       const nestedStructured = await queryEntity<{ id: string }>(
         database.sql,
         eligibilityDefinitions,

@@ -2039,17 +2039,44 @@ describe('Server database lifecycle', () => {
       VALUES (${catOne}, 9), (${catTwo}, 9)
     `
 
-    const ids = async (entity: string, where: string): Promise<unknown[]> => (
+    const ids = async (entity: string, where: Filter | string): Promise<unknown[]> => (
       await queryEntity<{ id: string }>(database.sql, entities, entity, {
         fields: ['id'],
         orderBy: 'id',
         where,
       })
     ).map(row => row.id)
+    const goodTrait: Filter = {
+      field: 'trait',
+      operator: Operator.Comparison.Equal,
+      value: 'good',
+    }
+    const negatedTrait: Filter = {
+      filters: [goodTrait],
+      operator: Operator.Logical.Not,
+    }
+    const containsNegatedTrait: Filter = {
+      field: 'pets',
+      filters: [negatedTrait],
+      operator: Operator.Comparison.Contains,
+    }
+    const universalTrait: Filter = {
+      field: 'pets',
+      filters: [goodTrait],
+      operator: Operator.Collection.All,
+    }
 
     expect(await ids('Person', "pets $contains (trait = 'good')")).toEqual([ada, grace])
     expect(await ids('Person', "pets $contains (NOT (trait = 'good'))")).toEqual([])
+    expect(await ids('Person', containsNegatedTrait)).toEqual([])
+    expect(await ids('Person', "NOT(pets $contains (NOT (trait = 'good')))"))
+      .toEqual([ada, grace, linus, dana])
+    expect(await ids('Person', {
+      filters: [containsNegatedTrait],
+      operator: Operator.Logical.Not,
+    })).toEqual([ada, grace, linus, dana])
     expect(await ids('Person', "pets $all (trait = 'good')")).toEqual([grace, linus])
+    expect(await ids('Person', universalTrait)).toEqual([grace, linus])
     expect(await ids('Person', "pets !$contains (trait = 'good')")).toEqual([linus, dana])
     expect(await ids('Person', 'pets $empty')).toEqual([linus])
     expect(await ids('Person', 'pets $contains (lives = 9)')).toEqual([ada, dana])
@@ -2058,6 +2085,15 @@ describe('Server database lifecycle', () => {
     expect(await ids('Person', "pets $contains (mentor.manager.title = 'Ada')")).toEqual([ada])
     expect(await ids('Person', "pets $contains (mentor.title = 'Ada')")).toEqual([grace])
     expect(await ids('Person', "pets $all (mentor.title = 'Grace')")).toEqual([linus])
+    expect(await ids('Person', {
+      field: 'pets',
+      filters: [{
+        field: 'mentor.title',
+        operator: Operator.Comparison.Equal,
+        value: 'Grace',
+      }],
+      operator: Operator.Collection.All,
+    })).toEqual([linus])
 
     const nineHops = Array.from({ length: 8 }, () => 'manager').join('.')
     expect(() => compileEntityQuery(entities, 'Person', {

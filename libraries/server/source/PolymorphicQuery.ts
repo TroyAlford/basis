@@ -2,7 +2,8 @@ import { resolveCollectionRelation } from './CollectionRelation'
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDefinition, RelationshipEndpointDefinition } from './EntityDefinitions'
 import { Constraint, FieldType, identityDefinition, logicalFieldContract } from './EntityDefinitions'
-import { resolveCollectionPath, resolveFieldPath, resolvePredicatePath } from './PathResolution'
+import type { PathFailure, PhysicalPathVariant, ResolvedPredicatePath } from './PathResolution'
+import { resolvePredicatePath } from './PathResolution'
 import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 import type { Filter } from './Predicate'
 import { arrayItemField, Predicate } from './Predicate'
@@ -172,6 +173,16 @@ interface FilterJoinScope {
   join(sql: string): void,
 }
 
+/** One canonical physical path branch with its SQL occurrence aliases. */
+interface CanonicalFilterBranch {
+  /** Occurrence owning the terminal field or collection. */
+  readonly context: EntityContext,
+  /** Physical occurrences keyed by logical reference prefix. */
+  readonly occurrences: ReadonlyMap<string, string>,
+  /** Canonical physical sequence and restrictions. */
+  readonly variant: PhysicalPathVariant,
+}
+
 /** One descendant-only field declaration group. */
 interface DescendantField {
   /** Distinct canonical type/format/reference-target contracts. */
@@ -192,18 +203,6 @@ interface DescendantVariant {
   readonly leaves: readonly string[],
   /** Physical owner table. */
   readonly owner: string,
-}
-
-/** One descendant-reference branch used while composing a filter expression. */
-interface DescendantReferenceBranch {
-  /** Quoted concrete leaf list. */
-  readonly leaves: string,
-  /** Resolved terminal expression and optional renderer. */
-  readonly resolved: {
-    readonly count?: CountScope,
-    readonly expression: string,
-    readonly render?: (bind: (value: BoundScalar) => string) => string,
-  },
 }
 
 /** Effective-field metadata for one entity occurrence. */
@@ -260,24 +259,6 @@ interface CollectionRelationPlan {
   readonly targetEndpoint?: RelationshipEndpointDefinition,
   /** Initial relation work emitted by this plan. */
   readonly work: number,
-}
-
-/** One physical collection definition shared by a set of concrete leaves. */
-interface DerivedCollectionVariant {
-  /** Collection navigation and its physical source. */
-  readonly collection: DerivedCollectionDefinition,
-  /** Concrete entity names selected by this variant. */
-  readonly leaves: readonly string[],
-}
-
-/** One branch of a descendant-only collection count. */
-interface CollectionVariantCountPart {
-  /** Static count expression, when no values need binding. */
-  readonly expression?: string,
-  /** SQL predicate selecting this variant's concrete owner type. */
-  readonly guard: string,
-  /** Value-aware count renderer. */
-  readonly render?: (bind: (value: BoundScalar) => string) => string,
 }
 
 /** One physical member query for a collection projection. */
@@ -473,22 +454,17 @@ class QueryProjection {
   }
 
   /**
-   * Resolve one filter path and its SQL expression.
-   * @param context - Occurrence where traversal starts.
-   * @param segments - Remaining path segments.
-   * @param fullName - Full logical filter path.
-   * @param contextKey - Stable logical prefix used for shared joins.
-   * @param depth - Number of reference hops already traversed.
-   * @param scope - Local SQL join sink for this resolution scope.
-   * @returns The SQL expression, scalar field, and identity classification.
+   * Resolve one predicate path and its SQL expression through canonical metadata.
+   * @param context - Occurrence where the predicate path starts.
+   * @param name - Full logical predicate path.
+   * @param sink - Local SQL join sink for this resolution scope.
+   * @returns The SQL expression, scalar field, identity classification, or count metadata.
+   * @throws {Error} When canonical path resolution fails or a physical variant cannot compile.
    */
   #resolveFilterPath(
     context: EntityContext,
-    segments: readonly string[],
-    fullName: string,
-    contextKey = '',
-    depth = 0,
-    scope: FilterJoinScope = this.#outerFilterScope(),
+    name: string,
+    sink: FilterJoinScope = this.#outerFilterScope(),
   ): {
     count?: CountScope,
     expression: string,
@@ -496,293 +472,361 @@ class QueryProjection {
     identity: boolean,
     render?: (bind: (value: BoundScalar) => string) => string,
   } {
-    const [segment] = segments
-    if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
-    const rest = segments.slice(1)
-    if (rest.length === 1 && (rest[0] === '$total' || rest[0] === '$matched')) {
-      const directives = parseCollectionDirectives(segment)
-      if (directives.limit !== undefined
-        || directives.offset !== undefined
-        || directives.orderBy !== undefined) {
-        throw new Error(
-          `Collection ${rest[0]} does not accept limit, offset, or orderBy directives`,
-        )
-      }
-      const key = fullName.slice(0, -(rest[0].length + 1))
-      const directCollection = context.definition.collections.some(
-        candidate => candidate.name === directives.name,
-      )
-      const variants = directCollection
-        ? undefined
-        : descendantCollectionVariants(this.#entities, context.definition, directives.name)
-      if (variants && variants.length > 0) {
-        const count = this.#variantCollectionCount(
-          context,
-          variants,
-          `${fullName}\u0000${context.baseAlias}`,
-          rest[0] === '$matched' ? directives.filter : undefined,
-        )
-        return {
-          count,
-          expression: '',
-          field: { name: fullName, type: FieldType.Number },
-          identity: false,
-        }
-      }
-      const collection = context.collections.get(directives.name)
-      if (collection) {
-        const plan = this.#collectionPlan(collection, context.baseAlias, key)
-        this.#consume(plan.work)
-        if (rest[0] === '$matched' && directives.filter !== undefined) {
-          return {
-            expression: '',
-            field: { name: fullName, type: FieldType.Number },
-            identity: false,
-            render: this.#collectionMatchedRenderer(plan, directives.filter),
-          }
-        }
-        const count = this.#collectionCountExpression(
-          plan,
-          `${fullName}\u0000${context.baseAlias}`,
-        )
-        return {
-          count,
-          expression: '',
-          field: { name: fullName, type: FieldType.Number },
-          identity: false,
-        }
-      }
-      if (directives.filter !== undefined) {
-        throw new Error(`Collection filter "${fullName}" requires a collection navigation`)
-      }
-      const descendantCount = context.descendants.get(directives.name)
-      if (descendantCount?.type === FieldType.Array) {
-        const branches = descendantCount.variants.map(variant => {
-          const owner = this.#ownerAlias(context, variant.owner, true, scope)
-          this.#consume()
-          const leaves = variant.leaves.map(quoteLiteral).join(', ')
-          return `WHEN ${context.rootAlias}.${quote('entity')} IN (${leaves}) ` +
-            `THEN COALESCE(cardinality(${owner}.${quote(variant.field.name)}), 0)`
-        })
-        const expression = `(CASE ${branches.join(' ')} ELSE 0 END)`
-        return {
-          count: {
-            empty: `${expression} = 0`,
-            exists: `${expression} > 0`,
-            expression,
-          },
-          expression: '',
-          field: { name: fullName, type: FieldType.Number },
-          identity: false,
-        }
-      }
-      const countField = context.effective.get(directives.name)
-      if (countField?.type === FieldType.Array) {
-        const expression = this.#arrayCountExpression(context, countField, scope)
-        const count = {
-          empty: `COALESCE(cardinality(${expression}), 0) = 0`,
-          exists: `COALESCE(cardinality(${expression}), 0) > 0`,
-          expression: `COALESCE(cardinality(${expression}), 0)`,
-        }
-        this.#consume()
-        return {
-          count,
-          expression: '',
-          field: { name: fullName, type: FieldType.Number },
-          identity: false,
-        }
-      }
-      throw new Error(`Query count path "${fullName}" requires a collection or native array field`)
+    const resolved = resolvePredicatePath(context.definition, name, {
+      definitions: this.#entities,
+    })
+    if ('kind' in resolved) throw this.#pathError(context, name, resolved)
+    const terminal = resolved.terminal
+    if (!('kind' in terminal)
+      && terminal.type === FieldType.Number
+      && (name.endsWith('.$total') || name.endsWith('.$matched'))) {
+      return this.#resolveCanonicalCount(context, name, resolved, sink)
     }
-    const field = context.effective.get(segment)
-    if (field) {
-      if (rest.length === 0) {
-        if (field.type === FieldType.Entity) {
-          const target = this.#entities.entity(field.target)
-          const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-          return {
-            expression: `${sourceAlias}.${quote(field.column)}`,
-            field: {
-              ...(target?.idFormat ? { format: target.idFormat } : {}),
-              name: fullName,
-              type: FieldType.ID,
-            },
-            identity: true,
-          }
-        }
-        return {
-          expression: this.#expression(context, field, false, false, scope),
-          field: (fullName.includes('.') ? { ...field, name: fullName } : field) as QueryFieldDefinition,
-          identity: false,
-        }
-      }
-      if (field.type !== FieldType.Entity) {
-        throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
-      }
-      if (rest.length === 1 && rest[0] === 'id') {
-        const target = this.#entities.entity(field.target)
-        const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-        return {
-          expression: `${sourceAlias}.${quote(field.column)}`,
-          field: {
-            ...(target?.idFormat ? { format: target.idFormat } : {}),
-            name: fullName,
-            type: FieldType.ID,
-          },
-          identity: true,
-        }
-      }
-      if (depth >= MAX_REFERENCE_DEPTH) {
-        throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-      }
-      const childKey = contextKey === '' ? segment : `${contextKey}.${segment}`
-      const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-      const targetOccurrence = this.#filterTarget(field, sourceAlias, childKey, scope)
-      return this.#resolveFilterPath(targetOccurrence, rest, fullName, childKey, depth + 1, scope)
+    if ('kind' in terminal) {
+      throw new Error(`Filter path "${name}" is a collection navigation, not a scalar path`)
     }
+    return this.#resolveCanonicalScalar(context, name, resolved, sink)
+  }
 
-    const descendant = context.descendants.get(segment)
-    if (!descendant) throw new Error(`Unknown field "${context.definition.name}.${segment}"`)
-    if (descendant.contracts.size > 1) {
-      throw new Error(`Descendant field "${context.definition.name}.${segment}" has incompatible declarations`)
+  /**
+   * Translate one canonical path failure into the predicate compiler's error contract.
+   * @param context - Occurrence where resolution started.
+   * @param name - Full logical predicate path.
+   * @param failure - Canonical path failure.
+   * @returns The equivalent compiler error.
+   */
+  #pathError(context: EntityContext, name: string, failure: PathFailure): Error {
+    if (failure.kind === 'depth') {
+      return new Error(`Reference path "${name}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
     }
-    if (rest.length === 0) {
-      if (descendant.type === FieldType.Entity) {
-        if (depth >= MAX_REFERENCE_DEPTH) {
-          throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-        }
-        const branches = descendant.variants.map(variant => {
-          const owner = this.#ownerAlias(context, variant.owner, true, scope)
-          const variantKey = `${contextKey}.${segment}#${variant.owner}`
-          const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey, scope)
-          const leaves = variant.leaves.map(quoteLiteral).join(', ')
-          return `WHEN ${this.#ensureRoot(context, scope)}.${quote('entity')} IN (${leaves}) ` +
-            `THEN ${targetOccurrence.rootAlias}.${quote('id')}`
-        })
-        const targetField = descendant.variants[0]?.field
-        const target = targetField?.type === FieldType.Entity ? this.#entities.entity(targetField.target) : undefined
-        return {
-          expression: `CASE ${branches.join(' ')} ELSE NULL END`,
-          field: {
-            ...(target?.idFormat ? { format: target.idFormat } : {}),
-            name: fullName,
-            type: FieldType.ID,
-          },
-          identity: true,
-        }
-      }
-      const variant = descendant.variants[0]
-      if (!variant) throw new Error(`Descendant field "${context.definition.name}.${segment}" has no declaration`)
-      return {
-        expression: this.#descendantExpression(context, descendant, scope),
-        field: { ...variant.field, name: fullName } as QueryFieldDefinition,
-        identity: false,
-      }
+    if (failure.kind === 'non-reference') {
+      return new Error(`Filter path "${name}" traverses non-reference field "${failure.segment}"`)
     }
-    if (descendant.type !== FieldType.Entity) {
-      throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
+    if (failure.kind === 'invalid-count') {
+      return new Error(`Query count path "${name}" requires a collection or native array field`)
     }
-    if (depth >= MAX_REFERENCE_DEPTH) {
-      throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-    }
-    const root = this.#ensureRoot(context, scope)
-    let resolvedField: QueryFieldDefinition | undefined
-    let resolvedIdentity = false
-    const branches = descendant.variants.map(variant => {
-      const owner = this.#ownerAlias(context, variant.owner, true, scope)
-      const variantKey = `${contextKey}.${segment}#${variant.owner}`
-      const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey, scope)
-      const resolved = this.#resolveFilterPath(
-        targetOccurrence,
-        rest,
-        fullName,
-        variantKey,
-        depth + 1,
-        scope,
+    if (failure.kind === 'ambiguous') {
+      return new Error(
+        `Descendant field "${context.definition.name}.${name}" has incompatible declarations`,
       )
-      resolvedIdentity = resolved.identity
-      if (!resolvedField) resolvedField = resolved.field
-      else if (
-        resolvedField.type !== resolved.field.type
-        || ('format' in resolvedField ? resolvedField.format : undefined) !==
-          ('format' in resolved.field ? resolved.field.format : undefined)
-      ) {
-        throw new Error(`Filter path "${fullName}" has incompatible descendant declarations`)
+    }
+    return new Error(`Unknown field "${context.definition.name}.${name}"`)
+  }
+
+  /**
+   * Build SQL occurrences for every canonical physical path variant.
+   * @param context - Occurrence where the predicate path starts.
+   * @param name - Full logical predicate path.
+   * @param resolved - Canonical path resolution.
+   * @param sink - Local SQL join sink for this resolution scope.
+   * @returns One branch per canonical physical variant.
+   * @throws {Error} When a canonical variant cannot be compiled.
+   */
+  #canonicalBranches(
+    context: EntityContext,
+    name: string,
+    resolved: ResolvedPredicatePath,
+    sink: FilterJoinScope,
+  ): readonly CanonicalFilterBranch[] {
+    if (resolved.variants.length === 0) {
+      throw new Error(`Predicate path "${name}" resolved without physical variants`)
+    }
+    return resolved.variants.map(variant => {
+      if (variant.fields.length === 0) {
+        throw new Error(`Predicate path "${name}" resolved without a physical terminal`)
       }
+      let current = context
+      let prefix = ''
+      const occurrences = new Map<string, string>([['', context.rootAlias]])
+      for (let fieldIndex = 0; fieldIndex < variant.fields.length - 1; fieldIndex += 1) {
+        const field = variant.fields[fieldIndex]
+        if (!field || 'kind' in field) {
+          throw new Error(
+            `Predicate path "${name}" contains a collection before its physical terminal`,
+          )
+        }
+        if (field.type !== FieldType.Entity) {
+          throw new Error(
+            `Predicate path "${name}" traverses non-reference field "${field.name}"`,
+          )
+        }
+        const sourceAlias = this.#ownerAlias(current, field.owner, true, sink)
+        const nextPrefix = prefix === '' ? field.name : `${prefix}.${field.name}`
+        current = this.#filterTarget(
+          field,
+          sourceAlias,
+          this.#filterJoinKey(current, nextPrefix, field, sourceAlias, resolved.variants.length),
+          sink,
+        )
+        prefix = nextPrefix
+        occurrences.set(prefix, current.rootAlias)
+      }
+      return { context: current, occurrences, variant }
+    })
+  }
+
+  /**
+   * Build a stable shared-join key for one physical reference occurrence.
+   * @param context - Occurrence owning the reference column.
+   * @param prefix - Logical reference prefix.
+   * @param field - Reference field being traversed.
+   * @param sourceAlias - Alias of the table holding the reference column.
+   * @param variantCount - Number of canonical physical variants for the path.
+   * @returns Stable join-cache key.
+   */
+  #filterJoinKey(
+    context: EntityContext,
+    prefix: string,
+    field: EffectiveFieldDefinition,
+    sourceAlias: string,
+    variantCount: number,
+  ): string {
+    const declared = context.effective.get(field.name)
+    const column = 'column' in field ? field.column : ''
+    if (variantCount === 1
+      && declared?.owner === field.owner
+      && declared !== undefined
+      && 'column' in declared
+      && declared.column === column) {
+      return prefix
+    }
+    return `${prefix}\u0000${field.owner}\u0000${field.name}\u0000${column}\u0000${sourceAlias}`
+  }
+
+  /**
+   * Render the discriminator guard for one canonical physical variant.
+   * @param context - Occurrence where the predicate path starts.
+   * @param name - Full logical predicate path.
+   * @param branch - Canonical physical branch.
+   * @param sink - Local SQL join sink for this resolution scope.
+   * @returns SQL guard, or `TRUE` when the variant is unrestricted.
+   * @throws {Error} When a restriction has no physical occurrence.
+   */
+  #canonicalBranchGuard(
+    context: EntityContext,
+    name: string,
+    branch: CanonicalFilterBranch,
+    sink: FilterJoinScope,
+  ): string {
+    const guards = branch.variant.restrictions.map(restriction => {
+      const prefixName = restriction.path === 'entity'
+        ? ''
+        : restriction.path.slice(0, -'.entity'.length)
+      const alias = prefixName === ''
+        ? this.#ensureRoot(context, sink)
+        : branch.occurrences.get(prefixName)
+      if (alias === undefined) {
+        throw new Error(
+          `Predicate path "${name}" restriction "${restriction.path}" has no physical occurrence`,
+        )
+      }
+      return `${alias}.${quote('entity')} IN (` +
+        `${restriction.entityTypes.map(quoteLiteral).join(', ')})`
+    })
+    return guards.length === 0 ? 'TRUE' : guards.join(' AND ')
+  }
+
+  /**
+   * Render one canonical scalar or reference-identity predicate path.
+   * @param context - Occurrence where the predicate path starts.
+   * @param name - Full logical predicate path.
+   * @param resolved - Canonical path resolution.
+   * @param sink - Local SQL join sink for this resolution scope.
+   * @returns The SQL expression and field metadata.
+   * @throws {Error} When physical variants disagree about identity.
+   */
+  #resolveCanonicalScalar(
+    context: EntityContext,
+    name: string,
+    resolved: ResolvedPredicatePath,
+    sink: FilterJoinScope,
+  ): {
+    expression: string,
+    field: QueryFieldDefinition,
+    identity: boolean,
+  } {
+    const branches = this.#canonicalBranches(context, name, resolved, sink).map(branch => {
+      const terminal = branch.variant.fields.at(-1)
+      if (!terminal || 'kind' in terminal) {
+        throw new Error(`Predicate path "${name}" has no scalar physical terminal`)
+      }
+      const previous = branch.variant.fields.at(-2)
+      const referenceTerminal = terminal.type === FieldType.Entity
+      const identity = referenceTerminal
+        || (terminal.name === 'id'
+          && previous !== undefined
+          && !('kind' in previous)
+          && previous.type === FieldType.Entity)
+      const expression = referenceTerminal
+        ? `${this.#ownerAlias(branch.context, terminal.owner, true, sink)}.${quote(terminal.column)}`
+        : this.#expression(branch.context, terminal, true, false, sink)
       return {
-        leaves: variant.leaves.map(quoteLiteral).join(', '),
-        resolved,
+        expression,
+        guard: this.#canonicalBranchGuard(context, name, branch, sink),
+        identity,
+        previous,
+        terminal,
       }
     })
-    if (!resolvedField) throw new Error(`Filter path "${fullName}" has no descendant declaration`)
-    const hasCount = branches.some(branch => branch.resolved.count !== undefined)
-    const rendered = branches.some(branch => (
-      branch.resolved.render !== undefined
-      || branch.resolved.count?.render !== undefined
-      || branch.resolved.count?.fragment !== undefined
-    ))
-    const render = rendered
-      ? descendantReferenceRenderer(root, branches, hasCount)
-      : undefined
-    const expression = rendered
-      ? ''
-      : descendantReferenceExpression(root, branches, hasCount)
-    if (render !== undefined) {
-      let count: CountScope | undefined
-      if (hasCount) {
-        count = {
-          empty: (bind: (value: BoundScalar) => string) => `COALESCE((${render(bind)}), 0) = 0`,
-          exists: (bind: (value: BoundScalar) => string) => `COALESCE((${render(bind)}), 0) > 0`,
-          expression: '',
-          render,
+    const first = branches[0]
+    if (!first) throw new Error(`Predicate path "${name}" has no compilable physical variant`)
+    if (branches.some(branch => branch.identity !== first.identity)) {
+      throw new Error(`Predicate path "${name}" has incompatible descendant declarations`)
+    }
+    let field = resolved.terminal as QueryFieldDefinition
+    if (first.identity) {
+      const reference = first.terminal.type === FieldType.Entity
+        ? first.terminal
+        : first.previous
+      if (reference !== undefined && !('kind' in reference) && reference.type === FieldType.Entity) {
+        const target = reference.target === 'Entity'
+          ? identityDefinition()
+          : this.#entities.entity(reference.target)
+        if (target?.idFormat !== undefined) {
+          field = { ...field, format: target.idFormat } as unknown as QueryFieldDefinition
         }
       }
-      return {
-        ...(count === undefined ? {} : { count }),
-        expression: '',
-        field: { ...resolvedField, name: fullName },
-        identity: resolvedIdentity,
-        render,
-      }
     }
-    if (hasCount) {
+    if (branches.length === 1 && first.guard === 'TRUE') {
+      return { expression: first.expression, field, identity: first.identity }
+    }
+    const cases = branches.map(branch => (
+      `WHEN ${branch.guard} THEN ${branch.expression}`
+    )).join(' ')
+    return {
+      expression: `CASE ${cases} ELSE NULL END`,
+      field,
+      identity: first.identity,
+    }
+  }
+
+  /**
+   * Resolve one canonical count path into bind-aware count metadata.
+   * @param context - Occurrence where the count path starts.
+   * @param name - Full logical count path.
+   * @param resolved - Canonical path resolution.
+   * @param sink - Local SQL join sink for this resolution scope.
+   * @returns Count forms or a filtered `$matched` renderer.
+   * @throws {Error} When the terminal is not a collection or native array.
+   */
+  #resolveCanonicalCount(
+    context: EntityContext,
+    name: string,
+    resolved: ResolvedPredicatePath,
+    sink: FilterJoinScope,
+  ): {
+    count?: CountScope,
+    expression: string,
+    field: QueryFieldDefinition,
+    identity: boolean,
+    render?: (bind: (value: BoundScalar) => string) => string,
+  } {
+    const segments = splitFieldPath(name)
+    const ownerSegment = segments[segments.length - 2]
+    if (ownerSegment === undefined) throw new Error(`Invalid count path "${name}"`)
+    const directives = parseCollectionDirectives(ownerSegment)
+    if (directives.limit !== undefined
+      || directives.offset !== undefined
+      || directives.orderBy !== undefined) {
+      const suffix = name.endsWith('.$matched') ? '$matched' : '$total'
+      throw new Error(
+        `Collection ${suffix} does not accept limit, offset, or orderBy directives`,
+      )
+    }
+    const filter = name.endsWith('.$matched') ? directives.filter : undefined
+    const branches = this.#canonicalBranches(context, name, resolved, sink)
+    const parts = branches.map((branch, index) => {
+      const terminal = branch.variant.fields.at(-1)
+      if (!terminal) {
+        throw new Error(`Predicate path "${name}" has no count terminal`)
+      }
+      const guard = this.#canonicalBranchGuard(context, name, branch, sink)
+      if ('kind' in terminal) {
+        const key = `${name}\u0000${index}`
+        const plan = this.#collectionPlan(terminal, branch.context.baseAlias, key)
+        this.#consume(plan.work)
+        if (filter !== undefined) {
+          return {
+            count: undefined,
+            guard,
+            render: this.#collectionMatchedRenderer(plan, filter),
+          }
+        }
+        const count = this.#collectionCountExpression(plan, key)
+        const render = count.render ?? (count.fragment === undefined
+          ? undefined
+          : (bind: (value: BoundScalar) => string) => `(${SQL.bindFragment(count.fragment as SqlFragment, bind)})`)
+        return { count, expression: count.expression, guard, render }
+      }
+      if (terminal.type !== FieldType.Array) {
+        throw new Error(`Query count path "${name}" requires a collection or native array field`)
+      }
+      this.#consume()
+      const expression = `COALESCE(cardinality(${this.#expression(branch.context, terminal, true, false, sink)}), 0)`
+      return {
+        count: {
+          empty: `${expression} = 0`,
+          exists: `${expression} > 0`,
+          expression,
+        },
+        expression,
+        guard,
+      }
+    })
+    const field: QueryFieldDefinition = { name, type: FieldType.Number }
+    if (parts.length === 1 && parts[0]?.guard === 'TRUE') {
+      const part = parts[0]
+      if (filter !== undefined && part.render !== undefined) {
+        return { expression: '', field, identity: false, render: part.render }
+      }
+      if (part.count !== undefined) {
+        return { count: part.count, expression: '', field, identity: false }
+      }
+      const expression = part.expression as string
       return {
         count: {
           empty: `COALESCE((${expression}), 0) = 0`,
           exists: `COALESCE((${expression}), 0) > 0`,
           expression,
         },
-        expression,
-        field: { ...resolvedField, name: fullName },
-        identity: resolvedIdentity,
+        expression: '',
+        field,
+        identity: false,
       }
     }
-    return {
-      expression,
-      field: { ...resolvedField, name: fullName },
-      identity: resolvedIdentity,
+    const render = (bind: (value: BoundScalar) => string): string => (
+      `CASE ${parts.map(part => {
+        const value = part.render === undefined ? part.expression as string : part.render(bind)
+        return `WHEN ${part.guard} THEN (${value})`
+      }).join(' ')} ELSE 0 END`
+    )
+    if (filter !== undefined) {
+      return { expression: '', field, identity: false, render }
     }
-  }
-
-  /**
-   * Build the conditional expression for one descendant scalar field.
-   * @param context - Occurrence exposing the descendant.
-   * @param descendant - Descendant field metadata.
-   * @param scope - Local SQL join sink for this resolution scope.
-   * @returns SQL expression selecting the field value by concrete leaf.
-   */
-  #descendantExpression(
-    context: EntityContext,
-    descendant: DescendantField,
-    scope: FilterJoinScope = this.#outerFilterScope(),
-  ): string {
-    const root = this.#ensureRoot(context, scope)
-    const branches = descendant.variants.map(variant => {
-      const owner = this.#ownerAlias(context, variant.owner, true, scope)
-      const leaves = variant.leaves.map(quoteLiteral).join(', ')
-      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${owner}.${quote(variant.field.name)}`
-    })
-    return `CASE ${branches.join(' ')} ELSE NULL END`
+    if (parts.some(part => part.render !== undefined)) {
+      return {
+        count: {
+          empty: bind => `COALESCE((${render(bind)}), 0) = 0`,
+          exists: bind => `COALESCE((${render(bind)}), 0) > 0`,
+          expression: '',
+          render,
+        },
+        expression: '',
+        field,
+        identity: false,
+      }
+    }
+    const expression = render(() => '')
+    return {
+      count: {
+        empty: `COALESCE((${expression}), 0) = 0`,
+        exists: `COALESCE((${expression}), 0) > 0`,
+        expression,
+      },
+      expression: '',
+      field,
+      identity: false,
+    }
   }
 
   /**
@@ -885,7 +929,6 @@ class QueryProjection {
     const scope = this.#scopeForCollection(
       { collection: plan.collection, parentAlias: plan.parentAlias },
       key,
-      false,
     )
     const normalized = QueryNormalizer.normalize(
       plan.target,
@@ -894,7 +937,9 @@ class QueryProjection {
       scope.collection,
       scope.array,
     ) ?? undefined
-    const predicate = SQL.where(this.#entities, plan.target.name, normalized, scope)
+    const predicate = normalized === undefined
+      ? { sql: '', values: [] }
+      : SQL.whereFilter(this.#entities, plan.target.name, normalized, scope)
     const identity = scope.expression(scope.field('id'))
     const filterFragment = predicate.sql === ''
       ? undefined
@@ -981,7 +1026,9 @@ class QueryProjection {
       scope.collection,
       scope.array,
     ) ?? undefined
-    return SQL.where(this.#entities, plan.target.name, normalized, scope)
+    return normalized === undefined
+      ? { sql: '', values: [] }
+      : SQL.whereFilter(this.#entities, plan.target.name, normalized, scope)
   }
 
   /**
@@ -992,33 +1039,9 @@ class QueryProjection {
   collectionScope(name: string): CollectionScope | undefined {
     const cached = this.#collectionScopes.get(name)
     if (cached) return cached
-    const declared = this.root.definition.collections.some(collection => collection.name === name)
-    if (declared) {
-      const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
-      if (!resolved) return undefined
-      const scope = this.#scopeForCollection(resolved, name, true)
-      this.#collectionScopes.set(name, scope)
-      return scope
-    }
-    const canonical = this.#collectionScopeFromPath(name)
-    if (canonical) {
-      this.#collectionScopes.set(name, canonical)
-      return canonical
-    }
-    const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
-    if (!resolved) return undefined
-    const scope = this.#scopeForCollection(resolved, name, true)
-    this.#collectionScopes.set(name, scope)
-    return scope
-  }
-
-  /**
-   * Build root collection scopes from canonical per-occurrence physical variants.
-   * @param name - Logical collection path.
-   * @returns Variant-aware scope, or undefined when the path is not a collection.
-   */
-  #collectionScopeFromPath(name: string): CollectionScope | undefined {
-    return this.#canonicalCollectionScope(this.root, name, this.#outerFilterScope())
+    const canonical = this.#canonicalCollectionScope(this.root, name, this.#outerFilterScope())
+    if (canonical) this.#collectionScopes.set(name, canonical)
+    return canonical
   }
 
   /**
@@ -1058,13 +1081,14 @@ class QueryProjection {
           )
         }
         const sourceAlias = this.#ownerAlias(current, field.owner, true, sink)
+        const nextPrefix = prefix === '' ? field.name : `${prefix}.${field.name}`
         current = this.#filterTarget(
           field,
           sourceAlias,
-          `${name}\u0000${index}\u0000${prefix}`,
+          this.#filterJoinKey(current, nextPrefix, field, sourceAlias, resolved.variants.length),
           sink,
         )
-        prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
+        prefix = nextPrefix
         occurrences.set(prefix, current.rootAlias)
       }
       if (!terminal) {
@@ -1073,13 +1097,14 @@ class QueryProjection {
       const scope = this.#scopeForCollection(
         { collection: terminal, parentAlias: current.baseAlias },
         `${name}\u0000${index}`,
-        false,
       )
       const guards = variant.restrictions.map(restriction => {
         const prefixName = restriction.path === 'entity'
           ? ''
           : restriction.path.slice(0, -'.entity'.length)
-        const alias = occurrences.get(prefixName)
+        const alias = prefixName === ''
+          ? this.#ensureRoot(context, sink)
+          : occurrences.get(prefixName)
         if (alias === undefined) {
           throw new Error(
             `Predicate path "${name}" restriction "${restriction.path}" ` +
@@ -1102,71 +1127,22 @@ class QueryProjection {
   }
 
   /**
-   * Resolve a collection navigation relative to one occurrence, including
-   * composed singular-reference prefixes.
-   * @param context - Occurrence where the path starts.
-   * @param name - Collection navigation or dotted reference path.
-   * @param sink - Local join sink for reference traversal.
-   * @returns The collection and its parent occurrence, or undefined when absent.
-   */
-  #resolveCollectionPath(
-    context: EntityContext,
-    name: string,
-    sink: FilterJoinScope,
-  ): { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string } | undefined {
-    const resolved = resolveCollectionPath(context.definition, name, {
-      resolve: value => this.#entities.entity(value),
-    })
-    if (!resolved) return undefined
-    if ('kind' in resolved) {
-      if (resolved.kind === 'depth') {
-        throw new Error(`Collection path "${name}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-      }
-      return undefined
-    }
-    if (resolved.prefix === '') {
-      return { collection: resolved.collection, context, parentAlias: context.baseAlias }
-    }
-    const prefix = resolveFieldPath(context.definition, resolved.prefix, {
-      resolve: value => this.#entities.entity(value),
-    })
-    if ('kind' in prefix) return undefined
-    let current = context
-    for (const hop of prefix.hops) {
-      const sourceAlias = this.#ownerAlias(current, hop.field.owner, false, sink)
-      current = this.#filterTarget(hop.field, sourceAlias, hop.path, sink)
-    }
-    if (prefix.terminal.type !== FieldType.Entity) return undefined
-    const sourceAlias = this.#ownerAlias(current, prefix.terminal.owner, false, sink)
-    const owner = this.#filterTarget(prefix.terminal, sourceAlias, resolved.prefix, sink)
-    return { collection: resolved.collection, context: owner, parentAlias: owner.baseAlias }
-  }
-
-  /**
    * Build the correlated scope used by one resolved collection.
    * @param resolved - Resolved collection and its owning occurrence.
    * @param resolved.collection - Collection navigation.
    * @param resolved.parentAlias - Alias of the occurrence owning the collection.
    * @param name - Stable logical collection path.
-   * @param root - Whether this is a root-level collection.
    * @returns The collection scope.
    */
   #scopeForCollection(
     resolved: { collection: DerivedCollectionDefinition, parentAlias: string },
     name: string,
-    root: boolean,
   ): CollectionScope {
     const plan = this.#collectionPlan(resolved.collection, resolved.parentAlias, name)
     this.#consume(plan.work)
     const relationship = plan.relationship
     const relationshipAlias = plan.relationshipAlias
     const condition = plan.condition
-    if (root) {
-      this.#countFields.set(
-        `${name}.$total`,
-        this.#collectionCountExpression(plan, `${name}.$total\u0000${resolved.parentAlias}`),
-      )
-    }
     if (plan.resultType === 'record') {
       const recordScope = this.#recordScope(plan)
       const endpoints = new Set(plan.relationship?.between.map(endpoint => endpoint.field) ?? [])
@@ -1260,7 +1236,7 @@ class QueryProjection {
       }
       const segments = path.split('.')
       if (segments.some(segment => segment.length === 0)) throw new Error(`Invalid filter path "${path}"`)
-      const result = this.#resolveFilterPath(context, segments, path, '', 0, sink)
+      const result = this.#resolveFilterPath(context, path, sink)
       resolvedFields.set(path, result.field)
       expressions.set(path, result.expression)
       if (result.identity) identities.add(path)
@@ -1268,12 +1244,7 @@ class QueryProjection {
     }
     const scope: CollectionScope = {
       array: nested => this.#arrayScopeFor(context, nested, sink),
-      collection: nested => {
-        const canonical = this.#canonicalCollectionScope(context, nested, sink)
-        if (canonical) return canonical
-        const inner = this.#resolveCollectionPath(context, nested, sink)
-        return inner ? this.#scopeForCollection(inner, `${name}.${nested}`, false) : undefined
-      },
+      collection: nested => this.#canonicalCollectionScope(context, nested, sink),
       condition,
       consume: units => this.#consume(units),
       definition: plan.target,
@@ -1289,62 +1260,6 @@ class QueryProjection {
       get work() { return plan.work + joins.length },
     }
     return scope
-  }
-
-  /**
-   * Build count SQL metadata across descendant-only collection variants.
-   * @param context - Occurrence owning the collection.
-   * @param variants - Physical collection variants.
-   * @param key - Stable logical count path.
-   * @param filter - Authored filter for `$matched`, when present.
-   * @returns Count expression and canonical existence forms.
-   */
-  #variantCollectionCount(
-    context: EntityContext,
-    variants: readonly DerivedCollectionVariant[],
-    key: string,
-    filter?: string,
-  ): CountScope {
-    const parts: CollectionVariantCountPart[] = variants.map(variant => {
-      const variantKey = `${key}\u0000${variant.leaves.join(',')}`
-      const plan = this.#collectionPlan(
-        variant.collection,
-        context.baseAlias,
-        variantKey,
-      )
-      this.#consume(plan.work)
-      const guard = `${context.rootAlias}.${quote('entity')} IN (` +
-        `${variant.leaves.map(quoteLiteral).join(', ')})`
-      if (filter !== undefined) {
-        return { guard, render: this.#collectionMatchedRenderer(plan, filter) }
-      }
-      const count = this.#collectionCountExpression(plan, variantKey)
-      const fragment = count.fragment
-      const render = count.render ?? (fragment === undefined
-        ? undefined
-        : (bind: (value: BoundScalar) => string) => `(${SQL.bindFragment(fragment, bind)})`)
-      return { expression: count.expression, guard, render }
-    })
-    const render = (bind: (value: BoundScalar) => string): string => (
-      `(CASE ${parts.map(part => {
-        const value = part.render === undefined ? part.expression as string : part.render(bind)
-        return `WHEN ${part.guard} THEN (${value})`
-      }).join(' ')} ELSE 0 END)`
-    )
-    if (parts.some(part => part.render !== undefined)) {
-      return {
-        empty: bind => `COALESCE((${render(bind)}), 0) = 0`,
-        exists: bind => `COALESCE((${render(bind)}), 0) > 0`,
-        expression: '',
-        render,
-      }
-    }
-    const expression = render(() => '')
-    return {
-      empty: `COALESCE((${expression}), 0) = 0`,
-      exists: `COALESCE((${expression}), 0) > 0`,
-      expression,
-    }
   }
 
   /**
@@ -1406,7 +1321,7 @@ class QueryProjection {
     try {
       const segments = name.split('.')
       if (segments.some(segment => segment.length === 0)) return undefined
-      const result = this.#resolveFilterPath(context, segments, name, '', 0, sink)
+      const result = this.#resolveFilterPath(context, name, sink)
       if (result.field.type !== FieldType.Array) return undefined
       return {
         consume: units => this.#consume(units),
@@ -1417,21 +1332,6 @@ class QueryProjection {
     } catch {
       return undefined
     }
-  }
-
-  /**
-   * Build the cardinality expression for one native array count.
-   * @param context - Occurrence owning the array.
-   * @param field - Effective array field.
-   * @param scope - Local SQL join sink.
-   * @returns SQL cardinality expression.
-   */
-  #arrayCountExpression(
-    context: EntityContext,
-    field: EffectiveFieldDefinition,
-    scope: FilterJoinScope,
-  ): string {
-    return this.#expression(context, field, false, false, scope)
   }
 
   /**
@@ -1473,7 +1373,7 @@ class QueryProjection {
     if (segments.some(segment => segment.length === 0)) {
       throw new Error(`Invalid filter path "${name}"`)
     }
-    const resolved = this.#resolveFilterPath(this.root, segments, name, '', 0)
+    const resolved = this.#resolveFilterPath(this.root, name)
     if (resolved.render) this.#filterRenders.set(name, resolved.render)
     else if (resolved.count) this.#countFields.set(name, resolved.count)
     else this.#filterExpressions.set(name, resolved.expression)
@@ -2444,7 +2344,9 @@ export function compilePolymorphicQuery(
   const where = normalized === undefined
     ? undefined
     : PredicateEligibility.lower(entities, synthetic, normalized)
-  const predicate = SQL.where(entities, definition.name, where, scope)
+  const predicate = where === undefined
+    ? { sql: '', values: [] }
+    : SQL.whereFilter(entities, definition.name, where, scope)
   let ordering = ''
   if (options.orderBy !== undefined) {
     ordering = SQL.orderBy(entities, definition.name, options.orderBy, scope).sql
@@ -2584,24 +2486,6 @@ function contextCollections(
  * @param name - Logical collection name.
  * @returns Physical variants with their concrete leaves.
  */
-function descendantCollectionVariants(
-  entities: EntityDefinitions,
-  definition: EntityDefinition,
-  name: string,
-): readonly DerivedCollectionVariant[] | undefined {
-  if (!definition.abstract) return undefined
-  const groups = new Map<DerivedCollectionDefinition, string[]>()
-  for (const leaf of entities.concreteDescendants(definition.name)) {
-    const collection = entities.collections(leaf.name).find(candidate => candidate.name === name)
-    if (!collection) continue
-    const leaves = groups.get(collection) ?? []
-    leaves.push(leaf.name)
-    groups.set(collection, leaves)
-  }
-  if (groups.size === 0) return undefined
-  return [...groups].map(([collection, leaves]) => ({ collection, leaves }))
-}
-
 /**
  * Build the descendant-only field index for one abstract entity.
  * @param entities - Canonical definitions.
@@ -2690,46 +2574,6 @@ function collectDescendantFields(
  * @param hasCount - Whether the CASE result is a count.
  * @returns The bind-aware renderer.
  */
-function descendantReferenceRenderer(
-  root: string,
-  branches: readonly DescendantReferenceBranch[],
-  hasCount: boolean,
-): (bind: (value: BoundScalar) => string) => string {
-  return bind => {
-    const cases = branches.map(branch => {
-      const resolved = branch.resolved
-      const value = resolved.render !== undefined
-        ? resolved.render(bind)
-        : resolved.count?.render !== undefined
-          ? resolved.count.render(bind)
-          : resolved.count?.fragment !== undefined
-            ? `(${SQL.bindFragment(resolved.count.fragment, bind)})`
-            : resolved.count?.expression ?? resolved.expression
-      return `WHEN ${root}.${quote('entity')} IN (${branch.leaves}) THEN (${value})`
-    }).join(' ')
-    return `(CASE ${cases} ELSE ${hasCount ? '0' : 'NULL'} END)`
-  }
-}
-
-/**
- * Render one static descendant-reference CASE expression.
- * @param root - Discriminator root alias.
- * @param branches - Physical descendant branches.
- * @param hasCount - Whether the CASE result is a count.
- * @returns The static SQL expression.
- */
-function descendantReferenceExpression(
-  root: string,
-  branches: readonly DescendantReferenceBranch[],
-  hasCount: boolean,
-): string {
-  const cases = branches.map(branch => (
-    `WHEN ${root}.${quote('entity')} IN (${branch.leaves}) ` +
-    `THEN (${branch.resolved.count?.expression ?? branch.resolved.expression})`
-  )).join(' ')
-  return `(CASE ${cases} ELSE ${hasCount ? '0' : 'NULL'} END)`
-}
-
 /** One parsed collection ordering entry. */
 interface CollectionOrdering {
   /** Sort direction. */

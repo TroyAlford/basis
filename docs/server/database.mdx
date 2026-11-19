@@ -445,7 +445,7 @@ Collection and count predicates follow the same rule:
 
 - Descendant-only collections are applicable only on leaves that expose them. `$empty` distinguishes an applicable empty collection from an inapplicable collection.
 - `$contains` reads only the applicable sibling's physical relationship; sibling collections backed by different relationships cannot read one another's rows.
-- `$all` uses a total counterexample: a member that cannot satisfy the member predicate, including one that does not declare a descendant-only member path, fails the universal. Ordinary negated member predicates remain guarded and do not match an inapplicable member.
+- `$all` uses a total counterexample: a member that cannot satisfy the fully guarded member predicate, including one that does not declare a descendant-only member path, fails the universal. Ordinary negated member predicates remain guarded and do not match an inapplicable member. SQL compiles `$all` as `NOT EXISTS` over failing members through the existing correlated collection machinery.
 - `collection.$total`, `collection.$matched`, and native-array `array.$total` are Number predicates and retain the owning field's eligibility. Filtered `$matched` paths preserve their binds and placeholder order.
 - Sibling declaration order does not change results.
 

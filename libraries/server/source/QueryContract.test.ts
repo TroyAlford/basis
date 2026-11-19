@@ -886,12 +886,14 @@ describe('Query contract', () => {
       fields: ['id'],
       where: "pets $all (title = 'Ada')",
     })
-    const counterexample = compileEntityQuery(relationshipDefinitions, 'User', {
+    const explicitNegation = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets !$contains ($not (title = 'Ada'))",
     })
-    expect(all.sql).toBe(counterexample.sql)
-    expect(all.values).toEqual(counterexample.values)
+    expect(all.sql).toContain('NOT EXISTS (SELECT 1 FROM "Pet"')
+    expect(explicitNegation.sql).toContain('EXISTS (SELECT 1 FROM "Pet"')
+    expect(all.sql).not.toBe(explicitNegation.sql)
+    expect(all.values).toEqual(explicitNegation.values)
 
     expect(compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],

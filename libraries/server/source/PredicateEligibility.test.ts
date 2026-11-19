@@ -84,7 +84,10 @@ function not(filter: Filter): Filter {
  */
 function collection(
   filters: readonly Filter[] = [],
-  operator: Operator.Comparison.Contains | Operator.Comparison.Empty = Operator.Comparison.Contains,
+  operator:
+    | Operator.Collection.All
+    | Operator.Comparison.Contains
+    | Operator.Comparison.Empty = Operator.Comparison.Contains,
 ): Filter {
   return {
     field: 'document.workspace.members',
@@ -369,14 +372,11 @@ describe('PredicateEligibility', () => {
     const scoresGuard = guard('entity', ['B'])
     expect(lowerScalar(scores)).toEqual(and(scoresGuard, scores))
     expect(lowerScalar(Predicate.universal('scores', [member]))).toEqual(
-      and(
-        scoresGuard,
-        not({
-          field: 'scores',
-          filters: [not(member)],
-          operator: Operator.Comparison.Contains,
-        }),
-      ),
+      and(scoresGuard, {
+        field: 'scores',
+        filters: [member],
+        operator: Operator.Collection.All,
+      }),
     )
     const ratings: Filter = {
       field: 'ratings',
@@ -418,11 +418,11 @@ describe('PredicateEligibility', () => {
       collectionDefinitions,
       Predicate.universal('document.workspace.members', [member]),
     )).toEqual(
-      and(documentGuard, not(collection([not(member)]))),
+      and(documentGuard, collection([member], Operator.Collection.All)),
     )
   })
 
-  test('treats inapplicable members as universal counterexamples', () => {
+  test('guards universal member eligibility inside the quantifier', () => {
     const member = eq('role', 'admin')
     const lowered = lowerCollection(
       memberDefinitions,
@@ -431,9 +431,9 @@ describe('PredicateEligibility', () => {
     expect(lowered).toEqual(
       and(
         documentGuard,
-        not(collection([
-          not(and(guard('entity', ['AdminMember']), member)),
-        ])),
+        collection([
+          and(guard('entity', ['AdminMember']), member),
+        ], Operator.Collection.All),
       ),
     )
     expect(lowerCollection(memberDefinitions, lowered)).toEqual(lowered)
