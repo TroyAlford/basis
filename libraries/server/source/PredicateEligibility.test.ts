@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { EntityDefinition, EntityDefinitions } from './EntityDefinitions'
 import { EntityDefinitions as Definitions } from './EntityDefinitions'
 import { Operator } from './Operator'
+import { resolvePredicatePath } from './PathResolution'
 import type { Filter } from './Predicate'
 import { Predicate } from './Predicate'
 import { PredicateEligibility } from './PredicateEligibility'
@@ -94,8 +95,21 @@ function collection(
 
 const scalarDefinitions = load({
   entities: [
-    { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
-    { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'ratings', items: { type: 'Number' }, type: 'Array' },
+      ],
+      name: 'A',
+    },
+    {
+      extends: 'A',
+      fields: [
+        { field: 'foo', type: 'Number' },
+        { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+      ],
+      name: 'B',
+    },
     { extends: 'A', fields: [{ field: 'bar', type: 'Number' }], name: 'C' },
     { extends: 'A', fields: [], name: 'D' },
   ],
@@ -190,6 +204,26 @@ const scalarA = entity(scalarDefinitions, 'A')
 const scalarB = entity(scalarDefinitions, 'B')
 
 /**
+ * Resolve one field path through the canonical resolver.
+ * @param definitions - Canonical definitions.
+ * @param startEntity - Start entity.
+ * @returns A resolver for logical field paths.
+ */
+function fieldResolver(
+  definitions: EntityDefinitions,
+  startEntity: EntityDefinition,
+): (name: string) => ReturnType<typeof Predicate.field> {
+  return name => {
+    const path = resolvePredicatePath(startEntity, name, { definitions })
+    if ('kind' in path) throw new Error(`Path "${name}" failed: ${path.kind}`)
+    if ('kind' in path.terminal) throw new Error(`Path "${name}" is a collection`)
+    return path.terminal
+  }
+}
+
+const resolveB = fieldResolver(scalarDefinitions, scalarB)
+
+/**
  * Lower one filter from the abstract scalar root.
  * @param filter - Normalized filter.
  * @returns Its guarded lowering.
@@ -243,6 +277,25 @@ describe('PredicateEligibility', () => {
     )
   })
 
+  test('treats a universal OR operand as universally applicable', () => {
+    const foo = guard('entity', ['B'])
+    const universal = eq('name', 'Example')
+    expect(PredicateEligibility.analyze(
+      scalarDefinitions,
+      scalarA,
+      or(eq('foo', 7), universal),
+    )).toEqual({
+      applicable: null,
+      match: or(eq('foo', 7), universal),
+    })
+    expect(lowerScalar(or(eq('foo', 7), universal))).toEqual(
+      or(and(foo, eq('foo', 7)), universal),
+    )
+    expect(lowerScalar(not(or(eq('foo', 7), universal)))).toEqual(
+      not(or(and(foo, eq('foo', 7)), universal)),
+    )
+  })
+
   test('composes negation of grouped predicates from applicability', () => {
     expect(lowerScalar(not(or(eq('foo', 7), eq('bar', 9))))).toEqual(
       and(
@@ -271,6 +324,38 @@ describe('PredicateEligibility', () => {
     expect(lowerScalar(filter)).toEqual(
       and(guard('entity', ['B']), guard('entity', ['C']), filter),
     )
+  })
+
+  test('preserves native-array member predicates in their member scope', () => {
+    const member: Filter = { field: '@', operator: Operator.Comparison.GreaterThan, value: 0 }
+    const scores: Filter = {
+      field: 'scores',
+      filters: [member],
+      operator: Operator.Comparison.Contains,
+    }
+    const scoresGuard = guard('entity', ['B'])
+    expect(lowerScalar(scores)).toEqual(and(scoresGuard, scores))
+    expect(lowerScalar(Predicate.universal('scores', [member]))).toEqual(
+      and(
+        scoresGuard,
+        not({
+          field: 'scores',
+          filters: [not(member)],
+          operator: Operator.Comparison.Contains,
+        }),
+      ),
+    )
+    const ratings: Filter = {
+      field: 'ratings',
+      filters: [member],
+      operator: Operator.Comparison.Contains,
+    }
+    expect(lowerScalar(ratings)).toEqual(ratings)
+    expect(() => lowerScalar({
+      field: 'name',
+      filters: [member],
+      operator: Operator.Comparison.Contains,
+    })).toThrow('not a collection or native array')
   })
 
   test('guards descendant collection paths at the referenced occurrence', () => {
@@ -302,6 +387,52 @@ describe('PredicateEligibility', () => {
     )).toEqual(
       and(documentGuard, not(collection([not(member)]))),
     )
+  })
+
+  test('guards count paths with owner eligibility and source/structured parity', () => {
+    const scores = {
+      field: 'scores.$total',
+      operator: Operator.Comparison.GreaterThanOrEqual,
+      value: 2,
+    }
+    const source = QueryNormalizer.normalize(scalarB, 'scores.$total >= 2', resolveB)
+    const structured = Predicate.normalize(scalarB, scores, resolveB)
+    if (!source || !structured) throw new Error('expected normalized filters')
+    expect(lowerScalar(source)).toEqual(lowerScalar(structured))
+    expect(lowerScalar(source)).toEqual(and(guard('entity', ['B']), scores))
+
+    const ratings = {
+      field: 'ratings.$total',
+      operator: Operator.Comparison.GreaterThanOrEqual,
+      value: 1,
+    }
+    expect(lowerScalar(ratings)).toEqual(ratings)
+
+    const sectionEntity = entity(collectionDefinitions, 'Section')
+    const resolveSection = fieldResolver(collectionDefinitions, sectionEntity)
+    const memberCount = {
+      field: 'document.workspace.members.$total',
+      operator: Operator.Comparison.Equal,
+      value: 0,
+    }
+    const sourceCount = QueryNormalizer.normalize(
+      sectionEntity,
+      'document.workspace.members.$total = 0',
+      resolveSection,
+    )
+    const structuredCount = Predicate.normalize(sectionEntity, memberCount, resolveSection)
+    if (!sourceCount || !structuredCount) throw new Error('expected normalized filters')
+    expect(lowerCollection(collectionDefinitions, sourceCount))
+      .toEqual(lowerCollection(collectionDefinitions, structuredCount))
+    expect(lowerCollection(collectionDefinitions, sourceCount))
+      .toEqual(and(documentGuard, memberCount))
+
+    const matched = {
+      field: 'document.workspace.members.$matched',
+      operator: Operator.Comparison.Equal,
+      value: 0,
+    }
+    expect(lowerCollection(collectionDefinitions, matched)).toEqual(and(documentGuard, matched))
   })
 
   test('reports applicability and original matching structure separately', () => {
@@ -336,15 +467,30 @@ describe('PredicateEligibility', () => {
   })
 
   test('produces equivalent lowered trees for string and structured inputs', () => {
-    const source = QueryNormalizer.normalize(scalarB, 'foo = 7')
+    const source = QueryNormalizer.normalize(scalarB, 'foo = 7', resolveB)
     const structured = Predicate.normalize(scalarB, {
       field: 'foo',
       operator: Operator.Comparison.Equal,
       value: 7,
-    })
+    }, resolveB)
     if (!source || !structured) throw new Error('expected normalized filters')
     expect(lowerScalar(source)).toEqual(lowerScalar(structured))
     expect(lowerScalar(source)).toEqual(and(guard('entity', ['B']), eq('foo', 7)))
+
+    const sourceOr = QueryNormalizer.normalize(
+      scalarB,
+      "foo = 7 $or name = 'Example'",
+      resolveB,
+    )
+    const structuredOr = Predicate.normalize(scalarB, {
+      filters: [
+        { field: 'foo', operator: Operator.Comparison.Equal, value: 7 },
+        { field: 'name', operator: Operator.Comparison.Equal, value: 'Example' },
+      ],
+      operator: Operator.Logical.Or,
+    }, resolveB)
+    if (!sourceOr || !structuredOr) throw new Error('expected normalized filters')
+    expect(lowerScalar(sourceOr)).toEqual(lowerScalar(structuredOr))
   })
 
   test('is idempotent on already-lowered filters', () => {

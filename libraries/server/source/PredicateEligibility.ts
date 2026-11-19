@@ -1,4 +1,5 @@
 import type { EntityDefinition, EntityDefinitions } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ConcreteEligibility } from './PathResolution'
 import { resolvePredicatePath } from './PathResolution'
@@ -111,7 +112,7 @@ function analyzeLogical(
 
   if (filter.operator === Operator.Logical.Or) {
     return {
-      applicable: orFilters(children.map(child => child.applicable)),
+      applicable: orApplicability(children.map(child => child.applicable)),
       guarded: orFilters(children.map(child => child.guarded)) ?? filter,
       match: orFilters(children.map(child => child.match)) ?? filter,
     }
@@ -144,7 +145,15 @@ function analyzeCollection(
   }
   const terminal = resolved.terminal
   if (!('kind' in terminal)) {
-    throw new Error(`Predicate path "${filter.field}" is not a collection`)
+    if (terminal.type !== FieldType.Array) {
+      throw new Error(`Predicate path "${filter.field}" is not a collection or native array`)
+    }
+    const applicable = eligibilityFilters(resolved.eligibility)
+    return {
+      applicable,
+      guarded: guard(applicable, filter),
+      match: filter,
+    }
   }
   const member = definitions.entity(terminal.target)
   const children = filter.filters.map(child => (
@@ -261,6 +270,15 @@ function andFilters(filters: readonly (Filter | null)[]): Filter | null {
   if (deduped.length === 0) return null
   if (deduped.length === 1) return deduped[0] as Filter
   return { filters: deduped, operator: Operator.Logical.And }
+}
+
+/**
+ * Compose applicability through OR, where TRUE absorbs the disjunction.
+ * @param filters - Child applicability guards, with null meaning TRUE.
+ * @returns TRUE when any operand is universally applicable, otherwise the guard disjunction.
+ */
+function orApplicability(filters: readonly (Filter | null)[]): Filter | null {
+  return filters.some(filter => filter === null) ? null : orFilters(filters)
 }
 
 /**

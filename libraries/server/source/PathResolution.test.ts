@@ -36,8 +36,21 @@ function resolved(result: ReturnType<typeof resolve>) {
 
 const scalarDefinitions = load({
   entities: [
-    { fields: [{ field: 'id', format: 'UUID' }], name: 'A' },
-    { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'B' },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'ratings', items: { type: 'Number' }, type: 'Array' },
+      ],
+      name: 'A',
+    },
+    {
+      extends: 'A',
+      fields: [
+        { field: 'foo', type: 'Number' },
+        { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+      ],
+      name: 'B',
+    },
     { extends: 'A', fields: [{ field: 'foo', type: 'Number' }], name: 'C' },
     { extends: 'A', fields: [], name: 'D' },
   ],
@@ -317,6 +330,108 @@ describe('PathResolution.resolvePredicatePath', () => {
       path: 'foo',
       terminal: { name: 'foo', type: 'Number' },
       variants: [{ fields: [{ name: 'foo', owner: 'Left' }] }],
+    })
+  })
+
+  test('resolves native-array and collection count paths with owner eligibility', () => {
+    expect(resolved(resolve(scalarDefinitions, 'A', 'ratings.$total'))).toMatchObject({
+      eligibility: [],
+      path: 'ratings.$total',
+      terminal: { name: 'ratings.$total', type: 'Number' },
+      variants: [{ fields: [{ name: 'ratings', owner: 'A' }] }],
+    })
+    expect(resolved(resolve(scalarDefinitions, 'A', 'scores.$total'))).toMatchObject({
+      eligibility: [{ entityTypes: ['B'], occurrence: 0, path: 'entity' }],
+      path: 'scores.$total',
+      terminal: { name: 'scores.$total', type: 'Number' },
+      variants: [{ fields: [{ name: 'scores', owner: 'B' }] }],
+    })
+    expect(resolve(scalarDefinitions, 'A', 'scores.$matched')).toMatchObject({
+      entity: 'A',
+      kind: 'invalid-count',
+      path: 'scores.$matched',
+      segment: '$matched',
+    })
+    expect(resolve(scalarDefinitions, 'A', 'name.$total')).toMatchObject({
+      entity: 'A',
+      kind: 'invalid-count',
+      path: 'name.$total',
+      segment: '$total',
+    })
+    expect(resolve(scalarDefinitions, 'A', 'scores.$bogus')).toMatchObject({
+      entity: 'A',
+      kind: 'non-reference',
+      path: 'scores.$bogus',
+      segment: 'scores',
+    })
+
+    const definitions = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'document', target: 'Document', type: 'Entity' },
+          ],
+          name: 'Section',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Document' },
+        { extends: 'Document', fields: [], name: 'PublicDocument' },
+        {
+          extends: 'Document',
+          fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+          name: 'PrivateDocument',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'members',
+              inverse: 'workspace',
+              target: 'Member',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Workspace',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+          ],
+          name: 'Member',
+        },
+      ],
+    })
+    expect(resolved(resolve(definitions, 'Section', 'document.workspace.members.$total')))
+      .toMatchObject({
+        eligibility: [{ entityTypes: ['PrivateDocument'], occurrence: 1, path: 'document.entity' }],
+        path: 'document.workspace.members.$total',
+        terminal: { name: 'document.workspace.members.$total', type: 'Number' },
+        variants: [{
+          fields: [{ name: 'document' }, { name: 'workspace' }, { name: 'members' }],
+          restrictions: [{
+            entityTypes: ['PrivateDocument'],
+            occurrence: 1,
+            path: 'document.entity',
+          }],
+        }],
+      })
+    expect(resolved(resolve(definitions, 'Section', 'document.workspace.members.$matched')))
+      .toMatchObject({
+        eligibility: [{ entityTypes: ['PrivateDocument'], occurrence: 1, path: 'document.entity' }],
+        terminal: { name: 'document.workspace.members.$matched', type: 'Number' },
+      })
+    expect(resolved(resolve(
+      definitions,
+      'Section',
+      'document.workspace.members[role = "admin"].$matched',
+    ))).toMatchObject({
+      eligibility: [{ entityTypes: ['PrivateDocument'], occurrence: 1, path: 'document.entity' }],
+      terminal: {
+        name: 'document.workspace.members[role = "admin"].$matched',
+        type: 'Number',
+      },
     })
   })
 

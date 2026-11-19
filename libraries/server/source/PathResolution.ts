@@ -3,6 +3,7 @@ import type { EntityDefinition, EntityReferenceFieldDefinition } from './EntityD
 import type { EntityDefinitions, QueryFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import { logicalFieldContract } from './EntityDefinitions'
+import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
 
 /** Maximum singular-reference hops in one Graph path. */
 export const MAX_GRAPH_PATH_DEPTH = 8
@@ -17,6 +18,7 @@ export type PathFailure =
     readonly kind: 'ambiguous',
     readonly path: string,
   }
+  | { readonly entity: string, readonly kind: 'invalid-count', readonly path: string, readonly segment: string }
   | { readonly kind: 'depth', readonly path: string }
 
 /** Entity lookup used while resolving a path. */
@@ -264,9 +266,18 @@ export function resolvePredicatePath(
   path: string,
   options: PredicatePathOptions,
 ): ResolvedPredicatePath | PathFailure {
-  const segments = path.split('.')
+  let segments: readonly string[]
+  try {
+    segments = splitFieldPath(path)
+  } catch {
+    return { entity: entity.name, kind: 'unknown', path }
+  }
   if (segments.length === 0 || segments.some(segment => segment.length === 0)) {
     return { entity: entity.name, kind: 'unknown', path }
+  }
+  const suffix = segments[segments.length - 1]
+  if (suffix === '$total' || suffix === '$matched') {
+    return resolveCountPath(entity, path, segments, suffix, options)
   }
 
   let states: PredicateTraversalState[] = [{
@@ -303,6 +314,52 @@ export function resolvePredicatePath(
     path,
     terminal,
     variants: buildPhysicalVariants(states),
+  }
+}
+
+/**
+ * Resolve one supported collection or native-array count suffix.
+ * @param entity - Entity where the path starts.
+ * @param path - Original full path.
+ * @param segments - Parsed path segments.
+ * @param suffix - Count suffix.
+ * @param options - Canonical entity definitions.
+ * @returns The numeric count path or a failure.
+ */
+function resolveCountPath(
+  entity: EntityDefinition,
+  path: string,
+  segments: readonly string[],
+  suffix: '$matched' | '$total',
+  options: PredicatePathOptions,
+): PathFailure | ResolvedPredicatePath {
+  if (segments.length < 2) {
+    return { entity: entity.name, kind: 'invalid-count', path, segment: suffix }
+  }
+  const owners = [...segments.slice(0, -1)]
+  const lastOwner = owners[owners.length - 1] as string
+  let ownerName: string
+  try {
+    ownerName = parseCollectionDirectives(lastOwner).name
+  } catch {
+    return { entity: entity.name, kind: 'unknown', path }
+  }
+  owners[owners.length - 1] = ownerName
+  const base = resolvePredicatePath(entity, owners.join('.'), options)
+  if ('kind' in base) return base
+  const terminal = base.terminal
+  const collection = 'kind' in terminal
+  if (!collection && terminal.type !== FieldType.Array) {
+    return { entity: entity.name, kind: 'invalid-count', path, segment: suffix }
+  }
+  if (suffix === '$matched' && !collection) {
+    return { entity: entity.name, kind: 'invalid-count', path, segment: suffix }
+  }
+  return {
+    eligibility: base.eligibility,
+    path,
+    terminal: { name: path, type: FieldType.Number },
+    variants: base.variants,
   }
 }
 
