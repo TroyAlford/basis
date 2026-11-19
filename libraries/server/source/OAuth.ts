@@ -70,6 +70,12 @@ export interface OAuthOptions {
   session: Identity,
   /** State cookie lifetime in seconds. Defaults to 600. */
   stateMaxAgeSeconds?: number,
+  /**
+   * Trust `X-Forwarded-Host` and `X-Forwarded-Proto` from an ingress that
+   * overwrites them. Defaults to false; forwarded headers never expand the
+   * destination allowlist on their own.
+   */
+  trustForwardedOrigin?: boolean,
 }
 
 /**
@@ -99,18 +105,23 @@ export class OAuth {
       crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2, '0'),
     ).join('')
-    const returnTo = request
-      ? safeReturnTo(new URL(request.url).searchParams.get('returnTo'), request, this.#options.returnToDomains)
-      : null
+    const returnTarget = request ? new URL(request.url).searchParams.get('returnTo') : null
+    let returnTo: string | null = null
+    if (returnTarget !== null && request) {
+      returnTo = safeReturnTo(
+        returnTarget,
+        request,
+        this.#options.returnToDomains,
+        this.#options.trustForwardedOrigin ?? false,
+      )
+    }
     const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials(), request) })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, this.#cookieOptions()))
-    if (returnTo !== null) {
-      headers.append('Set-Cookie', serializeCookie(
-        RETURN_TO_COOKIE,
-        encodeURIComponent(returnTo),
-        this.#cookieOptions(),
-      ))
-    }
+    headers.append('Set-Cookie', serializeCookie(
+      RETURN_TO_COOKIE,
+      returnTo === null ? '' : encodeURIComponent(returnTo),
+      this.#cookieOptions(returnTo === null ? 0 : this.#stateMaxAge()),
+    ))
     return new Response(null, { headers, status: 302 })
   }
 
@@ -156,6 +167,7 @@ export class OAuth {
       decodeReturnTo(readCookie(request.headers.get('cookie'), RETURN_TO_COOKIE)),
       request,
       this.#options.returnToDomains,
+      this.#options.trustForwardedOrigin ?? false,
     ) ?? this.#options.returnTo ?? '/'
     const headers = new Headers({ Location: returnTo })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, '', this.#cookieOptions(0)))
@@ -174,6 +186,7 @@ export class OAuth {
       new URL(request.url).searchParams.get('returnTo'),
       request,
       this.#options.returnToDomains,
+      this.#options.trustForwardedOrigin ?? false,
     ) ?? this.#options.returnTo ?? '/'
     const headers = new Headers({ Location: returnTo })
     this.#options.session.set(request, headers, null)
@@ -252,10 +265,13 @@ function decodeReturnTo(value: string | null): string | null {
 /**
  * Resolve the public request origin after a reverse proxy.
  * @param request - The incoming request.
- * @returns The request URL with forwarded host and protocol, when present.
+ * @param trustForwardedOrigin - Whether the ingress is trusted to overwrite forwarding headers.
+ * @returns The request URL with forwarded host and protocol, when trusted.
  */
-function publicRequestURL(request: Request): URL {
+function publicRequestURL(request: Request, trustForwardedOrigin: boolean): URL {
   const url = new URL(request.url)
+  if (!trustForwardedOrigin) return url
+
   const host = firstHeader(request, 'x-forwarded-host') ?? request.headers.get('host')
   const protocol = firstHeader(request, 'x-forwarded-proto')?.toLowerCase()
   if (host) {
@@ -288,12 +304,14 @@ function firstHeader(request: Request, name: string): string | null {
  * @param value - Candidate return target.
  * @param request - The login, callback, or logout request.
  * @param domains - Explicit trusted domains, including their subdomains.
+ * @param trustForwardedOrigin - Whether forwarding headers define the public protocol and port.
  * @returns A safe path or absolute URL, or `null` when the candidate is unsafe.
  */
 function safeReturnTo(
   value: string | null,
   request: Request,
   domains: readonly string[] = [],
+  trustForwardedOrigin = false,
 ): string | null {
   if (value === null || value === '' || value.includes('\\')) return null
   for (let index = 0; index < value.length; index++) {
@@ -301,23 +319,24 @@ function safeReturnTo(
     if (code <= 0x20 || code === 0x7f) return null
   }
 
-  const base = publicRequestURL(request)
+  const internal = new URL(request.url)
+  const publicOrigin = publicRequestURL(request, trustForwardedOrigin)
   let target: URL
   try {
-    target = new URL(value, base)
+    target = new URL(value, publicOrigin)
   } catch {
     return null
   }
 
   if (target.username !== '' || target.password !== '') return null
   if (value.startsWith('/')) {
-    return target.origin === base.origin
+    return target.origin === publicOrigin.origin
       ? `${target.pathname}${target.search}${target.hash}`
       : null
   }
 
-  if (target.origin === base.origin) return target.href
-  if (target.protocol !== base.protocol || target.port !== base.port) return null
+  if (target.origin === internal.origin) return target.href
+  if (target.protocol !== publicOrigin.protocol || target.port !== publicOrigin.port) return null
   return isTrustedReturnHost(target.hostname, domains) ? target.href : null
 }
 

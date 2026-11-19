@@ -52,6 +52,43 @@ function cookieValue(header: string): string {
 }
 
 /**
+ * Apply captured `Set-Cookie` headers to a tiny browser cookie jar.
+ * @param jar - Cookie name to name/value pair map.
+ * @param headers - Captured `Set-Cookie` values.
+ */
+function applyCookies(jar: Map<string, string>, headers: readonly string[]): void {
+  for (const header of headers) {
+    const pair = header.split(';')[0] ?? ''
+    const separator = pair.indexOf('=')
+    if (separator === -1) continue
+    const name = pair.slice(0, separator)
+    if (/;\s*Max-Age=0(?:;|$)/i.test(header)) jar.delete(name)
+    else jar.set(name, pair)
+  }
+}
+
+/**
+ * Render a cookie jar as a request `Cookie` header.
+ * @param jar - Cookie name to name/value pair map.
+ * @returns The header value.
+ */
+function cookieHeader(jar: ReadonlyMap<string, string>): string {
+  return [...jar.values()].join('; ')
+}
+
+/**
+ * Whether captured cookies contain a usable return target.
+ * @param cookies - Captured `Set-Cookie` values.
+ * @returns True when a non-clearing return cookie is present.
+ */
+function hasReturnTarget(cookies: readonly string[]): boolean {
+  return cookies.some(cookie => (
+    cookie.startsWith('basis_oauth_return_to=')
+    && !cookie.startsWith('basis_oauth_return_to=;')
+  ))
+}
+
+/**
  * A flow with scripted provider seams.
  * @param overrides - Provider or policy overrides.
  * @returns The flow.
@@ -120,6 +157,38 @@ describe('OAuth login', () => {
     }
   })
 
+  test('clears an earlier return target when a later login omits one', async () => {
+    const jar = new Map<string, string>()
+    const subject = flow()
+
+    const first = captureSetCookie()
+    try {
+      subject.login(requestFor(
+        `${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent('/old')}`,
+      ))
+      applyCookies(jar, first.cookies)
+    } finally {
+      first.restore()
+    }
+    expect(jar.has('basis_oauth_return_to')).toBe(true)
+
+    const second = captureSetCookie()
+    try {
+      subject.login(requestFor(`${ORIGIN}/api/oauth/login`))
+      applyCookies(jar, second.cookies)
+    } finally {
+      second.restore()
+    }
+    expect(jar.has('basis_oauth_return_to')).toBe(false)
+
+    const stateCookie = jar.get('basis_oauth_state') ?? ''
+    const callback = await subject.callback(requestFor(
+      `${ORIGIN}/api/oauth/callback?code=abc&state=${cookieValue(stateCookie)}`,
+      cookieHeader(jar),
+    ))
+    expect(callback.headers.get('location')).toBe('/')
+  })
+
   test('hands the resolved client credentials to the provider seams', () => {
     let seen: IdentityCredentials | null = null
     const subject = flow({
@@ -179,10 +248,30 @@ describe('OAuth login', () => {
         }),
         url: `http://127.0.0.1:4321/api/oauth/login?returnTo=${encodeURIComponent(returnTo)}`,
       } as Request
-      flow().login(request)
+      flow({ trustForwardedOrigin: true }).login(request)
 
       const returnCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_return_to=')) ?? ''
       expect(decodeURIComponent(cookieValue(returnCookie))).toBe(returnTo)
+    } finally {
+      capture.restore()
+    }
+  })
+
+  test('does not let spoofed forwarded headers expand the destination allowlist', () => {
+    const capture = captureSetCookie()
+    try {
+      const target = 'https://attacker.example/landing'
+      const request = {
+        headers: new Headers({
+          'x-forwarded-host': 'attacker.example',
+          'x-forwarded-proto': 'https',
+        }),
+        url: `http://127.0.0.1:4321/api/oauth/login?returnTo=${encodeURIComponent(target)}`,
+      } as Request
+      flow({ returnToDomains: [], trustForwardedOrigin: true }).login(request)
+
+      expect(hasReturnTarget(capture.cookies)).toBe(false)
+      expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to=;'))).toBe(true)
     } finally {
       capture.restore()
     }
@@ -197,7 +286,7 @@ describe('OAuth login', () => {
       const capture = captureSetCookie()
       try {
         flow().login(requestFor(`${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(target)}`))
-        expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+        expect(hasReturnTarget(capture.cookies)).toBe(false)
       } finally {
         capture.restore()
       }
@@ -212,7 +301,7 @@ describe('OAuth login', () => {
       flow({ returnToDomains: [] }).login(
         requestFor(`${requestUrl}?returnTo=${encodeURIComponent(candidate)}`),
       )
-      expect(untrusted.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+      expect(hasReturnTarget(untrusted.cookies)).toBe(false)
     } finally {
       untrusted.restore()
     }
@@ -237,7 +326,7 @@ describe('OAuth login', () => {
           encodeURIComponent('https://attacker.github.io/steal')
         }`,
       ))
-      expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+      expect(hasReturnTarget(capture.cookies)).toBe(false)
     } finally {
       capture.restore()
     }
@@ -251,7 +340,7 @@ describe('OAuth login', () => {
       const capture = captureSetCookie()
       try {
         flow().login(requestFor(`${ORIGIN}/api/oauth/login?returnTo=${encodeURIComponent(target)}`))
-        expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_return_to='))).toBe(false)
+        expect(hasReturnTarget(capture.cookies)).toBe(false)
       } finally {
         capture.restore()
       }
