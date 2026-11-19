@@ -2,21 +2,44 @@ import { compile } from '@mdx-js/mdx'
 import type { BunPlugin, PluginBuilder } from 'bun'
 import * as path from 'node:path'
 import remarkGfm from 'remark-gfm'
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import { splitFrontMatter } from '../../utilities'
 import { resolveDocsHref } from '../../utilities/functions/docsLink'
 
 /** The minimal Markdown/MDX node shape these transforms read and produce. */
 interface MarkdownNode {
   children?: MarkdownNode[],
-  lang?: string,
+  lang?: string | null,
   name?: string,
   type: string,
   url?: string,
   value?: string,
 }
 
-/** Whether the document contains a Mermaid fence. */
-const MERMAID_FENCE = /^`{3,}\s*mermaid\b/m
+/**
+ * Whether a parsed Markdown tree contains a Mermaid code fence.
+ *
+ * The parser normalizes backtick and tilde fences to the same `code` node, so
+ * the import decision and the fence transformation share one source of truth.
+ * @param node - The node to inspect.
+ * @returns Whether the node or any descendant is a Mermaid fence.
+ */
+function containsMermaidFence(node: MarkdownNode): boolean {
+  if (node.type === 'code' && node.lang === 'mermaid') return true
+  return node.children?.some(containsMermaidFence) ?? false
+}
+
+/**
+ * Whether a Markdown/MDX source contains a Mermaid fence.
+ * @param source - The document source.
+ * @returns Whether the document needs the docs Mermaid import.
+ */
+function hasMermaidFence(source: string): boolean {
+  const tree = unified().use(remarkParse).use(remarkMdx).parse(source)
+  return containsMermaidFence(tree as unknown as MarkdownNode)
+}
 
 /**
  * The import that makes a `mermaid` fence resolve to the docs Mermaid component.
@@ -111,7 +134,7 @@ export function pluginMarkdown(options: MarkdownPluginOptions = {}): BunPlugin {
     setup(build: PluginBuilder) {
       build.onLoad({ filter: /\.mdx?$/ }, async args => {
         const body = splitFrontMatter(await Bun.file(args.path).text()).body
-        const source = MERMAID_FENCE.test(body) ? MERMAID_IMPORT + body : body
+        const source = hasMermaidFence(body) ? MERMAID_IMPORT + body : body
         const compiled = await compile(source, {
           outputFormat: 'program',
           remarkPlugins: [remarkGfm, remarkDocsLinks(args.path, options.docsRoot, options.route ?? '/'), remarkMermaid],
