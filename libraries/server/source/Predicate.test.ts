@@ -10,12 +10,20 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       { field: 'id', format: 'UUID' },
       { field: 'active', type: 'Boolean' },
       { field: 'createdAt', type: 'Timestamp' },
+      { field: 'kind', type: 'String' },
+      { enum: 'Kind', field: 'label', type: 'Enum' },
       { field: 'operator', type: 'String' },
       { field: 'score', type: 'Number' },
       { field: 'title', type: 'String' },
     ],
     name: 'Note',
   }],
+  enums: {
+    Kind: {
+      beta: 'Beta.',
+      gamma: 'Gamma.',
+    },
+  },
 }))
 
 const entity = definitions.entity('Note')
@@ -496,6 +504,67 @@ describe('Predicate.normalize', () => {
       operator: Operator.Comparison.Equal,
       value: 'literal',
     })).toThrow('must compare actor presence with null')
+  })
+
+  test('normalizes scalar $in arrays for String, Enum, and ID fields', () => {
+    expect(normalize({
+      field: 'kind',
+      operator: Operator.Comparison.In,
+      value: ['B', 'C'],
+    })).toEqual({
+      field: 'kind',
+      operator: Operator.Comparison.In,
+      value: ['B', 'C'],
+    })
+    expect(normalize({
+      field: 'label',
+      operator: Operator.Comparison.In,
+      value: ['beta', 'gamma'],
+    })).toEqual({
+      field: 'label',
+      operator: Operator.Comparison.In,
+      value: ['beta', 'gamma'],
+    })
+    const identity = '00000000-0000-4000-8000-000000000001'
+    expect(normalize({
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: [identity],
+    })).toEqual({
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: [identity],
+    })
+  })
+
+  test('rejects malformed scalar $in operands', () => {
+    for (const value of [undefined, null, 'B', {}, { $field: 'title' }, [], [null], [['B']], ['B', undefined]]) {
+      expect(() => normalize({
+        field: 'kind',
+        operator: Operator.Comparison.In,
+        value,
+      })).toThrow()
+    }
+    expect(() => normalize({
+      field: 'kind',
+      operator: Operator.Comparison.In,
+      value: ['B', 7],
+    })).toThrow('not a valid string value')
+    expect(() => normalize({
+      field: 'label',
+      operator: Operator.Comparison.In,
+      value: ['beta', 7],
+    })).toThrow('not a valid enum value')
+    expect(() => normalize({
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: ['not-an-id'],
+    })).toThrow('not a valid id value')
+    expect(() => normalize({
+      field: 'score',
+      operator: Operator.Comparison.In,
+      value: [1, 2],
+    })).toThrow('Query operator "$in" is not valid for field "score"')
   })
 
   test('normalizes canonical field-reference operands', () => {

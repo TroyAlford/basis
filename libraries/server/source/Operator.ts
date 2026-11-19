@@ -21,6 +21,8 @@ export namespace Operator {
     GreaterThan = '$gt',
     /** Greater than or equal. */
     GreaterThanOrEqual = '$gte',
+    /** Membership in a non-empty scalar value list. */
+    In = '$in',
     /** Less than. */
     LessThan = '$lt',
     /** Less than or equal. */

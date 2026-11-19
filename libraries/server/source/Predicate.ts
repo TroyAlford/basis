@@ -105,6 +105,7 @@ const MAX_ARRAY_OPERAND = 128
 const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
   Operator.Comparison.Contains,
   Operator.Comparison.Equal,
+  Operator.Comparison.In,
   Operator.Comparison.Overlaps,
   Operator.Comparison.SequenceEqual,
   Operator.Comparison.GreaterThan,
@@ -112,6 +113,15 @@ const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
   Operator.Comparison.LessThan,
   Operator.Comparison.LessThanOrEqual,
 ])
+
+/**
+ * Scalar field types that support membership comparisons.
+ *
+ * Stored as wire names because this module participates in a cycle with
+ * `EntityDefinitions`; evaluating `FieldType` during module initialization is
+ * not safe.
+ */
+const IN_FIELD_TYPES = new Set<string>(['Enum', 'ID', 'String'])
 
 /**
  * Normalize structured and source-level shorthand into canonical predicates.
@@ -262,6 +272,7 @@ export const Predicate = {
     operator: Operator.Comparison,
     raw: unknown,
   ): unknown {
+    if (operator === Operator.Comparison.In) return inOperand(field, raw)
     if (field.type === FieldType.Array) return arrayOperand(field, operator, raw)
     if (field.type === FieldType.JSON) {
       if (operator !== Operator.Comparison.Contains) {
@@ -589,6 +600,51 @@ export function arrayMemberResolver(
 ): ScalarFieldDefinition {
   if (name !== '@') throw new Error(`Unknown scoped member field "${name}"`)
   return member
+}
+
+/**
+ * Normalize one scalar membership operand.
+ * @param field - Target scalar field.
+ * @param raw - Raw array operand.
+ * @returns Normalized element values in operand order.
+ * @throws {Error} When the field, list shape, or an element is invalid.
+ */
+function inOperand(field: QueryFieldDefinition, raw: unknown): unknown {
+  if (!IN_FIELD_TYPES.has(field.type)) {
+    throw new Error(`Query operator "${Operator.Comparison.In}" is not valid for field "${field.name}"`)
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`Query operator "${Operator.Comparison.In}" requires an array operand for "${field.name}"`)
+  }
+  if (raw.length === 0) {
+    throw new Error(`Query operator "${Operator.Comparison.In}" requires a non-empty array operand for "${field.name}"`)
+  }
+  return raw.map(value => {
+    if (value === null) {
+      throw new Error(`Query ${Operator.Comparison.In} operands for "${field.name}" cannot contain null`)
+    }
+    if (Array.isArray(value)) {
+      throw new Error(
+        `Query ${Operator.Comparison.In} operands for "${field.name}" must contain only scalar values`,
+      )
+    }
+    if (isFieldOperand(value)) {
+      throw new Error(
+        `Query ${Operator.Comparison.In} operands for "${field.name}" must not contain field references`,
+      )
+    }
+    if (field.type === FieldType.Enum) {
+      if (typeof value !== 'string') invalidOperand(field)
+      return value
+    }
+    if (value === ACTOR_FIELD_NAME) {
+      if (field.type === FieldType.ID) return value
+      throw new Error('Query operand "$me" is only valid for identity fields')
+    }
+    const normalized = normalizeScalar(field as ScalarFieldDefinition, value)
+    if (normalized === undefined) invalidOperand(field)
+    return normalized
+  })
 }
 
 /**

@@ -257,6 +257,17 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
     },
     validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
   }],
+  [Operator.Comparison.In, {
+    allowedFieldTypes: new Set([FieldType.Enum, FieldType.ID, FieldType.String]),
+    build: (_field, column, operand, bind) => {
+      const values = operand as readonly BoundScalar[]
+      if (values.length === 0) {
+        throw new Error(`Query operator "${Operator.Comparison.In}" requires a non-empty value list`)
+      }
+      return `${column} IN (${values.map(value => bind(value)).join(', ')})`
+    },
+    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
+  }],
   [Operator.Comparison.Overlaps, {
     allowedFieldTypes: new Set([FieldType.Array]),
     build: (field, column, operand, bind) => {

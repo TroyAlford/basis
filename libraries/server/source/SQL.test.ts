@@ -405,6 +405,59 @@ describe('SQL.where', () => {
     })
   })
 
+  test('compiles scalar $in lists to ordered parameter placeholders', () => {
+    expect(SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: ['A', 'B'],
+    })).toEqual({
+      sql: 'WHERE "title" IN ($1, $2)',
+      values: ['A', 'B'],
+    })
+    expect(SQL.where(definitions, entity, {
+      filters: [
+        { field: 'title', operator: Operator.Comparison.Equal, value: 'prefix' },
+        { field: 'title', operator: Operator.Comparison.In, value: ['A', 'B'] },
+      ],
+      operator: Operator.Logical.And,
+    })).toEqual({
+      sql: 'WHERE ("title" IS NOT DISTINCT FROM $1 AND "title" IN ($2, $3))',
+      values: ['prefix', 'A', 'B'],
+    })
+    const identity = '00000000-0000-4000-8000-000000000001'
+    expect(SQL.where(definitions, entity, {
+      field: 'id',
+      operator: Operator.Comparison.In,
+      value: [identity],
+    })).toEqual({
+      sql: 'WHERE "id" IN ($1)',
+      values: [identity],
+    })
+    const source = QueryNormalizer.normalize(note, "title $in ['A', 'B']")
+    expect(SQL.where(definitions, entity, source)).toEqual({
+      sql: 'WHERE "title" IN ($1, $2)',
+      values: ['A', 'B'],
+    })
+  })
+
+  test('rejects invalid scalar $in operands before emitting SQL', () => {
+    expect(() => SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: [],
+    })).toThrow('non-empty')
+    expect(() => SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: ['A', null],
+    })).toThrow('cannot contain null')
+    expect(() => SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.In,
+      value: [1, 2],
+    })).toThrow('not valid for field')
+  })
+
   test('maps null equality to IS NULL without binding', () => {
     expect(SQL.where(definitions, entity, { score: null })).toEqual({
       sql: 'WHERE "score" IS NULL',

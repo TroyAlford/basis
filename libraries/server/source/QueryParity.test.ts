@@ -99,6 +99,60 @@ describe('Query parity gate', () => {
     )
   })
 
+  test('matches source and structured scalar $in predicates', () => {
+    const sourceQuery = source('Note', "title $in ['A', 'B']")
+    const structuredQuery = structured('Note', {
+      field: 'title',
+      operator: Operator.Comparison.In,
+      value: ['A', 'B'],
+    })
+    expect(sourceQuery).toEqual(structuredQuery)
+    expect(sourceQuery.sql).toContain('"title" IN ($1, $2)')
+    expect(sourceQuery.values.slice(0, 2)).toEqual(['A', 'B'])
+    expect(sourceQuery.values).not.toContain('C')
+    expect(QueryNormalizer.normalize(note, "title $in ['A', 'B']")).toEqual(
+      Predicate.normalize(note, {
+        field: 'title',
+        operator: Operator.Comparison.In,
+        value: ['A', 'B'],
+      }),
+    )
+  })
+
+  test('rejects malformed scalar $in predicates in both forms', () => {
+    const invalid = [
+      {
+        message: 'non-empty',
+        source: 'title $in []',
+        structured: { field: 'title', operator: Operator.Comparison.In, value: [] },
+      },
+      {
+        message: 'cannot contain null',
+        source: 'title $in [null]',
+        structured: { field: 'title', operator: Operator.Comparison.In, value: [null] },
+      },
+      {
+        message: 'scalar',
+        source: "title $in [['A']]",
+        structured: { field: 'title', operator: Operator.Comparison.In, value: [['A']] },
+      },
+      {
+        message: 'not a valid string value',
+        source: "title $in ['A', 7]",
+        structured: { field: 'title', operator: Operator.Comparison.In, value: ['A', 7] },
+      },
+      {
+        message: 'not valid for field',
+        source: 'score $in [1, 2]',
+        structured: { field: 'score', operator: Operator.Comparison.In, value: [1, 2] },
+      },
+    ] as const
+    for (const queryCase of invalid) {
+      expect(() => source('Note', queryCase.source)).toThrow(queryCase.message)
+      expect(() => structured('Note', queryCase.structured)).toThrow(queryCase.message)
+    }
+  })
+
   test('preserves source diagnostics with exact offsets', () => {
     const result = QueryParser.parse("title = 'unterminated")
     expect(result.expression).toBeNull()
