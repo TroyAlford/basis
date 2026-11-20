@@ -863,6 +863,112 @@ describe('Graph', () => {
     expect(helpers).toContain('current_setting(\'actor.id\', true)')
   })
 
+  test('compiles descendant-reference collection policies', () => {
+    const polymorphic = new Graph({
+      entities: [
+        {
+          fields: [{ field: 'code', type: 'String' }],
+          name: 'Document',
+        },
+        { extends: 'Document', fields: [], name: 'PublicDocument' },
+        {
+          extends: 'Document',
+          fields: [
+            { field: 'secret', type: 'String' },
+            { field: 'workspace', target: 'Workspace', type: 'Entity' },
+          ],
+          name: 'PrivateDocument',
+        },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'members',
+            inverse: 'workspace',
+            target: 'Member',
+            type: 'Inverse',
+          }],
+          name: 'Workspace',
+        },
+        {
+          fields: [
+            { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+          ],
+          name: 'Member',
+        },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'SecretSection',
+          security: { [Action.Read]: { where: "document.secret = 's'" } },
+        },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'Section',
+          security: {
+            [Action.Read]: [
+              { where: "document.entity = 'PublicDocument'" },
+              { where: 'document.workspace.members $contains (id = $me)' },
+            ],
+          },
+        },
+      ],
+    })
+    const helpers = polymorphic.physicalSchema('basis_app', true).functions
+      .filter(fn => fn.name.startsWith('policy_'))
+      .map(fn => fn.sql)
+      .join('\n')
+    expect(helpers).toContain('PrivateDocument')
+    expect(helpers).toContain('"workspace.id"')
+    expect(helpers).toContain('"secret"')
+    expect(helpers).toContain('"Member"')
+    expect(helpers).toContain('current_setting(\'actor.id\', true)')
+  })
+
+  test('rejects collection count paths in policy predicates', () => {
+    expect(() => new Graph({
+      entities: [{
+        fields: [
+          { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Note',
+        security: { [Action.Read]: { where: 'scores.$total > 0' } },
+      }],
+    })).toThrow('count path "scores.$total" is not policy-safe')
+  })
+
+  test('compiles descendant member fields in relationship policies', () => {
+    const memberGraph = new Graph({
+      entities: [
+        {
+          fields: [],
+          name: 'Campaign',
+          security: { [Action.Read]: { where: 'members $contains (company = null)' } },
+        },
+        { fields: [], name: 'Person' },
+        {
+          extends: 'Person',
+          fields: [{ field: 'company', nullable: true, type: 'String' }],
+          name: 'Client',
+        },
+        { extends: 'Person', fields: [], name: 'SystemUser' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'person', inverse: 'campaigns', target: 'Person' },
+        ],
+        fields: [],
+        name: 'CampaignMembership',
+      }],
+    })
+    const helpers = memberGraph.physicalSchema('basis_app', true).functions
+      .filter(fn => fn.name.startsWith('policy_'))
+      .map(fn => fn.sql)
+      .join('\n')
+    expect(helpers).toContain('"Client"')
+    expect(helpers).toContain('"company"')
+  })
+
   test('allows where-only membership rules without an artificial capability', () => {
     enum MembershipRole {
       Owner = 'Owner',

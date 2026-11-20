@@ -94,6 +94,7 @@
     "remark-stringify": "^11.0.0",
     "sass": "1.98.0",
     "shiki": "3.0.0",
+    "source-map-js": "^1.2.1",
     "stylelint": "^17.15.0",
     "stylelint-order": "^8.1.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",

@@ -35,7 +35,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
     },
     {
       extends: 'Person',
-      fields: [{ field: 'company', type: 'String' }],
+      fields: [{ field: 'company', nullable: true, type: 'String' }],
       name: 'Client',
     },
     {
@@ -79,6 +79,178 @@ const definitions = EntityDefinitions.load(JSON.stringify({
     name: 'Membership',
   }],
 }))
+
+const eligibilityEntities = [
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'label', type: 'String' },
+    ],
+    name: 'A',
+  },
+  {
+    extends: 'A',
+    fields: [
+      { field: 'foo', nullable: true, type: 'Number' },
+      { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+      {
+        cardinality: 'Many',
+        field: 'items',
+        inverse: 'ownerB',
+        target: 'Item',
+        type: 'Inverse',
+      },
+    ],
+    name: 'B',
+  },
+  {
+    extends: 'A',
+    fields: [
+      { field: 'foo', nullable: true, type: 'Number' },
+      {
+        cardinality: 'Many',
+        field: 'items',
+        inverse: 'ownerC',
+        target: 'Item',
+        type: 'Inverse',
+      },
+    ],
+    name: 'C',
+  },
+  { extends: 'A', fields: [], name: 'D' },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'title', type: 'String' },
+      { field: 'ownerB', inverse: 'items', target: 'B', type: 'Entity' },
+      { field: 'ownerC', inverse: 'items', target: 'C', type: 'Entity' },
+    ],
+    name: 'Item',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'document', target: 'Document', type: 'Entity' },
+    ],
+    name: 'Section',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'code', type: 'String' },
+    ],
+    name: 'Document',
+  },
+  { extends: 'Document', fields: [], name: 'PublicDocument' },
+  {
+    extends: 'Document',
+    fields: [
+      { field: 'secret', type: 'String' },
+      { field: 'workspace', target: 'Workspace', type: 'Entity' },
+    ],
+    name: 'PrivateDocument',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      {
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'workspace',
+        target: 'Member',
+        type: 'Inverse',
+      },
+    ],
+    name: 'Workspace',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+    ],
+    name: 'Member',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      {
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'owner',
+        target: 'TeamMember',
+        type: 'Inverse',
+      },
+    ],
+    name: 'Owner',
+  },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'owner', inverse: 'members', target: 'Owner', type: 'Entity' },
+    ],
+    name: 'TeamMember',
+  },
+  {
+    extends: 'TeamMember',
+    fields: [
+      {
+        cardinality: 'Many',
+        field: 'tickets',
+        inverse: 'admin',
+        target: 'Ticket',
+        type: 'Inverse',
+      },
+      { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+    ],
+    name: 'AdminTeamMember',
+  },
+  { extends: 'TeamMember', fields: [], name: 'GuestTeamMember' },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'title', type: 'String' },
+      { field: 'admin', inverse: 'tickets', target: 'AdminTeamMember', type: 'Entity' },
+    ],
+    name: 'Ticket',
+  },
+]
+const eligibilityDefinitions = EntityDefinitions.load(JSON.stringify({ entities: eligibilityEntities }))
+const eligibilityDefinitionsReversed = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    eligibilityEntities[0],
+    eligibilityEntities[2],
+    eligibilityEntities[1],
+    ...eligibilityEntities.slice(3),
+  ],
+}))
+
+const eligibilityB1 = '00000000-0000-4000-8000-000000000101'
+const eligibilityB2 = '00000000-0000-4000-8000-000000000102'
+const eligibilityB3 = '00000000-0000-4000-8000-000000000103'
+const eligibilityC1 = '00000000-0000-4000-8000-000000000111'
+const eligibilityC2 = '00000000-0000-4000-8000-000000000112'
+const eligibilityC3 = '00000000-0000-4000-8000-000000000113'
+const eligibilityD1 = '00000000-0000-4000-8000-000000000121'
+const eligibilityItem1 = '00000000-0000-4000-8000-000000000201'
+const eligibilityItem2 = '00000000-0000-4000-8000-000000000202'
+const eligibilityItem3 = '00000000-0000-4000-8000-000000000203'
+const eligibilityItem4 = '00000000-0000-4000-8000-000000000204'
+const eligibilitySection1 = '00000000-0000-4000-8000-000000000301'
+const eligibilitySection2 = '00000000-0000-4000-8000-000000000302'
+const eligibilitySection3 = '00000000-0000-4000-8000-000000000303'
+const eligibilityPublicDoc = '00000000-0000-4000-8000-000000000311'
+const eligibilityPrivateDoc = '00000000-0000-4000-8000-000000000312'
+const eligibilityPrivateDocTwo = '00000000-0000-4000-8000-000000000313'
+const eligibilityWorkspaceOne = '00000000-0000-4000-8000-000000000321'
+const eligibilityWorkspaceTwo = '00000000-0000-4000-8000-000000000322'
+const eligibilityMemberOne = '00000000-0000-4000-8000-000000000331'
+const eligibilityOwnerOne = '00000000-0000-4000-8000-000000000341'
+const eligibilityOwnerTwo = '00000000-0000-4000-8000-000000000342'
+const eligibilityAdminOne = '00000000-0000-4000-8000-000000000351'
+const eligibilityAdminTwo = '00000000-0000-4000-8000-000000000352'
+const eligibilityGuestOne = '00000000-0000-4000-8000-000000000353'
+const eligibilityGuestTwo = '00000000-0000-4000-8000-000000000354'
+const eligibilityTicketOne = '00000000-0000-4000-8000-000000000361'
 
 /** One source/structured parity case. */
 interface ParityCase {
@@ -210,6 +382,140 @@ async function seed(database: LifecycleDatabase): Promise<void> {
       (${grace}, ${campaignOne}, 'Player'),
       (${linus}, ${campaignOne}, 'Player'),
       (${grace}, ${campaignTwo}, 'GM')
+  `
+}
+
+/**
+ * Seed the polymorphic eligibility fixture.
+ * @param database - Isolated PostgreSQL database.
+ * @param model - Entity definitions to install.
+ */
+async function seedEligibility(
+  database: LifecycleDatabase,
+  model = eligibilityDefinitions,
+): Promise<void> {
+  await database.use(model)
+  await database.sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES
+      (${eligibilityB1}, 'B1', 'B'),
+      (${eligibilityB2}, 'B2', 'B'),
+      (${eligibilityB3}, 'B3', 'B'),
+      (${eligibilityC1}, 'C1', 'C'),
+      (${eligibilityC2}, 'C2', 'C'),
+      (${eligibilityC3}, 'C3', 'C'),
+      (${eligibilityD1}, 'D1', 'D'),
+      (${eligibilityItem1}, 'Item 1', 'Item'),
+      (${eligibilityItem2}, 'Item 2', 'Item'),
+      (${eligibilityItem3}, 'Item 3', 'Item'),
+      (${eligibilityItem4}, 'Item 4', 'Item'),
+      (${eligibilitySection1}, 'Section 1', 'Section'),
+      (${eligibilitySection2}, 'Section 2', 'Section'),
+      (${eligibilitySection3}, 'Section 3', 'Section'),
+      (${eligibilityPublicDoc}, 'Public Document', 'PublicDocument'),
+      (${eligibilityPrivateDoc}, 'Private Document', 'PrivateDocument'),
+      (${eligibilityPrivateDocTwo}, 'Private Document Two', 'PrivateDocument'),
+      (${eligibilityWorkspaceOne}, 'Workspace One', 'Workspace'),
+      (${eligibilityWorkspaceTwo}, 'Workspace Two', 'Workspace'),
+      (${eligibilityMemberOne}, 'Member One', 'Member'),
+      (${eligibilityOwnerOne}, 'Owner One', 'Owner'),
+      (${eligibilityOwnerTwo}, 'Owner Two', 'Owner'),
+      (${eligibilityAdminOne}, 'Admin One', 'AdminTeamMember'),
+      (${eligibilityAdminTwo}, 'Admin Two', 'AdminTeamMember'),
+      (${eligibilityGuestOne}, 'Guest One', 'GuestTeamMember'),
+      (${eligibilityGuestTwo}, 'Guest Two', 'GuestTeamMember'),
+      (${eligibilityTicketOne}, 'Urgent', 'Ticket')
+  `
+  await database.sql`
+    INSERT INTO "A" ("id", "label")
+    VALUES
+      (${eligibilityB1}, 'b7'),
+      (${eligibilityB2}, 'bnull'),
+      (${eligibilityB3}, 'b8'),
+      (${eligibilityC1}, 'c7'),
+      (${eligibilityC2}, 'cnull'),
+      (${eligibilityC3}, 'c9'),
+      (${eligibilityD1}, 'd')
+  `
+  await database.sql`
+    INSERT INTO "B" ("id", "foo", "scores")
+    VALUES
+      (${eligibilityB1}, 7, ARRAY [1, 2]::DOUBLE PRECISION[]),
+      (${eligibilityB2}, ${null}, ARRAY []::DOUBLE PRECISION[]),
+      (${eligibilityB3}, 8, ARRAY [3]::DOUBLE PRECISION[])
+  `
+  await database.sql`
+    INSERT INTO "C" ("id", "foo")
+    VALUES (${eligibilityC1}, 7), (${eligibilityC2}, ${null}), (${eligibilityC3}, 9)
+  `
+  await database.sql`
+    INSERT INTO "D" ("id")
+    VALUES (${eligibilityD1})
+  `
+  await database.sql`
+    INSERT INTO "Item" ("id", "title", "ownerB.id", "ownerC.id")
+    VALUES
+      (${eligibilityItem1}, 'match', ${eligibilityB1}, ${null}),
+      (${eligibilityItem2}, 'other', ${eligibilityB2}, ${null}),
+      (${eligibilityItem3}, 'match', ${null}, ${eligibilityC1}),
+      (${eligibilityItem4}, 'other', ${null}, ${eligibilityC2})
+  `
+  await database.sql`
+    INSERT INTO "Document" ("id", "code")
+    VALUES (${eligibilityPublicDoc}, 'pub'), (${eligibilityPrivateDoc}, 'priv'), (${eligibilityPrivateDocTwo}, 'priv2')
+  `
+  await database.sql`
+    INSERT INTO "PublicDocument" ("id")
+    VALUES (${eligibilityPublicDoc})
+  `
+  await database.sql`
+    INSERT INTO "Workspace" ("id")
+    VALUES (${eligibilityWorkspaceOne}), (${eligibilityWorkspaceTwo})
+  `
+  await database.sql`
+    INSERT INTO "Member" ("id", "workspace.id")
+    VALUES (${eligibilityMemberOne}, ${eligibilityWorkspaceOne})
+  `
+  await database.sql`
+    INSERT INTO "Owner" ("id")
+    VALUES (${eligibilityOwnerOne}), (${eligibilityOwnerTwo})
+  `
+  await database.sql`
+    INSERT INTO "TeamMember" ("id", "owner.id")
+    VALUES
+      (${eligibilityAdminOne}, ${eligibilityOwnerOne}),
+      (${eligibilityAdminTwo}, ${eligibilityOwnerOne}),
+      (${eligibilityGuestOne}, ${eligibilityOwnerOne}),
+      (${eligibilityGuestTwo}, ${eligibilityOwnerTwo})
+  `
+  await database.sql`
+    INSERT INTO "AdminTeamMember" ("id", "scores")
+    VALUES
+      (${eligibilityAdminOne}, ARRAY [1, 2]::DOUBLE PRECISION[]),
+      (${eligibilityAdminTwo}, ARRAY []::DOUBLE PRECISION[])
+  `
+  await database.sql`
+    INSERT INTO "GuestTeamMember" ("id")
+    VALUES (${eligibilityGuestOne}), (${eligibilityGuestTwo})
+  `
+  await database.sql`
+    INSERT INTO "Ticket" ("id", "title", "admin.id")
+    VALUES (${eligibilityTicketOne}, 'Urgent', ${eligibilityAdminOne})
+  `
+  await database.sql`
+    INSERT INTO "PrivateDocument" ("id", "secret", "workspace.id")
+    VALUES (${eligibilityPrivateDoc}, 's', ${eligibilityWorkspaceOne})
+  `
+  await database.sql`
+    INSERT INTO "PrivateDocument" ("id", "secret", "workspace.id")
+    VALUES (${eligibilityPrivateDocTwo}, 't', ${eligibilityWorkspaceTwo})
+  `
+  await database.sql`
+    INSERT INTO "Section" ("id", "document.id")
+    VALUES
+      (${eligibilitySection1}, ${eligibilityPublicDoc}),
+      (${eligibilitySection2}, ${eligibilityPrivateDoc}),
+      (${eligibilitySection3}, ${eligibilityPrivateDocTwo})
   `
 }
 
@@ -448,6 +754,16 @@ const cases: readonly ParityCase[] = [
       field: 'members',
       filters: [{ field: 'membership.role', operator: Operator.Comparison.Equal, value: 'Player' }],
       operator: Operator.Collection.All,
+    },
+  },
+  {
+    entity: 'Campaign',
+    expected: [],
+    source: 'members $contains (company = null)',
+    structured: {
+      field: 'members',
+      filters: [{ field: 'company', operator: Operator.Comparison.Equal, value: null }],
+      operator: Operator.Comparison.Contains,
     },
   },
   {
@@ -776,6 +1092,463 @@ describe('Query parity gate', () => {
         expect(inverseSource.map(row => row.id)).toEqual([...actorCase.expected])
         expect(containsSource.map(row => row.id)).toEqual([...actorCase.expected])
       }
+    })
+  })
+
+  test('enforces descendant field and collection eligibility against PostgreSQL', async () => {
+    await withLifecycleDatabase('polymorphic-eligibility', async database => {
+      await seedEligibility(database)
+      const ids = async (entity: string, where: string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, eligibilityDefinitions, entity, {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+
+      const eligibilityCases = [
+        { entity: 'A', expected: [eligibilityB1, eligibilityC1], where: 'foo = 7' },
+        { entity: 'A', expected: [eligibilityB2, eligibilityC2], where: 'foo = null' },
+        {
+          entity: 'A',
+          expected: [eligibilityB2, eligibilityB3, eligibilityC2, eligibilityC3],
+          where: 'NOT(foo = 7)',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1, eligibilityD1],
+          where: "foo = 7 OR label = 'd'",
+        },
+        { entity: 'A', expected: [eligibilityB1], where: "label = 'b7'" },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1],
+          where: "items $contains (title = 'match')",
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB3, eligibilityC1, eligibilityC3],
+          where: "items $all (title = 'match')",
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          where: 'items $empty',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          where: 'items.$total = 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB2, eligibilityC1, eligibilityC2],
+          where: 'items.$total > 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1],
+          where: "items[title = 'match'].$matched >= 1",
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB3],
+          where: 'scores.$total > 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB2],
+          where: 'scores.$total = 0',
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB2],
+          where: 'NOT(scores.$total > 0)',
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: "document.secret = 's'",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: "NOT(document.secret = 's')",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection1],
+          where: "document.code = 'pub'",
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: `document.workspace.members $contains (id = '${eligibilityMemberOne}')`,
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: 'document.workspace.members $empty',
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: `NOT(document.workspace.members $contains (id = '${eligibilityMemberOne}'))`,
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: 'document.workspace.members.$total = 0',
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: 'document.workspace.members.$total > 0',
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          where: `document.workspace.members[id = '${eligibilityMemberOne}'].$matched >= 1`,
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          where: `document.workspace.members[id = '${eligibilityMemberOne}'].$matched = 0`,
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: "members $contains (tickets $contains (title = 'Urgent'))",
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: 'members $contains (tickets $empty)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: 'members $contains (scores.$total > 0)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: 'members $contains (tickets.$total > 0)',
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: "members $contains (tickets[title = 'Urgent'].$matched > 0)",
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerOne],
+          where: "members $contains (tickets[title = 'Missing'].$matched = 0)",
+        },
+        {
+          entity: 'Owner',
+          expected: [eligibilityOwnerTwo],
+          where: "NOT(members $contains (tickets $contains (title = 'Urgent')))",
+        },
+      ] as const
+      for (const queryCase of eligibilityCases) {
+        expect(await ids(queryCase.entity, queryCase.where)).toEqual([...queryCase.expected])
+      }
+
+      const parityCases = [
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityC1],
+          source: 'foo = 7',
+          structured: { field: 'foo', operator: Operator.Comparison.Equal, value: 7 },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB2, eligibilityB3, eligibilityC2, eligibilityC3],
+          source: 'NOT(foo = 7)',
+          structured: {
+            filters: [{ field: 'foo', operator: Operator.Comparison.Equal, value: 7 }],
+            operator: Operator.Logical.Not,
+          },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          source: 'items $empty',
+          structured: { field: 'items', operator: Operator.Comparison.Empty },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB3, eligibilityC3],
+          source: 'items.$total = 0',
+          structured: { field: 'items.$total', operator: Operator.Comparison.Equal, value: 0 },
+        },
+        {
+          entity: 'A',
+          expected: [eligibilityB1, eligibilityB3],
+          source: 'scores.$total > 0',
+          structured: {
+            field: 'scores.$total',
+            operator: Operator.Comparison.GreaterThan,
+            value: 0,
+          },
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          source: "document.secret = 's'",
+          structured: { 'document.secret': 's' },
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection2],
+          source: `document.workspace.members $contains (id = '${eligibilityMemberOne}')`,
+          structured: {
+            field: 'document.workspace.members',
+            filters: [{
+              field: 'id',
+              operator: Operator.Comparison.Equal,
+              value: eligibilityMemberOne,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        },
+        {
+          entity: 'Section',
+          expected: [eligibilitySection3],
+          source: 'document.workspace.members $empty',
+          structured: {
+            field: 'document.workspace.members',
+            operator: Operator.Comparison.Empty,
+          },
+        },
+      ] as const
+      for (const queryCase of parityCases) {
+        const sourceRows = await ids(queryCase.entity, queryCase.source)
+        const structuredRows = await queryEntity<{ id: string }>(
+          database.sql,
+          eligibilityDefinitions,
+          queryCase.entity,
+          {
+            fields: ['id'],
+            limit: null,
+            orderBy: 'id',
+            where: queryCase.structured,
+          },
+        )
+        expect(structuredRows.map(row => row.id)).toEqual(sourceRows)
+        expect(sourceRows).toEqual([...queryCase.expected])
+      }
+
+      const nestedStructured = await queryEntity<{ id: string }>(
+        database.sql,
+        eligibilityDefinitions,
+        'Owner',
+        {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where: {
+            field: 'members',
+            filters: [{
+              field: 'tickets',
+              filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Urgent' }],
+              operator: Operator.Comparison.Contains,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        },
+      )
+      expect(nestedStructured.map(row => row.id)).toEqual([eligibilityOwnerOne])
+
+      const matchedPath = `document.workspace.members[id = '${eligibilityMemberOne}'].$matched`
+      const matchedStructured = await queryEntity<{ id: string }>(
+        database.sql,
+        eligibilityDefinitions,
+        'Section',
+        {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where: { field: matchedPath, operator: Operator.Comparison.GreaterThanOrEqual, value: 1 },
+        },
+      )
+      expect(matchedStructured.map(row => row.id)).toEqual([eligibilitySection2])
+
+      await expect(queryEntity(database.sql, eligibilityDefinitions, 'A', {
+        fields: ['id'],
+        where: 'missing = 1',
+      })).rejects.toThrow()
+    })
+  })
+
+  test('preserves relationship member eligibility in filtered counts', async () => {
+    await withLifecycleDatabase('filtered-membership-eligibility', async database => {
+      await seed(database)
+      const client = '00000000-0000-4000-8000-000000000501'
+      const campaign = '00000000-0000-4000-8000-000000000502'
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES
+          (${client}, 'Nullable Client', 'Client'),
+          (${campaign}, 'Nullable Campaign', 'Campaign')
+      `
+      await database.sql`
+        INSERT INTO "Person" (
+          "id",
+          "title",
+          "primaryTag",
+          "favoriteIds",
+          "scores",
+          "tags",
+          "payload"
+        )
+        VALUES (
+          ${client},
+          'Nullable Client',
+          '',
+          ARRAY []::TEXT[],
+          ARRAY []::DOUBLE PRECISION[],
+          ARRAY []::TEXT[],
+          '{}'::JSONB
+        )
+      `
+      await database.sql`
+        INSERT INTO "Client" ("id", "company")
+        VALUES (${client}, ${null})
+      `
+      await database.sql`
+        INSERT INTO "Campaign" ("id", "title")
+        VALUES (${campaign}, 'Nullable Campaign')
+      `
+      await database.sql`
+        INSERT INTO "Membership" ("person.id", "campaign.id", "role")
+        VALUES (${client}, ${campaign}, 'GM')
+      `
+      const ids = async (where: Filter | string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, definitions, 'Campaign', {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+      expect(await ids('members $contains (company = null)')).toEqual([campaign])
+      expect(await ids('members[company = null].$matched > 0')).toEqual([campaign])
+      expect(await ids({
+        field: 'members[company = null].$matched',
+        operator: Operator.Comparison.GreaterThan,
+        value: 0,
+      })).toEqual([campaign])
+      expect(await ids("members[membership.role = 'GM'].$matched > 0"))
+        .toEqual([campaignOne, campaignTwo, campaign])
+      expect(await ids('NOT(members[company = null].$matched > 0)'))
+        .toEqual([campaignOne, campaignTwo, campaignThree])
+      const normalize = (sql: string) => sql.replace(/\b((?:cm|ct|cr|cj|o))\d+\b/gu, '$1')
+      const matchedSource = 'members[company = null].$matched > 0'
+      const matchedStructured: Filter = {
+        field: 'members[company = null].$matched',
+        operator: Operator.Comparison.GreaterThan,
+        value: 0,
+      }
+      expect(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: matchedSource,
+      }).sql)).toBe(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: matchedStructured,
+      }).sql))
+      const roleSource = "members[membership.role = 'GM'].$matched > 0"
+      const roleStructured: Filter = {
+        field: "members[membership.role = 'GM'].$matched",
+        operator: Operator.Comparison.GreaterThan,
+        value: 0,
+      }
+      expect(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: roleSource,
+      }).sql)).toBe(normalize(compileEntityQuery(definitions, 'Campaign', {
+        fields: ['id'],
+        where: roleStructured,
+      }).sql))
+    })
+  })
+
+  test('scopes count caches to physical parent occurrences', async () => {
+    await withLifecycleDatabase('count-parent-scope', async database => {
+      const selfDefinitions = EntityDefinitions.load(JSON.stringify({
+        entities: [{
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'manager', inverse: 'reports', target: 'Employee', type: 'Entity' },
+            {
+              cardinality: 'Many',
+              field: 'reports',
+              inverse: 'manager',
+              target: 'Employee',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Employee',
+        }],
+      }))
+      await database.use(selfDefinitions)
+      const root = '00000000-0000-4000-8000-000000000401'
+      const report = '00000000-0000-4000-8000-000000000402'
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${root}, 'Root', 'Employee'), (${report}, 'Report', 'Employee')
+      `
+      await database.sql`
+        INSERT INTO "Employee" ("id", "manager.id")
+        VALUES (${root}, ${null}), (${report}, ${root})
+      `
+      const ids = async (where: Filter | string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, selfDefinitions, 'Employee', {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+      const nested = 'reports.$total > 0 AND reports $contains (reports.$total > 0)'
+      expect(await ids(nested)).toEqual([])
+      expect(await ids('reports $contains (reports.$total > 0) AND reports.$total > 0'))
+        .toEqual([])
+      expect(await ids({
+        filters: [
+          { field: 'reports.$total', operator: Operator.Comparison.GreaterThan, value: 0 },
+          {
+            field: 'reports',
+            filters: [{
+              field: 'reports.$total',
+              operator: Operator.Comparison.GreaterThan,
+              value: 0,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        ],
+        operator: Operator.Logical.And,
+      })).toEqual([])
+    })
+  })
+
+  test('preserves eligibility results when sibling declarations are reversed', async () => {
+    await withLifecycleDatabase('polymorphic-eligibility-reversed', async database => {
+      await seedEligibility(database, eligibilityDefinitionsReversed)
+      const ids = async (where: string): Promise<string[]> => (
+        (await queryEntity<{ id: string }>(database.sql, eligibilityDefinitionsReversed, 'A', {
+          fields: ['id'],
+          limit: null,
+          orderBy: 'id',
+          where,
+        })).map(row => row.id)
+      )
+      expect(await ids('foo = 7')).toEqual([eligibilityB1, eligibilityC1])
+      expect(await ids("items $contains (title = 'match')"))
+        .toEqual([eligibilityB1, eligibilityC1])
+      expect(await ids('items.$total = 0')).toEqual([eligibilityB3, eligibilityC3])
     })
   })
 })

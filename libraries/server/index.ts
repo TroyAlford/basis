@@ -134,4 +134,14 @@ export { Cookies, serializeCookie } from './source/Cookies'
 export type { CookieChange, CookieOptions } from './source/Cookies'
 export { Server } from './source/Server'
 export type { ContextInput, ContextResult, ServerOptions } from './source/Server'
+export { buildVendor, buildVendorBundle, discoverVendorSpecifiers } from './source/Vendor'
+export type {
+  DiscoverVendorOptions,
+  VendorAsset,
+  VendorBuild,
+  VendorBuildOptions,
+  VendorBundleOptions,
+  VendorEntry,
+  VendorSourceMap,
+} from './source/Vendor'
 export type { Socket, SocketHandlers } from './types/Socket'

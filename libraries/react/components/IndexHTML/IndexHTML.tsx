@@ -20,12 +20,6 @@ interface Props {
    */
   favicon?: boolean,
   /**
-   * Absolute classic-script URLs to load before the module entrypoints. They are
-   * written into a blocking inline loader so Bun's HTML bundler never treats the
-   * prebuilt vendor URLs as bundle entrypoints.
-   */
-  preScripts?: readonly string[],
-  /**
    * Immutable runtime facts embedded for the client application context. When
    * present they are written as an escaped JSON document so the browser boots
    * without an extra fetch.
@@ -52,7 +46,7 @@ export class IndexHTML extends Component<Props> {
   static displayName = 'IndexHTML'
 
   override render(): React.ReactNode {
-    const { favicon = true, preScripts = [], runtime, scripts = [], title = 'Document' } = this.props
+    const { favicon = true, runtime, scripts = [], title = 'Document' } = this.props
 
     return (
       <html lang="en">
@@ -70,15 +64,6 @@ export class IndexHTML extends Component<Props> {
               dangerouslySetInnerHTML={{ __html: serializeBasisRuntime(runtime) }}
               id="basis-runtime"
               type="application/json"
-            />
-          )}
-          {preScripts.length > 0 && (
-            <script
-              dangerouslySetInnerHTML={{
-                __html: preScripts
-                  .map(src => `document.write('<script src="${src}"><\\/script>');`)
-                  .join(''),
-              }}
             />
           )}
           {scripts.map(script => {

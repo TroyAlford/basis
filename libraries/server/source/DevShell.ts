@@ -13,14 +13,15 @@ import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
  */
 export const DEV_SHELL_ROUTE = '/__basis_shell'
 
+/** The comment where the server injects prebuilt vendor script tags. */
+export const VENDOR_MARKER = '<!-- VENDORS -->'
+
 /** Options for rendering the development shell document. */
 export interface DevShellOptions {
   /** Directory the shell document is written to; script sources are relative to it. */
   directory: string,
   /** Absolute entrypoint files to load, in order. */
   entrypoints: readonly string[],
-  /** Absolute classic-script URLs to load before the module entrypoints. */
-  preScripts?: readonly string[],
   /** Document title. */
   title: string,
 }
@@ -62,14 +63,13 @@ function scriptSource(directory: string, entrypoint: string): string {
  * @param options - The entrypoints, shell directory, and document title.
  * @param options.directory - Directory the shell is written to.
  * @param options.entrypoints - Absolute entrypoint files to load, in order.
- * @param options.preScripts - Absolute classic-script URLs to load before the entrypoints.
  * @param options.title - Document title.
  * @returns The shell HTML.
  */
-export function renderDevShell({ directory, entrypoints, preScripts = [], title }: DevShellOptions): string {
+export function renderDevShell({ directory, entrypoints, title }: DevShellOptions): string {
   const scripts = entrypoints.map(entrypoint => ({ module: true, src: scriptSource(directory, entrypoint) }))
-  const body = renderToString(React.createElement(IndexHTML, { favicon: false, preScripts, scripts, title }))
-  return `<!doctype html>\n${body}\n`
+  const body = renderToString(React.createElement(IndexHTML, { favicon: false, scripts, title }))
+  return `<!doctype html>\n${body.replace('<head>', `<head>${VENDOR_MARKER}`)}\n`
 }
 
 /**

@@ -274,6 +274,23 @@ describe('Query contract', () => {
     }
   })
 
+  test('keeps distinct timestamp operands through eligibility lowering', () => {
+    const first = new Date('2026-01-01T00:00:00.000Z')
+    const second = new Date('2026-02-01T00:00:00.000Z')
+    const query = compileEntityQuery(definitions, 'Note', {
+      fields: ['id'],
+      where: {
+        filters: [
+          { field: 'createdAt', operator: Operator.Comparison.Equal, value: first },
+          { field: 'createdAt', operator: Operator.Comparison.Equal, value: second },
+        ],
+        operator: Operator.Logical.Or,
+      },
+    })
+    expect(query.sql).toContain(' OR ')
+    expect(query.values.slice(0, 2)).toEqual([first, second])
+  })
+
   test('keeps shorthand and explicit equality equivalent', () => {
     expect(Predicate.normalize(note, { title: 'Hello' })).toEqual(
       Predicate.normalize(note, {
@@ -886,12 +903,14 @@ describe('Query contract', () => {
       fields: ['id'],
       where: "pets $all (title = 'Ada')",
     })
-    const counterexample = compileEntityQuery(relationshipDefinitions, 'User', {
+    const explicitNegation = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets !$contains ($not (title = 'Ada'))",
     })
-    expect(all.sql).toBe(counterexample.sql)
-    expect(all.values).toEqual(counterexample.values)
+    expect(all.sql).toContain('NOT EXISTS (SELECT 1 FROM "Pet"')
+    expect(explicitNegation.sql).toContain('EXISTS (SELECT 1 FROM "Pet"')
+    expect(all.sql).not.toBe(explicitNegation.sql)
+    expect(all.values).toEqual(explicitNegation.values)
 
     expect(compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],

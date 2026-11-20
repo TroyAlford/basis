@@ -9,6 +9,7 @@ export { pluginGlobals } from '../libraries/bun-plugins/source/pluginGlobals'
 export { pluginHMR } from '../libraries/bun-plugins/source/pluginHMR'
 export { pluginMarkdown } from '../libraries/bun-plugins/source/pluginMarkdown'
 export { pluginSASS } from '../libraries/bun-plugins/source/pluginSASS'
+export { pluginVendor } from '../libraries/bun-plugins/source/pluginVendor'
 
 // eslint-disable-next-line @basis/no-default-export -- Bun's `[serve.static]` plugin loader requires a default export.
 export default pluginServe

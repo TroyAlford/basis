@@ -2337,7 +2337,7 @@ function validateAncestry(
 }
 
 /** One logical field source compared across concrete descendants. */
-type LogicalFieldSource =
+export type LogicalFieldSource =
   | DerivedCollectionDefinition
   | DerivedSingularDefinition
   | EffectiveFieldDefinition
@@ -2348,7 +2348,7 @@ type LogicalFieldSource =
  * @param source - Effective field or derived navigation.
  * @returns A deterministic contract signature.
  */
-function logicalFieldContract(source: LogicalFieldSource): string {
+export function logicalFieldContract(source: LogicalFieldSource): string {
   if ('kind' in source) {
     if (source.kind === 'inverse-one') return `singular:${source.target}`
     const resultKind = source.kind === 'explicit' && source.targetEndpoint === undefined

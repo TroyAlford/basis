@@ -431,8 +431,9 @@ export const Predicate = {
   /**
    * Build a canonical universal collection predicate.
    *
-   * The canonical form is `Not(Contains(Not(P)))`, so universal and
-   * existential collection predicates share one SQL mechanism.
+   * The `All` operator remains explicit so eligibility lowering can guard the
+   * member predicate and SQL can compile a universal counterexample without
+   * confusing it with an authored `Not(Contains(Not(P)))`.
    * @param field - Collection navigation name.
    * @param filters - Exactly one member requirement.
    * @returns The canonical universal collection filter.
@@ -442,12 +443,11 @@ export const Predicate = {
     if (filters.length !== 1) {
       throw new Error('Query $all requires exactly one member predicate')
     }
-    const [filter] = filters
-    return Predicate.not({
+    return {
       field,
-      filters: [Predicate.not(filter as Filter)],
-      operator: Operator.Comparison.Contains,
-    })
+      filters: [filters[0] as Filter],
+      operator: Operator.Collection.All,
+    }
   },
 }
 

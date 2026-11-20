@@ -67,7 +67,26 @@ Basis resolves the verified identity first, then runs the loader and the SSR ren
 
 ## Static files
 
-`assets(folder)` serves a fixed asset directory. `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. Both reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
+A standard `<root>/assets` directory is served automatically. `assets(folder)` overrides that root, and `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. All three reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
+
+## Vendor assets
+
+Basis Server discovers the application's client vendor dependencies automatically at startup. It follows workspace source, collects bare imports that resolve into `node_modules`, builds them into `dist/vendor/vendor.js`, and serves that bundle at the standard `/assets/vendor/vendor.js` path. Adding or removing a client dependency, or changing an installed package, requires a server restart so the vendor bundle and global map stay aligned. The shell loads the vendor bundle before the application, and the standard serve plugin resolves the application's matching imports to the vendor globals. No consumer configuration is required.
+
+A request without the current `v` query redirects to the content hash; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. Vendor chunks are minified with linked source maps, and the maps are served under the same content-versioned `/assets/vendor` contract.
+
+`buildVendor({ entries })` remains available for explicit chunks. `discoverVendorSpecifiers` and `buildVendorBundle` expose the automatic discovery and bundle steps:
+
+```ts
+import { Server } from 'basis/server'
+
+new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .start({ port: 8080 })
+```
+
+The server builds the vendor bundle during startup. If a consumer needs a custom chunk layout, `buildVendor` can still produce deterministic named chunks with exact module-to-global mappings.
 
 ## Live transports
 

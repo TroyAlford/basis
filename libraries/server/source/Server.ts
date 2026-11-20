@@ -1,10 +1,13 @@
 import type { Server as BunServer, ServerWebSocket } from 'bun'
 import type { FSWatcher } from 'chokidar'
+import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
+import { pluginMarkdown, pluginSASS } from '../../bun-plugins'
+import { setVendorSpecifiers } from '../../bun-plugins/source/vendorRuntime'
 import type { Identity } from '../../oauth'
 import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
@@ -24,7 +27,7 @@ import type { CookieChange } from './Cookies'
 import { Cookies, serializeCookie } from './Cookies'
 import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
 import { createDatabase, NullDatabase, openAdmin } from './Database'
-import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell, writeHydrationEntry } from './DevShell'
+import { DEV_SHELL_ROUTE, devShellDirectory, VENDOR_MARKER, writeDevShell, writeHydrationEntry } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
 import type { Graph } from './Graph'
@@ -37,6 +40,7 @@ import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
 import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
 /** Request-scoped data supplied to a {@link Server.context} loader. */
 export interface ContextInput<CookieSchema extends Record<string, string> = Record<string, string>> {
@@ -75,6 +79,20 @@ interface ResolvedContext<AppContext extends object> {
   readonly headers: Headers,
 }
 
+/**
+ * Whether an `If-None-Match` header matches the current strong ETag.
+ * @param header - The request header value.
+ * @param etag - The current strong ETag, including quotes.
+ * @returns Whether the client's cached representation is still current.
+ */
+function matchesETag(header: string | null, etag: string): boolean {
+  if (!header) return false
+  return header.split(',').some(value => {
+    const candidate = value.trim()
+    return candidate === '*' || candidate === etag || candidate === `W/${etag}`
+  })
+}
+
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
@@ -93,12 +111,6 @@ export interface ServerOptions {
   logger?: ILogger,
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
-  /**
-   * Absolute script URLs to import before the application module. Consumers use
-   * this for prebuilt vendor chunks that expose globals consumed by the
-   * application; the bundler must leave these URLs external.
-   */
-  preScripts?: readonly string[],
   /**
    * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
@@ -165,6 +177,7 @@ export class Server<
   #status: HealthStatus = 'starting'
   #title = 'Document'
   #version = 'development'
+  #vendorScripts: readonly string[] = []
 
   constructor() {
     this.#api([HttpVerb.Get], 'health', () => this.#health(), false)
@@ -417,19 +430,37 @@ export class Server<
 
   /**
    * Handles an asset request.
+   *
+   * Vendor artifacts are the standard `/assets/vendor` subtree and are versioned
+   * by content hash; other assets retain the server's modification-time
+   * versioning.
    * @param uri - The URI to handle.
+   * @param request - The incoming request, when available, for conditional vendor requests.
    * @returns The asset response.
    */
-  async handleAsset(uri: URI): Promise<Response> {
-    if (!this.#assets || isInternalStatePath(uri.route)) return Server.NotFound
+  async handleAsset(uri: URI, request?: Request): Promise<Response> {
+    const vendorRoute = uri.route === 'vendor' || uri.route.startsWith('vendor/')
+    const vendorRoot = path.join(this.#root, 'dist', 'vendor')
+    const vendor = vendorRoute && fs.existsSync(vendorRoot)
+    const root = vendor ? vendorRoot : this.#assets
+    if (!root || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const filePath = path.join(this.#assets, uri.route)
-    if (containsInternalStateSegment(this.#assets) || containsInternalStateSegment(filePath)) {
+    const relative = vendor ? uri.route.slice('vendor'.length).replace(/^\/+/, '') : uri.route
+    if (relative.length === 0) return Server.NotFound
+
+    const filePath = path.join(root, relative)
+    if (
+      containsInternalStateSegment(root)
+      || containsInternalStateSegment(filePath)
+      || (vendor && !filePath.startsWith(`${root}${path.sep}`))
+    ) {
       return Server.NotFound
     }
 
     const asset = await publicStaticFile(filePath)
     if (!asset) return Server.NotFound
+
+    if (vendor) return this.#serveVendor(uri, asset, request)
 
     const version = asset.lastModified.toString()
 
@@ -446,6 +477,48 @@ export class Server<
           status: 307,
         })
       }
+    } catch {
+      return Server.NotFound
+    }
+  }
+
+  /**
+   * Serve one content-versioned vendor artifact.
+   * @param uri - The vendor request URI.
+   * @param asset - The resolved vendor file.
+   * @param request - The incoming request, when available.
+   * @returns The versioned asset, a redirect to the current version, or a 304.
+   */
+  async #serveVendor(
+    uri: URI,
+    asset: ReturnType<typeof Bun.file>,
+    request: Request | undefined,
+  ): Promise<Response> {
+    try {
+      const bytes = new Uint8Array(await asset.arrayBuffer())
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      const etag = `"${hash}"`
+      const immutable = 'public, max-age=31536000, immutable'
+
+      if (uri.query.get('v') !== hash) {
+        uri.query.set('v', hash)
+        return new Response(null, {
+          headers: { 'Cache-Control': 'no-cache', 'Location': uri.toString() },
+          status: 307,
+        })
+      }
+
+      if (matchesETag(request?.headers.get('if-none-match') ?? null, etag)) {
+        return new Response(null, {
+          headers: { 'Cache-Control': immutable, 'ETag': etag },
+          status: 304,
+        })
+      }
+
+      return new Response(bytes, {
+        headers: { 'Cache-Control': immutable, 'Content-Type': asset.type, 'ETag': etag },
+        status: 200,
+      })
     } catch {
       return Server.NotFound
     }
@@ -505,6 +578,18 @@ export class Server<
       }
 
       const response = await Bun.fetch(this.#devShellURL())
+      const html = this.#vendorScripts.length > 0
+        ? this.#injectVendorScripts(await response.text())
+        : await response.text()
+      const headers = new Headers(response.headers)
+      headers.delete('content-encoding')
+      headers.delete('content-length')
+      const NativeResponse = Object.getPrototypeOf(await Bun.fetch('data:text/plain,')) as Response
+      const shell = new (NativeResponse.constructor as new (body: BodyInit, init?: ResponseInit) => Response)(html, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+      })
       return this.#withContextResponse(new HTMLRewriter()
         .on('title', {
           element: element => { element.setInnerContent(title) },
@@ -515,8 +600,49 @@ export class Server<
         .on('#root', {
           element: element => { element.setInnerContent(application, { html: true }) },
         })
-        .transform(response), resolved)
+        .transform(shell), resolved)
     })
+  }
+
+  /**
+   * Inject the standard vendor scripts at the generated shell marker.
+   * @param html - The Bun-generated shell HTML.
+   * @returns The shell HTML with the vendor script tags in place of the marker.
+   */
+  #injectVendorScripts(html: string): string {
+    const scripts = this.#vendorScripts
+      .map(src => `<script src="${src.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`)
+      .join('')
+    return html.replace(VENDOR_MARKER, scripts)
+  }
+
+  /**
+   * Discover and build the application's client vendor bundle.
+   *
+   * Discovery walks the client graph, follows workspace source, and records bare
+   * imports that resolve into node_modules. The bundle is built before the
+   * application shell consumes it. This is a startup snapshot; adding or removing
+   * a client dependency, or changing an installed package, requires a restart.
+   * @param entrypoints - The generated browser entrypoints.
+   * @returns The client vendor specifiers.
+   */
+  async #prepareVendor(entrypoints: readonly string[]): Promise<ReadonlySet<string>> {
+    if (entrypoints.length === 0) return new Set()
+
+    try {
+      const specifiers = await discoverVendorSpecifiers({
+        entrypoint: entrypoints[0],
+        plugins: [pluginSASS(), pluginMarkdown()],
+        root: this.#root,
+      })
+      await buildVendorBundle({ root: this.#root, specifiers })
+      return new Set(specifiers)
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error))
+      this.#logger.error(`client vendor discovery failed: ${failure.message}`)
+      await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => undefined)
+      return new Set()
+    }
   }
 
   /**
@@ -702,7 +828,6 @@ export class Server<
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
-   * @param options.preScripts - Absolute classic-script URLs to load before the application.
    * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
@@ -711,11 +836,24 @@ export class Server<
     idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
-    preScripts = [],
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): this => {
     if (logger) this.#logger = logger
     this.#version = version
+    if (!this.#assets) {
+      const assets = path.join(this.#root, 'assets')
+      if (fs.existsSync(assets)) this.#assets = assets
+    }
+
+    this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
+    const entrypoints = this.#mainPath
+      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
+      : []
+    const vendorReady = entrypoints.length > 0
+      ? this.#prepareVendor(entrypoints)
+      : Promise.resolve(new Set<string>())
+    setVendorSpecifiers(vendorReady)
+
     this.#favIcon = resolveFavIcon(
       this.#favIconInput,
       this.#favIconOptions,
@@ -743,11 +881,8 @@ export class Server<
     }
     const databaseReady = this.#databaseReady()
 
-    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, preScripts]))
-    const entrypoints = this.#mainPath
-      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
-      : []
-    const shell = writeDevShell({ directory, entrypoints, preScripts, title: this.#title })
+    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, this.#vendorScripts]))
+    const shell = writeDevShell({ directory, entrypoints, title: this.#title })
     const routes = {
       [DEV_SHELL_ROUTE]: import.meta.require(shell),
     } as Bun.Serve.Routes<SocketData, string>
@@ -782,7 +917,7 @@ export class Server<
     process.on('SIGTERM', this.#handleSignal)
 
     // The Bun dev shell builds lazily; prove one build before reporting healthy.
-    this.#warmShell(databaseReady, watcherReady)
+    this.#warmShell(databaseReady, watcherReady, vendorReady)
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -807,6 +942,7 @@ export class Server<
 
     this.#server?.stop()
     this.#server = null
+    setVendorSpecifiers(null)
 
     if (!this.#closing) {
       const closing = this.#database.close()
@@ -1146,14 +1282,19 @@ export class Server<
    * build reports `error` rather than a healthy process.
    * @param databaseReady - The pending database startup.
    * @param watcherReady - Resolves when the SSR source watcher is ready.
+   * @param vendorReady - Resolves when the client vendor bundle is built.
    */
-  #warmShell(databaseReady: Promise<void>, watcherReady: Promise<void>): void {
+  #warmShell(
+    databaseReady: Promise<void>,
+    watcherReady: Promise<void>,
+    vendorReady: Promise<ReadonlySet<string>>,
+  ): void {
     const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
     const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()
     this.#ready = this.#trackReady(
-      Promise.all([buildReady, databaseReady, watcherReady, ssrReady]).then(() => undefined),
+      Promise.all([buildReady, databaseReady, watcherReady, ssrReady, vendorReady]).then(() => undefined),
     )
   }
 
@@ -1275,7 +1416,7 @@ export class Server<
 
     switch (uri.type) {
       case 'api': return Server.BadRequest
-      case 'assets': return this.handleAsset(uri)
+      case 'assets': return this.handleAsset(uri, request)
       default: return this.handleUI(request)
     }
   }
