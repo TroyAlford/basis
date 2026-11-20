@@ -2,6 +2,13 @@
   "license": "MIT",
   "name": "basis",
   "private": true,
+  "sideEffects": [
+    "**/*.styles.ts",
+    "**/*.css",
+    "**/*.scss",
+    "**/*.less",
+    "**/*.sass"
+  ],
   "version": "1.0.0",
   "bin": {
     "basis": "./consumer/cli.ts"
@@ -9,6 +16,7 @@
   "exports": {
     "./cli": "./consumer/cli.ts",
     "./configuration": "./consumer/configuration.ts",
+    "./docs/mermaid": "./consumer/docs-mermaid.ts",
     "./eslint": "./consumer/eslint.ts",
     "./eslint.config.mjs": "./eslint.config.mjs",
     "./logger": "./consumer/logger.ts",
