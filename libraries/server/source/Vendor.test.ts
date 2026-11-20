@@ -3,6 +3,8 @@ import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { RawSourceMap } from 'source-map-js'
+import { SourceMapConsumer } from 'source-map-js'
 import { pluginMarkdown, pluginSASS } from '../../bun-plugins'
 import type { VendorAsset, VendorBuild } from './Vendor'
 import { buildVendor, buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
@@ -69,6 +71,18 @@ describe('vendor assets', () => {
         expect(asset.url).toBe(`/assets/vendor/${asset.name}.js?v=${asset.hash}`)
         expect(rebuilt?.hash).toBe(asset.hash)
         expect(new Uint8Array(await Bun.file(rebuilt.file).arrayBuffer())).toEqual(bytes)
+
+        expect(asset.sourceMap).toBeDefined()
+        const sourceMap = asset.sourceMap
+        if (!sourceMap) throw new Error(`missing source map for ${asset.name}`)
+        const map = JSON.parse(await Bun.file(sourceMap.file).text()) as RawSourceMap
+        expect(map.sourcesContent).toBeDefined()
+        const consumer = new SourceMapConsumer(map)
+        const sources = new Set<string>()
+        consumer.eachMapping(mapping => {
+          if (mapping.source) sources.add(mapping.source)
+        })
+        expect([...sources].some(source => source.includes(`${asset.name}.ts`))).toBe(true)
       }
 
       expect(await Bun.file(artifact(second, 'consumer').file).text()).toContain('window.Shared')
@@ -104,7 +118,11 @@ describe('vendor assets', () => {
       const build = await buildVendorBundle({ root, specifiers })
       const vendor = artifact(build, 'vendor')
       expect(vendor.url).toMatch(/^\/assets\/vendor\/vendor\.js\?v=[a-f0-9]{64}$/)
+      expect(vendor.sourceMap).toBeDefined()
       expect(await Bun.file(vendor.file).text()).toContain('__basisVendor')
+      expect(await Bun.file(vendor.file).text()).toContain('sourceMappingURL=vendor.js.map')
+      const map = await Bun.file(vendor.sourceMap?.file ?? '').text()
+      expect(map).toContain('vendor-entry.ts')
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -150,6 +168,8 @@ describe('vendor assets', () => {
       const initial = await buildVendor(options)
       const alpha = artifact(initial, 'alpha')
       const beta = artifact(initial, 'beta')
+      const alphaMap = alpha.sourceMap
+      if (!alphaMap) throw new Error('missing alpha source map')
       await mkdir(join(root, 'dist', 'vendor', '.basis'), { recursive: true })
       await writeFile(join(root, 'dist', 'vendor', '.basis', 'secret'), 'secret')
 
@@ -179,6 +199,16 @@ describe('vendor assets', () => {
       expect(redirect.status).toBe(307)
       expect(redirect.headers.get('cache-control')).toBe('no-cache')
       expect(redirect.headers.get('location')).toContain(`?v=${alpha.hash}`)
+
+      const mapRedirect = await Bun.fetch(`${application.url}/assets/vendor/alpha.js.map`, {
+        redirect: 'manual',
+      })
+      expect(mapRedirect.status).toBe(307)
+      expect(mapRedirect.headers.get('location')).toContain(`?v=${alphaMap.hash}`)
+
+      const mapResponse = await Bun.fetch(`${application.url}${alphaMap.url}`)
+      expect(mapResponse.status).toBe(200)
+      expect(await mapResponse.text()).toContain('sourcesContent')
 
       const rebuilt = await buildVendor(options)
       expect(artifact(rebuilt, 'alpha').hash).toBe(alpha.hash)

@@ -142,5 +142,6 @@ export type {
   VendorBuildOptions,
   VendorBundleOptions,
   VendorEntry,
+  VendorSourceMap,
 } from './source/Vendor'
 export type { Socket, SocketHandlers } from './types/Socket'

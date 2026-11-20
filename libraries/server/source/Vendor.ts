@@ -54,6 +54,18 @@ export interface VendorBundleOptions {
   specifiers: readonly string[],
 }
 
+/** One emitted source map for a vendor artifact. */
+export interface VendorSourceMap {
+  /** Byte size of the source map. */
+  bytes: number,
+  /** Absolute path to the source map. */
+  file: string,
+  /** SHA-256 of the source map bytes. */
+  hash: string,
+  /** Versioned source map URL. */
+  url: string,
+}
+
 /** One built vendor artifact. */
 export interface VendorAsset {
   /** Byte size of the emitted file. */
@@ -64,6 +76,8 @@ export interface VendorAsset {
   hash: string,
   /** Stable chunk name. */
   name: string,
+  /** Linked source map, when emitted. */
+  sourceMap?: VendorSourceMap,
   /** Versioned browser URL, including the content hash. */
   url: string,
 }
@@ -247,6 +261,7 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
       naming: { entry: `${entry.name}.js` },
       outdir,
       plugins,
+      sourcemap: 'linked',
       target: 'browser',
     })
 
@@ -260,11 +275,26 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
 
     const bytes = new Uint8Array(await output.arrayBuffer())
     const hash = createHash('sha256').update(bytes).digest('hex')
+    const mapOutput = build.outputs.find(candidate => (
+      candidate.kind === 'sourcemap' || candidate.path === `${output.path}.map`
+    ))
+    let sourceMap: VendorSourceMap | undefined
+    if (mapOutput) {
+      const mapBytes = new Uint8Array(await mapOutput.arrayBuffer())
+      const mapHash = createHash('sha256').update(mapBytes).digest('hex')
+      sourceMap = {
+        bytes: mapBytes.byteLength,
+        file: mapOutput.path,
+        hash: mapHash,
+        url: `/assets/vendor/${entry.name}.js.map?v=${mapHash}`,
+      }
+    }
     assets.push({
       bytes: bytes.byteLength,
       file: output.path,
       hash,
       name: entry.name,
+      sourceMap,
       url: `/assets/vendor/${entry.name}.js?v=${hash}`,
     })
   }
