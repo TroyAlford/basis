@@ -5,10 +5,11 @@ import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefin
 import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
-import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath, resolvePredicatePath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
+import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 import type { CollectionScope, QueryScope } from './SQL'
@@ -381,9 +382,10 @@ export class Graph {
   createExpression(target: string, row: Record<string, unknown> = {}): string | null {
     const entity = this.#policyEntity(target)
     if (!entity) return null
-    const readable = this.#rowExpression(target, Action.Read, row)
     const creatable = this.#rowExpression(target, Action.Create, row)
-    if (!readable || !creatable) return null
+    if (!creatable) return null
+    const readable = this.#rowExpression(target, Action.Read, row)
+    if (!readable) return null
     return `((${readable}) AND (${creatable}))`
   }
 
@@ -448,7 +450,7 @@ export class Graph {
       expression: field => literal(valueFor(field.name)),
       field: name => this.#policyPathField(entity, name),
     }
-    const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
+    const where = SQL.whereFilter(this.definitions, entity.name, grant.predicate as Filter, scope)
     return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
   }
 
@@ -627,8 +629,9 @@ export class Graph {
     const filter = typeof input === 'string'
       ? QueryNormalizer.normalize(entity, input, field, collection, array)
       : Predicate.normalize(entity, input, field, collection, array)
-    if (filter) assertPolicySafe(filter)
-    return filter
+    if (!filter) return null
+    assertPolicySafe(filter)
+    return PredicateEligibility.lower(this.definitions, entity, filter)
   }
 
   /**
@@ -644,8 +647,10 @@ export class Graph {
     const resolved = resolveCollectionPath(entity, name, {
       resolve: value => this.#policyEntity(value),
     })
-    if (!resolved) return undefined
+    if (!resolved) return this.#canonicalCollectionFilterScope(entity, name)
     if ('kind' in resolved) {
+      const canonical = this.#canonicalCollectionFilterScope(entity, name)
+      if (canonical) return canonical
       if (resolved.kind === 'depth') {
         throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
       }
@@ -657,6 +662,29 @@ export class Graph {
       collection: nested => this.#collectionFilterScope(target, nested),
       definition: target,
       field: path => this.#collectionField(resolved.collection, target, path),
+    }
+  }
+
+  /**
+   * Resolve one polymorphic collection navigation for policy normalization.
+   * @param entity - Entity whose collection is referenced.
+   * @param name - Logical collection path.
+   * @returns Collection filter scope, or undefined.
+   */
+  #canonicalCollectionFilterScope(
+    entity: EntityDefinition,
+    name: string,
+  ): CollectionFilterScope | undefined {
+    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
+    if ('kind' in resolved) return undefined
+    const collection = resolved.terminal
+    if (!('kind' in collection)) return undefined
+    const target = this.#collectionTarget(collection)
+    return {
+      array: nested => this.#policyArrayScope(target, nested),
+      collection: nested => this.#collectionFilterScope(target, nested),
+      definition: target,
+      field: path => this.#collectionField(collection, target, path),
     }
   }
 
@@ -695,6 +723,8 @@ export class Graph {
       resolve: value => this.#policyEntity(value),
     })
     if ('kind' in resolved) {
+      const canonical = this.#canonicalPolicyPathField(entity, name)
+      if (canonical) return canonical
       if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
       if (resolved.kind === 'non-reference') {
         throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
@@ -705,6 +735,21 @@ export class Graph {
       return { name: name.endsWith('.id') ? name : `${name}.id`, type: FieldType.ID }
     }
     return resolved.field
+  }
+
+  /**
+   * Resolve one polymorphic policy scalar or reference path.
+   * @param entity - Policy entity where the path starts.
+   * @param name - Logical path.
+   * @returns The terminal field, or undefined when the path is not a scalar.
+   */
+  #canonicalPolicyPathField(
+    entity: EntityDefinition,
+    name: string,
+  ): QueryFieldDefinition | undefined {
+    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
+    if ('kind' in resolved || 'kind' in resolved.terminal) return undefined
+    return resolved.terminal
   }
 
   /**
@@ -739,6 +784,8 @@ export class Graph {
       ? `${lowerFirst(collection.relationship.name)}.`
       : ''
     if ('kind' in resolved) {
+      const canonical = this.#canonicalPolicyPathField(target, normalized)
+      if (canonical) return canonical
       if ('relationship' in collection && normalized.startsWith(prefix)) {
         throw new Error(
           'Graph: unknown relationship field ' +
@@ -784,6 +831,19 @@ export class Graph {
         resolve: value => this.#policyEntity(value),
       })
       if ('kind' in resolved) {
+        const canonical = this.#canonicalPolicyExpression(
+          entity,
+          path,
+          baseAlias,
+          rootAlias,
+          allowSubqueries,
+          nextAlias,
+          parentId,
+        )
+        if (canonical) {
+          cache.set(path, canonical)
+          return canonical
+        }
         if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
         if (resolved.kind === 'non-reference') {
           throw new Error(`Graph: reference field "${entity.name}.${path}" is not policy-safe`)
@@ -829,6 +889,114 @@ export class Graph {
       return result
     }
     return resolve
+  }
+
+  /**
+   * Render one polymorphic policy scalar or reference path.
+   * @param entity - Policy entity where the path starts.
+   * @param path - Logical path.
+   * @param baseAlias - Alias of the table owning the policy entity's local fields.
+   * @param rootAlias - Alias of the joined `Entity` root row, when present.
+   * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextAlias - Allocator for one collision-free subquery alias.
+   * @param parentId - Identity expression for a row reached through a reference hop.
+   * @returns The SQL expression and field metadata, or undefined.
+   * @throws {Error} When a canonical variant cannot be compiled.
+   */
+  #canonicalPolicyExpression(
+    entity: EntityDefinition,
+    path: string,
+    baseAlias: string | undefined,
+    rootAlias: string | undefined,
+    allowSubqueries: boolean,
+    nextAlias: () => string,
+    parentId: string | undefined,
+  ): { readonly expression: string, readonly field: QueryFieldDefinition } | undefined {
+    const resolved = resolvePredicatePath(entity, path, { definitions: this.definitions })
+    if ('kind' in resolved || 'kind' in resolved.terminal) return undefined
+    const branches = resolved.variants.map(variant => {
+      let currentEntity = entity
+      let currentBase = baseAlias
+      let currentRoot = rootAlias
+      let currentParent = parentId
+      let prefix = ''
+      const occurrences = new Map<string, string>()
+      const rootIdentity = rootAlias !== undefined
+        ? `${rootAlias}.${quoteIdentifier('id')}`
+        : baseAlias !== undefined
+          ? `${baseAlias}.${quoteIdentifier('id')}`
+          : currentParent
+      if (rootIdentity) occurrences.set('', rootIdentity)
+      for (const field of variant.fields.slice(0, -1)) {
+        if ('kind' in field) {
+          throw new Error(`Graph: policy path "${path}" contains a nested collection`)
+        }
+        if (field.type !== FieldType.Entity) {
+          throw new Error(`Graph: policy path "${path}" traverses non-reference field "${field.name}"`)
+        }
+        const expression = this.#policyFieldExpression(
+          field,
+          currentEntity,
+          currentBase,
+          currentRoot,
+          currentParent,
+          allowSubqueries,
+          nextAlias,
+        )
+        const target = field.target === 'Entity'
+          ? identityDefinition()
+          : this.#policyEntity(field.target)
+        if (!target) throw new Error(`Graph: policy path "${path}" has unknown target`)
+        currentEntity = target
+        currentBase = undefined
+        currentRoot = undefined
+        currentParent = expression
+        prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
+        occurrences.set(prefix, expression)
+      }
+      const terminal = variant.fields.at(-1)
+      if (!terminal || 'kind' in terminal) {
+        throw new Error(`Graph: policy path "${path}" has no scalar terminal`)
+      }
+      const expression = this.#policyFieldExpression(
+        terminal,
+        currentEntity,
+        currentBase,
+        currentRoot,
+        currentParent,
+        true,
+        nextAlias,
+      )
+      const guards = variant.restrictions.map(restriction => {
+        const prefixName = restriction.path === 'entity'
+          ? ''
+          : restriction.path.slice(0, -'.entity'.length)
+        const identity = occurrences.get(prefixName)
+        if (identity === undefined) {
+          throw new Error(
+            `Graph: policy path "${path}" restriction "${restriction.path}" ` +
+            'has no physical occurrence',
+          )
+        }
+        return `(SELECT ${quoteIdentifier('entity')} FROM ${quoteIdentifier('Entity')} ` +
+          `WHERE ${quoteIdentifier('id')} = ${identity}) IN (` +
+          `${restriction.entityTypes.map(type => literal(type)).join(', ')})`
+      })
+      return {
+        expression,
+        guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+      }
+    })
+    const [first] = branches
+    if (!first) throw new Error(`Graph: policy path "${path}" has no physical variants`)
+    return {
+      expression: branches.length === 1 && first.guard === 'TRUE'
+        ? first.expression
+        : `CASE ${branches.map(branch => (
+          `WHEN ${branch.guard} THEN ${branch.expression}`
+        )).join(' ')} ELSE NULL END`,
+      field: resolved.terminal,
+    }
   }
 
   /**
@@ -902,25 +1070,170 @@ export class Graph {
     const resolved = resolveCollectionPath(entity, name, {
       resolve: value => this.#policyEntity(value),
     })
-    if (!resolved) return undefined
+    if (!resolved) {
+      return this.#canonicalCollectionSqlScope(
+        entity,
+        name,
+        parentAlias,
+        baseAlias,
+        rootAlias,
+        allowSubqueries,
+        nextPolicyFieldAlias,
+        depth,
+      )
+    }
     if ('kind' in resolved) {
+      const canonical = this.#canonicalCollectionSqlScope(
+        entity,
+        name,
+        parentAlias,
+        baseAlias,
+        rootAlias,
+        allowSubqueries,
+        nextPolicyFieldAlias,
+        depth,
+      )
+      if (canonical) return canonical
       if (resolved.kind === 'depth') {
         throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
       }
       return undefined
     }
     const collection = resolved.collection
+    const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries, nextPolicyFieldAlias)
+    const parentId = resolved.prefix === ''
+      ? `${parentAlias}.${quoteIdentifier('id')}`
+      : row(resolved.prefix).expression
+    return this.#collectionScopeForCollection(
+      collection,
+      parentId,
+      depth,
+      allowSubqueries,
+      nextPolicyFieldAlias,
+      `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`,
+    )
+  }
+
+  /**
+   * Build a collection scope from canonical physical path variants.
+   * @param entity - Policy entity where the collection path starts.
+   * @param name - Logical collection path.
+   * @param parentAlias - Alias of the policy row being authorized.
+   * @param baseAlias - Alias of the table owning the policy entity's local fields.
+   * @param rootAlias - Alias of the joined `Entity` root row, when present.
+   * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextPolicyFieldAlias - Allocator for one collision-free subquery alias.
+   * @param depth - Number of nested collection scopes.
+   * @returns Variant-aware collection scope, or undefined.
+   * @throws {Error} When a canonical physical variant cannot be compiled.
+   */
+  #canonicalCollectionSqlScope(
+    entity: EntityDefinition,
+    name: string,
+    parentAlias: string,
+    baseAlias: string | undefined,
+    rootAlias: string | undefined,
+    allowSubqueries: boolean,
+    nextPolicyFieldAlias: () => string,
+    depth: number,
+  ): CollectionScope | undefined {
+    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
+    if ('kind' in resolved) return undefined
+    const terminal = resolved.terminal
+    if (!('kind' in terminal)) return undefined
+    const scopes = resolved.variants.map((variant, index) => {
+      let currentEntity = entity
+      let currentBase = baseAlias
+      let currentRoot = rootAlias
+      let parentId = `${parentAlias}.${quoteIdentifier('id')}`
+      let prefix = ''
+      const occurrences = new Map<string, string>([['', parentId]])
+      for (const field of variant.fields.slice(0, -1)) {
+        if ('kind' in field) {
+          throw new Error(`Graph: collection path "${name}" contains a nested collection`)
+        }
+        if (field.type !== FieldType.Entity) {
+          throw new Error(`Graph: collection path "${name}" traverses non-reference field "${field.name}"`)
+        }
+        const expression = this.#policyFieldExpression(
+          field,
+          currentEntity,
+          currentBase,
+          currentRoot,
+          parentId,
+          allowSubqueries,
+          nextPolicyFieldAlias,
+        )
+        const target = field.target === 'Entity'
+          ? identityDefinition()
+          : this.#policyEntity(field.target)
+        if (!target) throw new Error(`Graph: collection path "${name}" has unknown target`)
+        currentEntity = target
+        currentBase = undefined
+        currentRoot = undefined
+        parentId = expression
+        prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
+        occurrences.set(prefix, expression)
+      }
+      const terminalField = variant.fields.at(-1)
+      if (!terminalField || !('kind' in terminalField)) {
+        throw new Error(`Graph: collection path "${name}" has no collection terminal`)
+      }
+      const guards = variant.restrictions.map(restriction => {
+        const prefixName = restriction.path === 'entity'
+          ? ''
+          : restriction.path.slice(0, -'.entity'.length)
+        const identity = occurrences.get(prefixName)
+        if (identity === undefined) {
+          throw new Error(
+            `Graph: collection path "${name}" restriction "${restriction.path}" ` +
+            'has no physical occurrence',
+          )
+        }
+        return `(SELECT ${quoteIdentifier('entity')} FROM ${quoteIdentifier('Entity')} ` +
+          `WHERE ${quoteIdentifier('id')} = ${identity}) IN (` +
+          `${restriction.entityTypes.map(type => literal(type)).join(', ')})`
+      })
+      return {
+        guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+        scope: this.#collectionScopeForCollection(
+          terminalField,
+          parentId,
+          depth,
+          allowSubqueries,
+          nextPolicyFieldAlias,
+          `${depth}_${index}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`,
+        ),
+      }
+    })
+    const [first] = scopes
+    if (!first) throw new Error(`Graph: collection path "${name}" has no physical variants`)
+    return { ...first.scope, variants: scopes }
+  }
+
+  /**
+   * Build one correlated collection scope from a resolved collection and parent identity.
+   * @param collection - Collection navigation.
+   * @param parentId - Identity expression of the owning occurrence.
+   * @param depth - Number of nested collection scopes.
+   * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextPolicyFieldAlias - Allocator for one collision-free subquery alias.
+   * @param suffix - Unique alias suffix for this collection variant.
+   * @returns The collection scope.
+   */
+  #collectionScopeForCollection(
+    collection: DerivedCollectionDefinition,
+    parentId: string,
+    depth: number,
+    allowSubqueries: boolean,
+    nextPolicyFieldAlias: () => string,
+    suffix: string,
+  ): CollectionScope {
     const record = collection.kind === 'explicit' && collection.targetEndpoint === undefined
     const target = this.#collectionTarget(collection)
-    const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
     const relationshipAlias = `__policy_${suffix}_rel`
     const targetAlias = `__policy_${suffix}_target`
     const rootAliasName = `__policy_${suffix}_root`
-    const prefix = resolved.prefix
-    const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries, nextPolicyFieldAlias)
-    const parentId = prefix === ''
-      ? `${parentAlias}.${quoteIdentifier('id')}`
-      : row(prefix).expression
     const relation = resolveCollectionRelation(collection, value => this.#policyEntity(value))
     const sql = collectionSqlRelation(this.definitions, relation, parentId, {
       relationship: relationshipAlias,
@@ -930,7 +1243,7 @@ export class Graph {
     const rootAliasValue = sql.rootAlias
     const rowAlias = record ? sql.relationshipAlias : sql.targetAlias ?? rootAliasValue
     if (rowAlias === undefined) {
-      throw new Error(`Graph: collection "${name}" has no row alias`)
+      throw new Error(`Graph: collection "${collection.name}" has no row alias`)
     }
     const relationship = 'relationship' in collection ? collection.relationship : undefined
     const resolver = this.#policyResolver(
@@ -1322,7 +1635,14 @@ export class Graph {
     if (!entity) return true
     return filterFieldNames(grant.predicate).some(name => {
       if (name === ACTOR_FIELD_NAME) return false
-      const field = entity.effectiveFields.find(candidate => candidate.name === name.split('.', 1)[0])
+      if (name.endsWith('.id')) {
+        const reference = entity.effectiveFields.find(
+          candidate => candidate.name === name.slice(0, -'.id'.length),
+        )
+        if (reference?.owner === grant.target && reference.type === FieldType.Entity) return false
+      }
+      if (name.includes('.')) return true
+      const field = entity.effectiveFields.find(candidate => candidate.name === name)
       return !field || field.owner !== grant.target
     })
   }
@@ -1387,7 +1707,7 @@ export class Graph {
       field,
       filterField: field,
     }
-    const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
+    const where = SQL.whereFilter(this.definitions, entity.name, grant.predicate as Filter, scope)
     return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
   }
 

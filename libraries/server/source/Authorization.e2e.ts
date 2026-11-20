@@ -776,6 +776,247 @@ describe('Authorization RLS', () => {
     }
   }, 30_000)
 
+  test('authorizes sections through polymorphic document workspace membership', async () => {
+    const documentGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'code', type: 'String' },
+            {
+              cardinality: 'Many',
+              field: 'sections',
+              inverse: 'document',
+              target: 'Section',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Document',
+          security: { [Action.Read]: Security.Public },
+        },
+        { extends: 'Document', fields: [], name: 'PublicDocument' },
+        {
+          extends: 'Document',
+          fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+          name: 'PrivateDocument',
+        },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'members',
+            inverse: 'workspace',
+            target: 'Member',
+            type: 'Inverse',
+          }],
+          name: 'Workspace',
+          security: { [Action.Read]: Security.Public },
+        },
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [
+            { field: 'user', target: 'User', type: 'Entity' },
+            { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+          ],
+          name: 'Member',
+          security: { [Action.Read]: Security.Public },
+        },
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'document', inverse: 'sections', target: 'Document', type: 'Entity' },
+          ],
+          name: 'Section',
+          security: {
+            [Action.Read]: [
+              { where: "document.entity = 'PublicDocument'" },
+              { where: 'document.workspace.members $contains (user = $me)' },
+            ],
+          },
+        },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'NegatedSection',
+          security: {
+            [Action.Read]: {
+              where: 'NOT(document.workspace.members $contains (user = $me))',
+            },
+          },
+        },
+      ],
+    })
+    const install = tempDirectory('basis-authorization-polymorphic-')
+    const server = await start(install, documentGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      const charlie = await authorization.enrollIdentity('test', 'charlie', { email: 'charlie@example.com' })
+      if (!alice || !bob || !charlie) throw new Error('authorization users were not enrolled')
+      const publicDocument = randomUUID()
+      const privateDocumentA = randomUUID()
+      const privateDocumentB = randomUUID()
+      const privateDocumentC = randomUUID()
+      const workspaceA = randomUUID()
+      const workspaceB = randomUUID()
+      const publicSection = randomUUID()
+      const privateSectionA = randomUUID()
+      const privateSectionB = randomUUID()
+      const privateSectionC = randomUUID()
+      const negatedPublic = randomUUID()
+      const negatedPrivateA = randomUUID()
+      const negatedPrivateB = randomUUID()
+      const memberAlice = randomUUID()
+      const memberBob = randomUUID()
+      await admin.sql.begin(async tx => {
+        await tx`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES
+            (${publicDocument}, 'Public Document', 'PublicDocument'),
+            (${privateDocumentA}, 'Private A', 'PrivateDocument'),
+            (${privateDocumentB}, 'Private B', 'PrivateDocument'),
+            (${privateDocumentC}, 'Private C', 'PrivateDocument'),
+            (${workspaceA}, 'Workspace A', 'Workspace'),
+            (${workspaceB}, 'Workspace B', 'Workspace'),
+            (${publicSection}, 'Public Section', 'Section'),
+            (${privateSectionA}, 'Private Section A', 'Section'),
+            (${privateSectionB}, 'Private Section B', 'Section'),
+            (${privateSectionC}, 'Private Section C', 'Section'),
+            (${negatedPublic}, 'Negated Public', 'NegatedSection'),
+            (${negatedPrivateA}, 'Negated Private A', 'NegatedSection'),
+            (${negatedPrivateB}, 'Negated Private B', 'NegatedSection'),
+            (${memberAlice}, 'Member Alice', 'Member'),
+            (${memberBob}, 'Member Bob', 'Member')
+        `
+        await tx`
+          INSERT INTO "Document" ("id", "code")
+          VALUES
+            (${publicDocument}, 'public'),
+            (${privateDocumentA}, 'private-a'),
+            (${privateDocumentB}, 'private-b'),
+            (${privateDocumentC}, 'private-c')
+        `
+        await tx`
+          INSERT INTO "PublicDocument" ("id") VALUES (${publicDocument})
+        `
+        await tx`
+          INSERT INTO "Workspace" ("id") VALUES (${workspaceA}), (${workspaceB})
+        `
+        await tx`
+          INSERT INTO "PrivateDocument" ("id", "workspace.id")
+          VALUES
+            (${privateDocumentA}, ${workspaceA}),
+            (${privateDocumentB}, ${workspaceB}),
+            (${privateDocumentC}, ${null})
+        `
+        await tx`
+          INSERT INTO "Member" ("id", "user.id", "workspace.id")
+          VALUES
+            (${memberAlice}, ${alice}, ${workspaceA}),
+            (${memberBob}, ${bob}, ${workspaceB})
+        `
+        await tx`
+          INSERT INTO "Section" ("id", "title", "document.id")
+          VALUES
+            (${publicSection}, 'Public', ${publicDocument}),
+            (${privateSectionA}, 'Private A', ${privateDocumentA}),
+            (${privateSectionB}, 'Private B', ${privateDocumentB}),
+            (${privateSectionC}, 'Private C', ${privateDocumentC})
+        `
+        await tx`
+          INSERT INTO "NegatedSection" ("id", "document.id")
+          VALUES
+            (${negatedPublic}, ${publicDocument}),
+            (${negatedPrivateA}, ${privateDocumentA}),
+            (${negatedPrivateB}, ${privateDocumentB})
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const read = (actor: string | null) => asActor(actor, () => server.db.query('Section', {
+        fields: ['id'],
+        orderBy: 'id',
+      }))
+      expect(await read(null)).toEqual([{ id: publicSection }])
+      expect(await read(alice)).toEqual([{ id: publicSection }, { id: privateSectionA }]
+        .sort((left, right) => left.id.localeCompare(right.id)))
+      expect(await read(bob)).toEqual([{ id: publicSection }, { id: privateSectionB }]
+        .sort((left, right) => left.id.localeCompare(right.id)))
+      expect(await read(charlie)).toEqual([{ id: publicSection }])
+
+      const direct = (actor: string | null) => asActor(actor, () => server.db.tx(async sql => (
+        sql<{ id: string }[]>`
+          SELECT "id"
+          FROM "Section"
+          ORDER BY "id"
+        `
+      )))
+      expect((await direct(null)).map(row => row.id)).toEqual([publicSection])
+      expect((await direct(alice)).map(row => row.id)).toEqual(
+        [publicSection, privateSectionA].sort((left, right) => left.localeCompare(right)),
+      )
+      expect((await direct(charlie)).map(row => row.id)).toEqual([publicSection])
+
+      const privateQuery = (actor: string | null) => asActor(actor, () => server.db.query('Section', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'document.workspace.members $contains (user = $me)',
+      }))
+      expect(await privateQuery(alice)).toEqual([{ id: privateSectionA }])
+      expect(await privateQuery(null)).toEqual([])
+      expect(await privateQuery(charlie)).toEqual([])
+      const negated = await asActor(alice, () => server.db.query('NegatedSection', {
+        fields: ['id'],
+        orderBy: 'id',
+      }))
+      expect(negated).toEqual([{ id: negatedPrivateB }])
+
+      expect(await asActor(alice, () => authorization.can('read', 'Section', { id: privateSectionA })))
+        .toBe(true)
+      expect(await asActor(alice, () => authorization.can('read', 'Section', { id: privateSectionB })))
+        .toBe(false)
+      expect(await asActor(alice, () => authorization.can('read', 'Section', { id: privateSectionC })))
+        .toBe(false)
+      expect(await asActor(charlie, () => authorization.can('read', 'Section', { id: privateSectionA })))
+        .toBe(false)
+      expect(await asActor(alice, () => authorization.can('create', 'Section', { id: randomUUID() })))
+        .toBe(false)
+      expect(await asActor(alice, () => authorization.can('update', 'Section', { id: privateSectionA })))
+        .toBe(false)
+      expect(await asActor(alice, () => authorization.can('delete', 'Section', { id: privateSectionA })))
+        .toBe(false)
+
+      const sectionsForActor = async (
+        actor: string | null,
+        document: string,
+      ): Promise<string[]> => {
+        const documents = await asActor(actor, () => server.db.query<{
+          readonly id: string,
+          readonly sections: { readonly items: readonly { readonly id: string }[] },
+        }>('Document', { fields: ['id', 'sections{$limit:null}'], orderBy: 'id' }))
+        return documents
+          .find(candidate => candidate.id === document)?.sections.items.map(section => section.id)
+          .sort((left, right) => left.localeCompare(right)) ?? []
+      }
+      expect(await sectionsForActor(null, privateDocumentA)).toEqual([])
+      expect(await sectionsForActor(charlie, privateDocumentA)).toEqual([])
+      expect(await sectionsForActor(alice, privateDocumentA)).toEqual([privateSectionA])
+      expect(await sectionsForActor(alice, privateDocumentB)).toEqual([])
+      expect(await sectionsForActor(alice, privateDocumentC)).toEqual([])
+      expect(await sectionsForActor(bob, privateDocumentB)).toEqual([privateSectionB])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 30_000)
+
   test('enforces explicit collection membership through PostgreSQL RLS', async () => {
     const explicitGraph = new Graph({
       entities: [
