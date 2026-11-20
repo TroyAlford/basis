@@ -2,7 +2,7 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
-import { devShellDirectory, renderDevShell, writeDevShell } from './DevShell'
+import { devShellDirectory, renderDevShell, VENDOR_MARKER, writeDevShell } from './DevShell'
 
 const shellDir = '/tmp/basis-shell'
 
@@ -34,6 +34,17 @@ describe('renderDevShell', () => {
     const html = renderDevShell({ directory: shellDir, entrypoints: [join(shellDir, 'entry.ts')], title: 't' })
 
     expect(html).toContain('src="./entry.ts"')
+  })
+
+  test('exposes a marker for server-injected vendor scripts before module entrypoints', () => {
+    const html = renderDevShell({
+      directory: shellDir,
+      entrypoints: ['/srv/app/index.tsx'],
+      title: 't',
+    })
+
+    expect(html).toContain(VENDOR_MARKER)
+    expect(html.indexOf(VENDOR_MARKER)).toBeLessThan(html.indexOf('type="module"'))
   })
 
   test('never emits a bare filesystem separator in a URL', () => {
