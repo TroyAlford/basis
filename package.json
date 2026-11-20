@@ -26,7 +26,6 @@
     "./react": "./consumer/react.ts",
     "./react/hmr": "./consumer/react-hmr.ts",
     "./react/icons": "./consumer/react-icons.ts",
-    "./react/mermaid": "./consumer/react-mermaid.ts",
     "./review": "./consumer/review.ts",
     "./serve": "./consumer/serve.ts",
     "./server": "./consumer/server.ts",
