@@ -65,7 +65,7 @@ test('keeps production React and hot-replaces a mounted class component', async 
     const html = await Bun.fetch(app.url).then(response => response.text())
     expect(html).toContain('<h1>Application <!-- -->0</h1>')
 
-    const source = [...html.matchAll(/<script[^>]*src="([^"]+\.js)"/g)].map(match => match[1])[0]
+    const source = [...html.matchAll(/<script type="module"[^>]*src="([^"]+)"/g)].map(match => match[1])[0]
     expect(source).toBeDefined()
     const bundle = await Bun.fetch(new URL(source, app.url)).then(response => response.text())
     expect(bundle).not.toContain('react-refresh')
