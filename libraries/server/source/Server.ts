@@ -617,7 +617,8 @@ export class Server<
    *
    * Discovery walks the client graph, follows workspace source, and records bare
    * imports that resolve into node_modules. The bundle is built before the
-   * application shell consumes it.
+   * application shell consumes it. This is a startup snapshot; adding or removing
+   * a client dependency, or changing an installed package, requires a restart.
    * @param entrypoints - The generated browser entrypoints.
    * @returns The client vendor specifiers.
    */

@@ -71,7 +71,7 @@ A standard `<root>/assets` directory is served automatically. `assets(folder)` o
 
 ## Vendor assets
 
-Basis Server discovers the application's client vendor dependencies automatically. It follows workspace source, collects bare imports that resolve into `node_modules`, builds them into `dist/vendor/vendor.js`, and serves that bundle at the standard `/assets/vendor/vendor.js` path. The shell loads the vendor bundle before the application, and the standard serve plugin resolves the application's matching imports to the vendor globals. No consumer configuration is required.
+Basis Server discovers the application's client vendor dependencies automatically at startup. It follows workspace source, collects bare imports that resolve into `node_modules`, builds them into `dist/vendor/vendor.js`, and serves that bundle at the standard `/assets/vendor/vendor.js` path. Adding or removing a client dependency, or changing an installed package, requires a server restart so the vendor bundle and global map stay aligned. The shell loads the vendor bundle before the application, and the standard serve plugin resolves the application's matching imports to the vendor globals. No consumer configuration is required.
 
 A request without the current `v` query redirects to the content hash; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. Vendor chunks are minified with linked source maps, and the maps are served under the same content-versioned `/assets/vendor` contract.
 
