@@ -6,6 +6,8 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
+import { pluginMarkdown, pluginSASS } from '../../bun-plugins'
+import { setVendorSpecifiers } from '../../bun-plugins/source/vendorRuntime'
 import type { Identity } from '../../oauth'
 import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
@@ -38,6 +40,7 @@ import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
 import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
 /** Request-scoped data supplied to a {@link Server.context} loader. */
 export interface ContextInput<CookieSchema extends Record<string, string> = Record<string, string>> {
@@ -432,11 +435,13 @@ export class Server<
    * @returns The asset response.
    */
   async handleAsset(uri: URI, request?: Request): Promise<Response> {
-    const vendor = uri.route === 'vendor' || uri.route.startsWith('vendor/')
-    const root = this.#assets
+    const vendorRoute = uri.route === 'vendor' || uri.route.startsWith('vendor/')
+    const vendorRoot = path.join(this.#root, 'dist', 'vendor')
+    const vendor = vendorRoute && fs.existsSync(vendorRoot)
+    const root = vendor ? vendorRoot : this.#assets
     if (!root || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const relative = uri.route
+    const relative = vendor ? uri.route.slice('vendor'.length).replace(/^\/+/, '') : uri.route
     if (relative.length === 0) return Server.NotFound
 
     const filePath = path.join(root, relative)
@@ -581,6 +586,34 @@ export class Server<
         })
         .transform(response), resolved)
     })
+  }
+
+  /**
+   * Discover and build the application's client vendor bundle.
+   *
+   * Discovery walks the client graph, follows workspace source, and records bare
+   * imports that resolve into node_modules. The bundle is built before the
+   * application shell consumes it.
+   * @param entrypoints - The generated browser entrypoints.
+   * @returns The client vendor specifiers.
+   */
+  async #prepareVendor(entrypoints: readonly string[]): Promise<ReadonlySet<string>> {
+    if (entrypoints.length === 0) return new Set()
+
+    try {
+      const specifiers = await discoverVendorSpecifiers({
+        entrypoint: entrypoints[0],
+        plugins: [pluginSASS(), pluginMarkdown()],
+        root: this.#root,
+      })
+      await buildVendorBundle({ root: this.#root, specifiers })
+      return new Set(specifiers)
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error))
+      this.#logger.error(`client vendor discovery failed: ${failure.message}`)
+      await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => undefined)
+      return new Set()
+    }
   }
 
   /**
@@ -782,6 +815,16 @@ export class Server<
       const assets = path.join(this.#root, 'assets')
       if (fs.existsSync(assets)) this.#assets = assets
     }
+
+    const preScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
+    const entrypoints = this.#mainPath
+      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
+      : []
+    const vendorReady = entrypoints.length > 0
+      ? this.#prepareVendor(entrypoints)
+      : Promise.resolve(new Set<string>())
+    setVendorSpecifiers(vendorReady)
+
     this.#favIcon = resolveFavIcon(
       this.#favIconInput,
       this.#favIconOptions,
@@ -809,11 +852,8 @@ export class Server<
     }
     const databaseReady = this.#databaseReady()
 
-    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath]))
-    const entrypoints = this.#mainPath
-      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
-      : []
-    const shell = writeDevShell({ directory, entrypoints, title: this.#title })
+    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, preScripts]))
+    const shell = writeDevShell({ directory, entrypoints, preScripts, title: this.#title })
     const routes = {
       [DEV_SHELL_ROUTE]: import.meta.require(shell),
     } as Bun.Serve.Routes<SocketData, string>
@@ -848,7 +888,7 @@ export class Server<
     process.on('SIGTERM', this.#handleSignal)
 
     // The Bun dev shell builds lazily; prove one build before reporting healthy.
-    this.#warmShell(databaseReady, watcherReady)
+    this.#warmShell(databaseReady, watcherReady, vendorReady)
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -873,6 +913,7 @@ export class Server<
 
     this.#server?.stop()
     this.#server = null
+    setVendorSpecifiers(null)
 
     if (!this.#closing) {
       const closing = this.#database.close()
@@ -1212,14 +1253,19 @@ export class Server<
    * build reports `error` rather than a healthy process.
    * @param databaseReady - The pending database startup.
    * @param watcherReady - Resolves when the SSR source watcher is ready.
+   * @param vendorReady - Resolves when the client vendor bundle is built.
    */
-  #warmShell(databaseReady: Promise<void>, watcherReady: Promise<void>): void {
+  #warmShell(
+    databaseReady: Promise<void>,
+    watcherReady: Promise<void>,
+    vendorReady: Promise<ReadonlySet<string>>,
+  ): void {
     const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
     const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()
     this.#ready = this.#trackReady(
-      Promise.all([buildReady, databaseReady, watcherReady, ssrReady]).then(() => undefined),
+      Promise.all([buildReady, databaseReady, watcherReady, ssrReady, vendorReady]).then(() => undefined),
     )
   }
 

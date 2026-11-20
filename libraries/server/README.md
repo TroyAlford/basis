@@ -40,7 +40,7 @@ The server delegates to Bun's dev server for compilation, watching, HMR, and Rea
 
 - `api(verbs, template, handler)` registers an API route under `/api`.
 - A standard `assets` directory is served automatically; `mount(prefix, folder, { allow })` and `assets(folder)` provide explicit mounts with traversal and `.basis` protection.
-- `buildVendor({ entries })` writes content-versioned chunks to `assets/vendor`; the standard `/assets/vendor` subtree gets immutable caching and ETag revalidation automatically.
+- Basis Server discovers client vendor imports from the application graph, builds `dist/vendor/vendor.js`, and serves the standard `/assets/vendor` path with immutable caching and ETag revalidation. `buildVendor({ entries })` remains available for explicit chunk layouts.
 - `sse(route, handler)` registers a GET event stream.
 - `socket(route, handlers)` registers a WebSocket route.
 - `oauth(options)` mounts a provider-agnostic OAuth flow.

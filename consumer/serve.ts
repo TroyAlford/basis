@@ -5,6 +5,8 @@
  */
 import { pluginServe } from '../libraries/bun-plugins/serve'
 
+export { pluginVendor } from '../libraries/bun-plugins/source/pluginVendor'
+
 // eslint-disable-next-line @basis/no-default-export -- Bun's `[serve.static]` plugin loader requires a default export.
 export default pluginServe
 export { pluginServe }

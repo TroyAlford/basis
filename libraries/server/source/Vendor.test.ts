@@ -1,10 +1,11 @@
 import { tempDirectory, useApplication } from 'basis/testing'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pluginMarkdown, pluginSASS } from '../../bun-plugins'
 import type { VendorAsset, VendorBuild } from './Vendor'
-import { buildVendor } from './Vendor'
+import { buildVendor, buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
 setDefaultTimeout(30_000)
 
@@ -86,6 +87,49 @@ describe('vendor assets', () => {
     }
   })
 
+  test('discovers the client graph and builds the standard automatic bundle', async () => {
+    const root = tempDirectory('basis-vendor-discovery-')
+
+    try {
+      const specifiers = await discoverVendorSpecifiers({
+        entrypoint: join(repoRoot, 'testing', 'server', 'Application.tsx'),
+        plugins: [pluginSASS(), pluginMarkdown()],
+        root: repoRoot,
+      })
+
+      expect(specifiers).toContain('react')
+      expect(specifiers).not.toContain('pg')
+      await symlink(join(repoRoot, 'node_modules'), join(root, 'node_modules'), 'dir')
+
+      const build = await buildVendorBundle({ root, specifiers })
+      const vendor = artifact(build, 'vendor')
+      expect(vendor.url).toMatch(/^\/assets\/vendor\/vendor\.js\?v=[a-f0-9]{64}$/)
+      expect(await Bun.file(vendor.file).text()).toContain('__basisVendor')
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test('wires the discovered vendor bundle into a Server application automatically', async () => {
+    const application = await useApplication({
+      cwd: repoRoot,
+      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
+    })
+
+    const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
+    expect(shell).toContain('/assets/vendor/vendor.js')
+
+    const source = /<script type="module"[^>]+src="([^"]+)"/.exec(shell)?.[1]
+    expect(source).toBeDefined()
+    const applicationBundle = await Bun.fetch(`${application.url}${source}`).then(response => response.text())
+    expect(applicationBundle).toContain('__basisVendor')
+    expect(applicationBundle).not.toContain('react.production')
+
+    const vendor = await Bun.fetch(`${application.url}/assets/vendor/vendor.js`, { redirect: 'manual' })
+    expect(vendor.status).toBe(307)
+    expect(vendor.headers.get('location')).toContain('?v=')
+  })
+
   test('reuses unchanged cache entries and invalidates changed chunks over HTTP', async () => {
     const root = tempDirectory('basis-vendor-http-')
 
@@ -106,8 +150,8 @@ describe('vendor assets', () => {
       const initial = await buildVendor(options)
       const alpha = artifact(initial, 'alpha')
       const beta = artifact(initial, 'beta')
-      await mkdir(join(root, 'assets', 'vendor', '.basis'), { recursive: true })
-      await writeFile(join(root, 'assets', 'vendor', '.basis', 'secret'), 'secret')
+      await mkdir(join(root, 'dist', 'vendor', '.basis'), { recursive: true })
+      await writeFile(join(root, 'dist', 'vendor', '.basis', 'secret'), 'secret')
 
       const application = await useApplication({
         cwd: repoRoot,

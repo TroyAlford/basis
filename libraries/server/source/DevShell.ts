@@ -19,6 +19,8 @@ export interface DevShellOptions {
   directory: string,
   /** Absolute entrypoint files to load, in order. */
   entrypoints: readonly string[],
+  /** Classic-script URLs to load before the module entrypoints. */
+  preScripts?: readonly string[],
   /** Document title. */
   title: string,
 }
@@ -58,12 +60,13 @@ function scriptSource(directory: string, entrypoint: string): string {
  * @param options - The entrypoints, shell directory, and document title.
  * @param options.directory - Directory the shell is written to.
  * @param options.entrypoints - Absolute entrypoint files to load, in order.
+ * @param options.preScripts - Classic-script URLs to load before the module entrypoints.
  * @param options.title - Document title.
  * @returns The shell HTML.
  */
-export function renderDevShell({ directory, entrypoints, title }: DevShellOptions): string {
+export function renderDevShell({ directory, entrypoints, preScripts = [], title }: DevShellOptions): string {
   const scripts = entrypoints.map(entrypoint => ({ module: true, src: scriptSource(directory, entrypoint) }))
-  const body = renderToString(React.createElement(IndexHTML, { favicon: false, scripts, title }))
+  const body = renderToString(React.createElement(IndexHTML, { favicon: false, preScripts, scripts, title }))
   return `<!doctype html>\n${body}\n`
 }
 
@@ -72,6 +75,7 @@ export function renderDevShell({ directory, entrypoints, title }: DevShellOption
  * @param options - The entrypoints, shell directory, and document title.
  * @param options.directory - Directory the shell is written to.
  * @param options.entrypoints - Absolute entrypoint files to load, in order.
+ * @param options.preScripts - Classic-script URLs to load before the module entrypoints.
  * @param options.title - Document title.
  * @returns The absolute path to the written `index.html`.
  */

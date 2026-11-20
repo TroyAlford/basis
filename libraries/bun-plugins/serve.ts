@@ -2,6 +2,7 @@ import type { BunPlugin } from 'bun'
 import { pluginMarkdown } from './source/pluginMarkdown'
 import { pluginRefresh } from './source/pluginRefresh'
 import { pluginSASS } from './source/pluginSASS'
+import { pluginVendor } from './source/pluginVendor'
 
 /**
  * The single bundler plugin Bun's development server loads for a Basis app.
@@ -14,7 +15,7 @@ import { pluginSASS } from './source/pluginSASS'
 export const pluginServe: BunPlugin = {
   name: 'basis-serve',
   setup(build) {
-    for (const plugin of [pluginSASS(), pluginMarkdown(), pluginRefresh()]) {
+    for (const plugin of [pluginSASS(), pluginMarkdown(), pluginRefresh(), pluginVendor()]) {
       plugin.setup(build)
     }
   },

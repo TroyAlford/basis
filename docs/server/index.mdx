@@ -71,26 +71,22 @@ A standard `<root>/assets` directory is served automatically. `assets(folder)` o
 
 ## Vendor assets
 
-`buildVendor({ entries })` compiles each vendor entry into `assets/vendor/<name>.js` and returns its SHA-256 content hash and versioned URL. An entry can map exact module specifiers to browser globals, so chunks such as `react-dom` consume a shared React chunk instead of bundling another copy.
+Basis Server discovers the application's client vendor dependencies automatically. It follows workspace source, collects bare imports that resolve into `node_modules`, builds them into `dist/vendor/vendor.js`, and serves that bundle at the standard `/assets/vendor/vendor.js` path. The shell loads the vendor bundle before the application, and the standard serve plugin resolves the application's matching imports to the vendor globals. No consumer configuration is required.
 
-The standard `/assets/vendor` subtree is content-versioned automatically. A request without the current `v` query redirects to it; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. There is no server option or URL prefix to configure.
+A request without the current `v` query redirects to the content hash; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL.
+
+`buildVendor({ entries })` remains available for explicit chunks. `discoverVendorSpecifiers` and `buildVendorBundle` expose the automatic discovery and bundle steps:
 
 ```ts
-import { buildVendor, Server } from 'basis/server'
-
-const vendor = await buildVendor({
-  entries: [
-    { entrypoint: './vendor/react.ts', name: 'react' },
-    { entrypoint: './vendor/react-dom.ts', globals: { react: 'window.React' }, name: 'react-dom' },
-  ],
-})
+import { Server } from 'basis/server'
 
 new Server()
   .root(import.meta.dir)
+  .main('./Application.tsx')
   .start({ port: 8080 })
 ```
 
-`vendor.byName.react.url` is the versioned URL for the React chunk. Building unchanged content keeps the same URL; changing one chunk changes only that chunk's hash.
+The server builds the vendor bundle during startup. If a consumer needs a custom chunk layout, `buildVendor` can still produce deterministic named chunks with exact module-to-global mappings.
 
 ## Live transports
 

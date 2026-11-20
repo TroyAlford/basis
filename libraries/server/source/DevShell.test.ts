@@ -36,6 +36,19 @@ describe('renderDevShell', () => {
     expect(html).toContain('src="./entry.ts"')
   })
 
+  test('loads prebuilt vendor scripts before the module entrypoints', () => {
+    const html = renderDevShell({
+      directory: shellDir,
+      entrypoints: ['/srv/app/index.tsx'],
+      preScripts: ['/assets/vendor/vendor.js'],
+      title: 't',
+    })
+
+    expect(html).toContain('document.write')
+    expect(html).toContain('/assets/vendor/vendor.js')
+    expect(html.indexOf('/assets/vendor/vendor.js')).toBeLessThan(html.indexOf('type="module"'))
+  })
+
   test('never emits a bare filesystem separator in a URL', () => {
     const html = renderDevShell({ directory: shellDir, entrypoints: ['/srv/app/index.tsx'], title: 't' })
 

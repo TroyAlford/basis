@@ -1,6 +1,6 @@
 import type { BunPlugin } from 'bun'
 import { createHash } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import * as path from 'node:path'
 
 /** One vendor entrypoint to build into a browser chunk. */
@@ -27,11 +27,31 @@ export interface VendorBuildOptions {
   entries: readonly VendorEntry[],
   /**
    * Directory to write chunks to, resolved relative to {@link VendorBuildOptions.root}.
-   * Defaults to `assets/vendor`.
+   * Defaults to `dist/vendor`.
    */
   outdir?: string,
   /** Root used to resolve relative entrypoints and `outdir`. Defaults to the working directory. */
   root?: string,
+}
+
+/** Options for discovering client vendor dependencies. */
+export interface DiscoverVendorOptions {
+  /** Absolute application entrypoint. */
+  entrypoint: string,
+  /** Additional build plugins needed to parse the application source. */
+  plugins?: readonly BunPlugin[],
+  /** Root used to resolve relative applications and paths. Defaults to the working directory. */
+  root?: string,
+}
+
+/** Options for building the automatic vendor bundle. */
+export interface VendorBundleOptions {
+  /** Directory to write the bundle to, resolved relative to {@link VendorBundleOptions.root}. */
+  outdir?: string,
+  /** Root used to resolve relative paths. Defaults to the working directory. */
+  root?: string,
+  /** Client bare import specifiers discovered from the application graph. */
+  specifiers: readonly string[],
 }
 
 /** One built vendor artifact. */
@@ -85,6 +105,106 @@ function exactGlobals(globals: Readonly<Record<string, string>>): BunPlugin {
 }
 
 /**
+ * Discover the bare imports the client application resolves into `node_modules`.
+ *
+ * Workspace and application source is traversed; a package under `node_modules`
+ * becomes a vendor specifier and is not traversed by the discovery build.
+ * @param options - The application entrypoint and optional build plugins.
+ * @returns The sorted client vendor specifiers.
+ */
+export async function discoverVendorSpecifiers(options: DiscoverVendorOptions): Promise<string[]> {
+  const root = path.resolve(options.root ?? process.cwd())
+  const entrypoint = path.isAbsolute(options.entrypoint)
+    ? options.entrypoint
+    : path.resolve(root, options.entrypoint)
+  const specifiers = new Set<string>()
+  const discovery: BunPlugin = {
+    name: 'basis-vendor-discovery',
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, args => {
+        const specifier = args.path
+        if (
+          specifier.length === 0
+          || specifier.startsWith('.')
+          || specifier.startsWith('/')
+          || specifier.startsWith('node:')
+          || specifier.startsWith('bun:')
+          || specifier === 'basis'
+          || specifier.startsWith('basis/')
+        ) {
+          return undefined
+        }
+
+        let resolved: string
+        try {
+          resolved = Bun.resolveSync(specifier, path.dirname(args.importer))
+        } catch {
+          return undefined
+        }
+        if (!resolved.includes(`${path.sep}node_modules${path.sep}`)) return undefined
+
+        specifiers.add(specifier)
+        return { external: true, path: specifier }
+      })
+    },
+  }
+
+  const build = await Bun.build({
+    define: {
+      'Bun.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV ?? 'production'),
+      'process.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV ?? 'production'),
+    },
+    entrypoints: [entrypoint],
+    format: 'iife',
+    plugins: [...(options.plugins ?? []), discovery],
+    target: 'browser',
+    write: false,
+  } as unknown as Bun.BuildConfig)
+
+  if (!build.success) {
+    const details = build.logs.map(log => log.message).join('\n')
+    throw new Error(`vendor discovery failed: ${details.length > 0 ? details : 'build failed'}`)
+  }
+
+  return [...specifiers].sort()
+}
+
+/**
+ * Build the automatic vendor bundle from discovered client specifiers.
+ *
+ * The bundle exposes each module namespace on `globalThis.__basisVendor`; the
+ * vendor plugin resolves the application's matching imports to those globals.
+ * @param options - The discovered specifiers and optional output directory.
+ * @returns The built vendor artifact set.
+ */
+export async function buildVendorBundle(options: VendorBundleOptions): Promise<VendorBuild> {
+  const root = path.resolve(options.root ?? process.cwd())
+  const directory = path.join(root, '.basis')
+  await mkdir(directory, { recursive: true })
+
+  const specifiers = [...new Set(options.specifiers)].sort()
+  const imports = specifiers.map((specifier, index) => (
+    `import * as vendor${index} from ${JSON.stringify(specifier)}`
+  ))
+  const assignments = specifiers.map((specifier, index) => (
+    `vendor[${JSON.stringify(specifier)}] = { ...vendor${index}, __esModule: true }`
+  ))
+  const entrypoint = path.join(directory, 'vendor-entry.ts')
+  await writeFile(entrypoint, [
+    ...imports,
+    'const vendor = globalThis.__basisVendor ??= {}',
+    ...assignments,
+    '',
+  ].join('\n'))
+
+  return buildVendor({
+    entries: [{ entrypoint, name: 'vendor' }],
+    outdir: options.outdir,
+    root,
+  })
+}
+
+/**
  * Build deterministic, separately cacheable vendor chunks.
  *
  * Each entrypoint is built in isolation into a stable `<name>.js` file, then
@@ -95,7 +215,7 @@ function exactGlobals(globals: Readonly<Record<string, string>>): BunPlugin {
  */
 export async function buildVendor(options: VendorBuildOptions): Promise<VendorBuild> {
   const root = path.resolve(options.root ?? process.cwd())
-  const outdirOption = options.outdir ?? 'assets/vendor'
+  const outdirOption = options.outdir ?? 'dist/vendor'
   const outdir = path.isAbsolute(outdirOption) ? outdirOption : path.resolve(root, outdirOption)
   const assets: VendorAsset[] = []
   const names = new Set<string>()
