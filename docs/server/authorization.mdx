@@ -254,7 +254,58 @@ The equivalent structured predicate is:
 }
 ```
 
-Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections, relationship-derived collections, and Entity-owned Collections all work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
+Authorization predicates support existential `$contains` with one or more member requirements, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections, relationship-derived collections, and Entity-owned Collections all work. Nested descendant collections and descendant-only collection-target fields use the same canonical eligibility guards as ordinary queries, including the correct referenced occurrence and missing-field behavior. `$all`, arrays/JSON relationship properties, collection count paths, and cross-collection captures remain rejected because their authorization meaning is ambiguous or not bounded.
+
+### Polymorphic reference authorization
+
+A policy can follow a reference into an abstract target whose descendants do not all expose the same fields. The discriminator applies at the referenced occurrence, and the existing `SECURITY DEFINER` helper carries the validated predicate without adding another authorization language:
+
+```ts
+const graph = new Graph({
+  entities: [
+    { name: 'Document', fields: [{ field: 'code', type: 'String' }] },
+    { extends: 'Document', fields: [], name: 'PublicDocument' },
+    {
+      extends: 'Document',
+      fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+      name: 'PrivateDocument',
+    },
+    {
+      name: 'Workspace',
+      fields: [{
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'workspace',
+        target: 'Member',
+        type: 'Inverse',
+      }],
+    },
+    {
+      name: 'Member',
+      fields: [
+        { field: 'user', target: 'User', type: 'Entity' },
+        { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+      ],
+    },
+    { name: 'User', fields: [] },
+    {
+      name: 'Section',
+      fields: [
+        { field: 'title', type: 'String' },
+        { field: 'document', target: 'Document', type: 'Entity' },
+      ],
+      security: {
+        [Action.Read]: [
+          { where: "document.entity = 'PublicDocument'" },
+          { where: 'document.workspace.members $contains (user = $me)' },
+        ],
+      },
+    },
+  ],
+})
+```
+
+Public Sections match the first rule. A private Section matches only when the referenced `PrivateDocument` exposes `workspace` and that Workspace contains the current actor. A `PublicDocument` has no `workspace`; its absence is structurally inapplicable, so it cannot satisfy the private rule even under negation or a null comparison. The same path behaves identically in an ordinary Section query and in the compiled policy helper.
 
 ### Entity-owned Collections
 
