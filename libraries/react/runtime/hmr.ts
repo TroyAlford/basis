@@ -33,6 +33,21 @@ let rerender: (() => void) | null = null
 /** Whether a render has already been queued for this microtask turn. */
 let scheduled = false
 
+/** Monotonic HMR generation consumed by mounted class components. */
+let generation = 0
+
+/**
+ * Read the current HMR generation.
+ *
+ * A mounted Component compares this value in `shouldComponentUpdate`, so an
+ * in-place class update renders through nested components even when their props
+ * and state are deeply equal.
+ * @returns The current generation.
+ */
+export function hmrGeneration(): number {
+  return generation
+}
+
 /**
  * Attach the application root renderer that receives component updates.
  *
@@ -102,6 +117,7 @@ function schedule(): void {
   if (scheduled) return
 
   scheduled = true
+  generation += 1
   queueMicrotask(() => {
     scheduled = false
     rerender?.()

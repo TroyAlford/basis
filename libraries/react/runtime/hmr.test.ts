@@ -1,4 +1,7 @@
+import { render } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
+import * as React from 'react'
+import { Component } from '../components/Component/Component'
 import { attachRoot, register } from './hmr'
 
 describe('production HMR runtime', () => {
@@ -93,6 +96,43 @@ describe('production HMR runtime', () => {
 
     expect(register('runtime:private', Second, true)).toBe(Second)
     expect(new Second().read()).toBe(2)
+  })
+
+  test('renders changed methods through nested mounted classes', async () => {
+    class Child extends Component {
+      text(): string {
+        return 'old'
+      }
+      content(): React.ReactNode {
+        return React.createElement('span', null, this.text())
+      }
+    }
+
+    class Parent extends Component {
+      content(): React.ReactNode {
+        return React.createElement(Child)
+      }
+    }
+
+    register('nested:child', Child)
+    const mounted = await render(React.createElement(Parent))
+    attachRoot(() => { void mounted.update(React.createElement(Parent)) })
+    expect(mounted.node.textContent).toBe('old')
+
+    class UpdatedChild extends Component {
+      text(): string {
+        return 'new'
+      }
+      content(): React.ReactNode {
+        return React.createElement('span', null, this.text())
+      }
+    }
+
+    register('nested:child', UpdatedChild)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(mounted.node.textContent).toBe('new')
+
+    mounted.unmount()
   })
 
   test('batches updates into one root render', async () => {

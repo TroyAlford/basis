@@ -17,6 +17,12 @@ import * as path from 'node:path'
  *   replacement keeps the component type (and mounted instance state).
  * - Style modules and component modules self-accept; every other module falls
  *   back to Bun's full reload.
+ *
+ * Instance function fields (for example `onClick = () => …`) are closures owned
+ * by each mounted instance and cannot be replaced by copying the prototype.
+ * Classes that declare them are treated as unstable, so React remounts the
+ * subtree and the new handlers take effect; this deliberately trades local
+ * state for handler correctness.
  */
 const REGISTER = '__basisHMRRegister'
 const RUNTIME = 'basis/react/hmr'
@@ -147,9 +153,12 @@ export function transformProductionModule(
        * components cannot be merged in place. Registration marks them unstable:
        * the runtime returns the new class and React remounts that subtree.
        */
-      const unstable = node.body.body.some(member => (
-        'key' in member && member.key?.type === 'PrivateName'
-      ))
+      const unstable = node.body.body.some(member => {
+        if ('key' in member && member.key?.type === 'PrivateName') return true
+        if (!('value' in member)) return false
+        return member.value?.type === 'ArrowFunctionExpression'
+          || member.value?.type === 'FunctionExpression'
+      })
       const registration = registrationSource(name, `${id}:${name}`, unstable)
 
       if (parentPath?.isExportDefaultDeclaration()) {

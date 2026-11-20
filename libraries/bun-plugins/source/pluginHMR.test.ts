@@ -30,6 +30,16 @@ describe('transformProductionModule', () => {
     expect(result?.contents).toContain('__basisHMRRegister("Private.tsx:Private", Private, true)')
   })
 
+  test('marks a class with instance function fields as unstable', () => {
+    const result = transformProductionModule(
+      'export class Handler extends Component { onClick = () => "clicked"; render() { return <button /> } }',
+      '/app/Handler.tsx',
+      '/app',
+    )
+
+    expect(result?.contents).toContain('__basisHMRRegister("Handler.tsx:Handler", Handler, true)')
+  })
+
   test('rewrites a default class export to a live stable binding', () => {
     const result = transformProductionModule(
       'export default class Defaulted extends Component {}',

@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import * as React from 'react'
 import { classNames, deepEquals, kebabCase, noop } from '../../../utilities'
+import { hmrGeneration } from '../../runtime/hmr'
 import type { Mixin } from '../../types/Mixin'
 import { filterByPrefix } from '../../utilities/filterByPrefix'
 import { prefixObject } from '../../utilities/prefixObject'
@@ -155,6 +156,7 @@ export abstract class Component<
   get defaultState(): State { return {} as State }
   readonly state = this.defaultState
 
+  #hmrGeneration = hmrGeneration()
   #nodeRef = React.createRef<Element>()
   get nodeRef(): React.RefObject<Element> {
     return this.props.nodeRef ?? this.#nodeRef
@@ -181,6 +183,11 @@ export abstract class Component<
    * @returns Whether the component should update.
    */
   shouldComponentUpdate(nextProps: Readonly<Props & TProps<Element>>, nextState: Readonly<State>): boolean {
+    const generation = hmrGeneration()
+    if (this.#hmrGeneration !== generation) {
+      this.#hmrGeneration = generation
+      return true
+    }
     return !deepEquals(this.props, nextProps) || !deepEquals(this.state, nextState)
   }
 
