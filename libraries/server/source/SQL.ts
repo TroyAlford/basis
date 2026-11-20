@@ -1,6 +1,7 @@
 import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, EnumFieldDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './FieldType'
 import { Operator } from './Operator'
+import { comparableFieldType } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, ComparisonOperators, isFieldOperand, Predicate } from './Predicate'
@@ -63,17 +64,32 @@ export interface CollectionScope {
   /** Related item entity definition. */
   readonly definition: EntityDefinition,
   /** Render one inner field expression. */
-  readonly expression: (field: QueryFieldDefinition) => string,
+  readonly expression: (
+    field: QueryFieldDefinition,
+    bind?: (value: BoundScalar) => string,
+  ) => string,
   /** Resolve one inner field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
+  /** Optional count expression metadata for inner count paths. */
+  readonly filterCount?: (name: string) => CountScope | undefined,
   /** Classify terminal reference identities inside the collection. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
   /** Authored source predicate applied to the collection relation. */
   readonly predicate?: SqlFragment,
   /** SQL relation containing the related items. */
   readonly relation: string,
+  /** Concrete physical variants for descendant-only sibling collections. */
+  readonly variants?: readonly CollectionScopeVariant[],
   /** Expanded relation join work emitted by this scope. */
   readonly work?: number,
+}
+
+/** One concrete physical variant of a descendant-only collection. */
+export interface CollectionScopeVariant {
+  /** SQL predicate selecting this variant's concrete owner type. */
+  readonly guard: string,
+  /** Scope for the variant's physical relation and member fields. */
+  readonly scope: CollectionScope,
 }
 
 /** One parameterized SQL fragment. */
@@ -266,7 +282,7 @@ const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
 ])
 
 /**
- * Build parameterized root-field comparison predicates.
+ * Normalize and build parameterized root-field comparison predicates.
  * @param entities - Validated entity definitions.
  * @param entityName - Exact entity name.
  * @param where - Equality shorthand, structured comparisons, or logical groups.
@@ -296,6 +312,35 @@ function whereClause(
   })
   const filter = Predicate.normalize(entity, where, resolve, scope?.collection, array)
   if (!filter) return { sql: '', values: [] }
+  return whereFilter(entities, entityName, filter, scope)
+}
+
+/**
+ * Build parameterized predicates from one already-normalized filter.
+ * @param entities - Validated entity definitions.
+ * @param entityName - Exact entity name.
+ * @param filter - Canonical normalized filter.
+ * @param scope - Optional effective-field expressions for polymorphic queries.
+ * @returns The quoted `WHERE` clause and its parameter values.
+ * @throws {Error} When a field, operator, or value is invalid.
+ */
+function whereFilter(
+  entities: EntityDefinitions,
+  entityName: string,
+  filter: Filter,
+  scope?: QueryScope,
+): SQLPredicate {
+  const entity = scope?.definition ?? definition(entities, entityName)
+  const array = scope?.array ?? (name => {
+    try {
+      const field = queryField(entity, name)
+      return field.type === FieldType.Array
+        ? { expression: quoteIdentifier(name), field, member: arrayItemField(field) }
+        : undefined
+    } catch {
+      return undefined
+    }
+  })
 
   const values: BoundScalar[] = []
   const bind = (value: BoundScalar): string => {
@@ -354,30 +399,12 @@ function whereClause(
         return requirements.join(' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
-      if (collectionFilter.operator === Operator.Comparison.Empty) {
-        const authored = collection.predicate === undefined
-          ? ''
-          : ` AND (${bindFragment(collection.predicate, bind)})`
-        collection.consume?.(collection.work ?? 1)
-        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition}${authored})`
+      if (collection.variants !== undefined && collection.variants.length > 0) {
+        return `(${collection.variants.map(variant => (
+          `(${variant.guard} AND ${compileCollection(collectionFilter, variant.scope)})`
+        )).join(' OR ')})`
       }
-      if (collectionFilter.operator !== Operator.Comparison.Contains) {
-        throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
-      }
-      if (collectionFilter.filters.length === 0) {
-        throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
-      }
-      const requirements = collectionFilter.filters.map(requirement => {
-        const inner = compile(requirement, collection)
-        collection.consume?.(collection.work ?? 1)
-        const predicate = collection.predicate === undefined
-          ? ''
-          : ` AND (${bindFragment(collection.predicate, bind)})`
-        return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-          `${collection.condition}${predicate} AND (${inner}))`
-      })
-      return requirements.join(' AND ')
+      return compileCollection(collectionFilter, collection)
     }
 
     const contract = ComparisonOperators.definition(node.operator as Operator.Comparison)
@@ -404,7 +431,7 @@ function whereClause(
       }
       if (!contract.allowedFieldTypes.has(field.type)) {
         throw new Error(
-          `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
+          `Query operator "${comparisonFilter.operator}" is not valid for field "${field.name}"`,
         )
       }
       const operand = contract.operand(field, comparisonFilter.value)
@@ -415,7 +442,7 @@ function whereClause(
         && field.type === FieldType.Array
         && isFieldOperand(operand)) {
         const reference = (active.filterField ?? active.field)(operand.$field)
-        if (comparableType(reference.type) !== comparableType(arrayItemField(field).type)) {
+        if (comparableFieldType(reference.type) !== comparableFieldType(arrayItemField(field).type)) {
           throw new Error(
             `Query field reference "${operand.$field}" is not comparable with "${comparisonFilter.field}"`,
           )
@@ -430,7 +457,7 @@ function whereClause(
           throw new Error('Query field references cannot target the actor sentinel')
         }
         const reference = (active.filterField ?? active.field)(operand.$field)
-        if (comparableType(reference.type) !== comparableType(field.type)) {
+        if (comparableFieldType(reference.type) !== comparableFieldType(field.type)) {
           throw new Error(
             `Query field reference "${operand.$field}" is not comparable with "${comparisonFilter.field}"`,
           )
@@ -459,16 +486,49 @@ function whereClause(
     return logical.build(logicalFilter.filters.map(childNode => compile(childNode, active)))
   }
 
-  return { sql: `WHERE ${compile(filter, base)}`, values }
-}
+  const compileCollection = (
+    collectionFilter: CollectionFilter,
+    collection: CollectionScope,
+  ): string => {
+    if (collectionFilter.operator === Operator.Comparison.Empty) {
+      const authored = collection.predicate === undefined
+        ? ''
+        : ` AND (${bindFragment(collection.predicate, bind)})`
+      collection.consume?.(collection.work ?? 1)
+      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+        `${collection.condition}${authored})`
+    }
+    if (collectionFilter.operator === Operator.Collection.All) {
+      if (collectionFilter.filters.length !== 1) {
+        throw new Error('Query $all requires exactly one member predicate')
+      }
+      const inner = compile(collectionFilter.filters[0] as Filter, collection)
+      collection.consume?.(collection.work ?? 1)
+      const predicate = collection.predicate === undefined
+        ? ''
+        : ` AND (${bindFragment(collection.predicate, bind)})`
+      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+        `${collection.condition}${predicate} AND NOT COALESCE((${inner}), FALSE))`
+    }
+    if (collectionFilter.operator !== Operator.Comparison.Contains) {
+      throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
+    }
+    if (collectionFilter.filters.length === 0) {
+      throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
+    }
+    const requirements = collectionFilter.filters.map(requirement => {
+      const inner = compile(requirement, collection)
+      collection.consume?.(collection.work ?? 1)
+      const predicate = collection.predicate === undefined
+        ? ''
+        : ` AND (${bindFragment(collection.predicate, bind)})`
+      return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+        `${collection.condition}${predicate} AND (${inner}))`
+    })
+    return requirements.join(' AND ')
+  }
 
-/**
- * Normalize a field type to its comparable SQL family.
- * @param type - Declared field type.
- * @returns The comparable field type.
- */
-function comparableType(type: FieldType): FieldType {
-  return type === FieldType.Enum ? FieldType.String : type
+  return { sql: `WHERE ${compile(filter, base)}`, values }
 }
 
 /**
@@ -649,6 +709,7 @@ export const SQL = {
   paginate,
   select,
   where: whereClause,
+  whereFilter,
 }
 
 /**
