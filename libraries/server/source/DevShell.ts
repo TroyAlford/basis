@@ -67,7 +67,7 @@ function scriptSource(directory: string, entrypoint: string): string {
 export function renderDevShell({ directory, entrypoints, title }: DevShellOptions): string {
   const scripts = entrypoints.map(entrypoint => ({ module: true, src: scriptSource(directory, entrypoint) }))
   const body = renderToString(React.createElement(IndexHTML, { favicon: false, scripts, title }))
-  return `<!doctype html>\n${body.replace('</head>', `${VENDOR_MARKER}</head>`)}\n`
+  return `<!doctype html>\n${body.replace('<head>', `<head>${VENDOR_MARKER}`)}\n`
 }
 
 /**
