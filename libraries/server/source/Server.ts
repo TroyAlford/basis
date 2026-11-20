@@ -575,9 +575,18 @@ export class Server<
       }
 
       const response = await Bun.fetch(this.#devShellURL())
-      const shell = this.#vendorScripts.length > 0
-        ? await this.#injectVendorScripts(response)
-        : response
+      const html = this.#vendorScripts.length > 0
+        ? this.#injectVendorScripts(await response.text())
+        : await response.text()
+      const headers = new Headers(response.headers)
+      headers.delete('content-encoding')
+      headers.delete('content-length')
+      const NativeResponse = Object.getPrototypeOf(await Bun.fetch('data:text/plain,')) as Response
+      const shell = new (NativeResponse.constructor as new (body: BodyInit, init?: ResponseInit) => Response)(html, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+      })
       return this.#withContextResponse(new HTMLRewriter()
         .on('title', {
           element: element => { element.setInnerContent(title) },
@@ -594,22 +603,14 @@ export class Server<
 
   /**
    * Inject the standard vendor scripts at the generated shell marker.
-   * @param response - The Bun-generated shell response.
-   * @returns A response with the vendor script tags in place of the marker.
+   * @param html - The Bun-generated shell HTML.
+   * @returns The shell HTML with the vendor script tags in place of the marker.
    */
-  async #injectVendorScripts(response: Response): Promise<Response> {
-    const html = await response.text()
+  #injectVendorScripts(html: string): string {
     const scripts = this.#vendorScripts
       .map(src => `<script src="${src.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`)
       .join('')
-    const headers = new Headers(response.headers)
-    headers.delete('content-encoding')
-    headers.delete('content-length')
-    return new Response(html.replace(VENDOR_MARKER, scripts), {
-      headers,
-      status: response.status,
-      statusText: response.statusText,
-    })
+    return html.replace(VENDOR_MARKER, scripts)
   }
 
   /**
