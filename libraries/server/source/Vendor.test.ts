@@ -135,9 +135,13 @@ describe('vendor assets', () => {
     })
 
     const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
-    expect(shell).toContain('/assets/vendor/vendor.js')
+    expect(shell).toContain('<!-- VENDORS -->')
 
-    const source = /<script type="module"[^>]+src="([^"]+)"/.exec(shell)?.[1]
+    const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
+    expect(html).toContain('<script src="/assets/vendor/vendor.js"></script>')
+    expect(html).not.toContain('document.write')
+
+    const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]
     expect(source).toBeDefined()
     const applicationBundle = await Bun.fetch(`${application.url}${source}`).then(response => response.text())
     expect(applicationBundle).toContain('__basisVendor')

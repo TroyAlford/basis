@@ -1,5 +1,4 @@
 import direct from './direct.html'
-import documentWrite from './document-write.html'
 
 const vendor = Bun.file(new URL('./public/vendor.js', import.meta.url))
 
@@ -13,6 +12,5 @@ Bun.serve({
       headers: { 'Content-Type': 'text/javascript' },
     }),
     '/direct': direct,
-    '/document-write': documentWrite,
   },
 })

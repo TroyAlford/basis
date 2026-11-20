@@ -27,7 +27,7 @@ import type { CookieChange } from './Cookies'
 import { Cookies, serializeCookie } from './Cookies'
 import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
 import { createDatabase, NullDatabase, openAdmin } from './Database'
-import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell, writeHydrationEntry } from './DevShell'
+import { DEV_SHELL_ROUTE, devShellDirectory, VENDOR_MARKER, writeDevShell, writeHydrationEntry } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
 import type { Graph } from './Graph'
@@ -174,6 +174,7 @@ export class Server<
   #status: HealthStatus = 'starting'
   #title = 'Document'
   #version = 'development'
+  #vendorScripts: readonly string[] = []
 
   constructor() {
     this.#api([HttpVerb.Get], 'health', () => this.#health(), false)
@@ -574,6 +575,9 @@ export class Server<
       }
 
       const response = await Bun.fetch(this.#devShellURL())
+      const shell = this.#vendorScripts.length > 0
+        ? await this.#injectVendorScripts(response)
+        : response
       return this.#withContextResponse(new HTMLRewriter()
         .on('title', {
           element: element => { element.setInnerContent(title) },
@@ -584,7 +588,27 @@ export class Server<
         .on('#root', {
           element: element => { element.setInnerContent(application, { html: true }) },
         })
-        .transform(response), resolved)
+        .transform(shell), resolved)
+    })
+  }
+
+  /**
+   * Inject the standard vendor scripts at the generated shell marker.
+   * @param response - The Bun-generated shell response.
+   * @returns A response with the vendor script tags in place of the marker.
+   */
+  async #injectVendorScripts(response: Response): Promise<Response> {
+    const html = await response.text()
+    const scripts = this.#vendorScripts
+      .map(src => `<script src="${src.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`)
+      .join('')
+    const headers = new Headers(response.headers)
+    headers.delete('content-encoding')
+    headers.delete('content-length')
+    return new Response(html.replace(VENDOR_MARKER, scripts), {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
     })
   }
 
@@ -816,7 +840,7 @@ export class Server<
       if (fs.existsSync(assets)) this.#assets = assets
     }
 
-    const preScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
+    this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
     const entrypoints = this.#mainPath
       ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
       : []
@@ -852,8 +876,8 @@ export class Server<
     }
     const databaseReady = this.#databaseReady()
 
-    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, preScripts]))
-    const shell = writeDevShell({ directory, entrypoints, preScripts, title: this.#title })
+    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, this.#vendorScripts]))
+    const shell = writeDevShell({ directory, entrypoints, title: this.#title })
     const routes = {
       [DEV_SHELL_ROUTE]: import.meta.require(shell),
     } as Bun.Serve.Routes<SocketData, string>
