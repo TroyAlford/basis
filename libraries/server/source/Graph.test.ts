@@ -923,6 +923,52 @@ describe('Graph', () => {
     expect(helpers).toContain('current_setting(\'actor.id\', true)')
   })
 
+  test('rejects collection count paths in policy predicates', () => {
+    expect(() => new Graph({
+      entities: [{
+        fields: [
+          { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Note',
+        security: { [Action.Read]: { where: 'scores.$total > 0' } },
+      }],
+    })).toThrow('count path "scores.$total" is not policy-safe')
+  })
+
+  test('compiles descendant member fields in relationship policies', () => {
+    const memberGraph = new Graph({
+      entities: [
+        {
+          fields: [],
+          name: 'Campaign',
+          security: { [Action.Read]: { where: 'members $contains (company = null)' } },
+        },
+        { fields: [], name: 'Person' },
+        {
+          extends: 'Person',
+          fields: [{ field: 'company', nullable: true, type: 'String' }],
+          name: 'Client',
+        },
+        { extends: 'Person', fields: [], name: 'SystemUser' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'person', inverse: 'campaigns', target: 'Person' },
+        ],
+        fields: [],
+        name: 'CampaignMembership',
+      }],
+    })
+    const helpers = memberGraph.physicalSchema('basis_app', true).functions
+      .filter(fn => fn.name.startsWith('policy_'))
+      .map(fn => fn.sql)
+      .join('\n')
+    expect(helpers).toContain('"Client"')
+    expect(helpers).toContain('"company"')
+  })
+
   test('allows where-only membership rules without an artificial capability', () => {
     enum MembershipRole {
       Owner = 'Owner',

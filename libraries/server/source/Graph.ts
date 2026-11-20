@@ -5,7 +5,8 @@ import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefin
 import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
-import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath, resolvePredicatePath } from './PathResolution'
+import type { PathFailure, PhysicalPathVariant } from './PathResolution'
+import { resolveCollectionMember, resolvePredicatePath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
@@ -644,39 +645,13 @@ export class Graph {
     entity: EntityDefinition,
     name: string,
   ): CollectionFilterScope | undefined {
-    const resolved = resolveCollectionPath(entity, name, {
-      resolve: value => this.#policyEntity(value),
-    })
-    if (!resolved) return this.#canonicalCollectionFilterScope(entity, name)
+    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
     if ('kind' in resolved) {
-      const canonical = this.#canonicalCollectionFilterScope(entity, name)
-      if (canonical) return canonical
       if (resolved.kind === 'depth') {
         throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
       }
       return undefined
     }
-    const target = this.#collectionTarget(resolved.collection)
-    return {
-      array: nested => this.#policyArrayScope(target, nested),
-      collection: nested => this.#collectionFilterScope(target, nested),
-      definition: target,
-      field: path => this.#collectionField(resolved.collection, target, path),
-    }
-  }
-
-  /**
-   * Resolve one polymorphic collection navigation for policy normalization.
-   * @param entity - Entity whose collection is referenced.
-   * @param name - Logical collection path.
-   * @returns Collection filter scope, or undefined.
-   */
-  #canonicalCollectionFilterScope(
-    entity: EntityDefinition,
-    name: string,
-  ): CollectionFilterScope | undefined {
-    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
-    if ('kind' in resolved) return undefined
     const collection = resolved.terminal
     if (!('kind' in collection)) return undefined
     const target = this.#collectionTarget(collection)
@@ -719,37 +694,47 @@ export class Graph {
    */
   #policyPathField(entity: EntityDefinition, name: string): QueryFieldDefinition {
     if (name === ACTOR_FIELD_NAME) return { name: ACTOR_FIELD_NAME, type: FieldType.ID }
-    const resolved = resolveFieldPath(entity, name, {
-      resolve: value => this.#policyEntity(value),
-    })
-    if ('kind' in resolved) {
-      const canonical = this.#canonicalPolicyPathField(entity, name)
-      if (canonical) return canonical
-      if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-      if (resolved.kind === 'non-reference') {
-        throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
-      }
-      throw new Error(`Graph: reference path "${name}" exceeds the maximum depth`)
+    if (name.endsWith('.$total') || name.endsWith('.$matched')) {
+      throw new Error(`Graph: collection count path "${name}" is not policy-safe`)
     }
-    if (resolved.identity) {
-      return { name: name.endsWith('.id') ? name : `${name}.id`, type: FieldType.ID }
+    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
+    if ('kind' in resolved) this.#throwPolicyPathFailure(entity, name, resolved)
+    if ('kind' in resolved.terminal) {
+      throw new Error(`Graph: collection path "${entity.name}.${name}" is not policy-safe`)
     }
-    return resolved.field
+    const terminalField = resolved.variants[0]?.fields.at(-1)
+    if (terminalField
+      && !('kind' in terminalField)
+      && terminalField.type === FieldType.Entity
+      && !name.endsWith('.id')) {
+      return { ...resolved.terminal, name: `${name}.id` }
+    }
+    return resolved.terminal
   }
 
   /**
-   * Resolve one polymorphic policy scalar or reference path.
+   * Throw the canonical policy-path diagnostic for one failure.
    * @param entity - Policy entity where the path starts.
    * @param name - Logical path.
-   * @returns The terminal field, or undefined when the path is not a scalar.
+   * @param failure - Canonical path failure.
+   * @throws {Error} Always.
    */
-  #canonicalPolicyPathField(
+  #throwPolicyPathFailure(
     entity: EntityDefinition,
     name: string,
-  ): QueryFieldDefinition | undefined {
-    const resolved = resolvePredicatePath(entity, name, { definitions: this.definitions })
-    if ('kind' in resolved || 'kind' in resolved.terminal) return undefined
-    return resolved.terminal
+    failure: PathFailure,
+  ): never {
+    if (failure.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
+    if (failure.kind === 'non-reference') {
+      throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
+    }
+    if (failure.kind === 'invalid-count') {
+      throw new Error(`Graph: collection count path "${name}" is not policy-safe`)
+    }
+    if (failure.kind === 'ambiguous') {
+      throw new Error(`Graph: policy path "${entity.name}.${name}" has incompatible declarations`)
+    }
+    throw new Error(`Graph: reference path "${name}" exceeds the maximum depth`)
   }
 
   /**
@@ -784,15 +769,13 @@ export class Graph {
       ? `${lowerFirst(collection.relationship.name)}.`
       : ''
     if ('kind' in resolved) {
-      const canonical = this.#canonicalPolicyPathField(target, normalized)
-      if (canonical) return canonical
       if ('relationship' in collection && normalized.startsWith(prefix)) {
         throw new Error(
           'Graph: unknown relationship field ' +
           `"${collection.relationship.name}.${normalized.slice(prefix.length)}"`,
         )
       }
-      throw new Error(`Graph: unknown field "${target.name}.${path}"`)
+      return this.#policyPathField(target, normalized)
     }
     if (resolved.relationshipProperty && (resolved.field.type === FieldType.Array
       || resolved.field.type === FieldType.JSON)) {
@@ -827,68 +810,122 @@ export class Graph {
         cache.set(path, actor)
         return actor
       }
-      const resolved = resolveFieldPath(entity, path, {
-        resolve: value => this.#policyEntity(value),
-      })
-      if ('kind' in resolved) {
-        const canonical = this.#canonicalPolicyExpression(
-          entity,
-          path,
-          baseAlias,
-          rootAlias,
-          allowSubqueries,
-          nextAlias,
-          parentId,
-        )
-        if (canonical) {
-          cache.set(path, canonical)
-          return canonical
-        }
-        if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
-        if (resolved.kind === 'non-reference') {
-          throw new Error(`Graph: reference field "${entity.name}.${path}" is not policy-safe`)
-        }
-        throw new Error(`Graph: reference path "${path}" exceeds the maximum depth`)
-      }
-      let current = entity
-      let currentBase = baseAlias
-      let currentRoot = rootAlias
-      let currentParent = parentId
-      for (const hop of resolved.hops) {
-        const expression = this.#policyFieldExpression(
-          hop.field,
-          current,
-          currentBase,
-          currentRoot,
-          currentParent,
-          allowSubqueries,
-          nextAlias,
-        )
-        const target = hop.field.target === 'Entity'
-          ? identityDefinition()
-          : this.#policyEntity(hop.field.target)
-        if (!target) throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
-        current = target
-        currentBase = undefined
-        currentRoot = undefined
-        currentParent = expression
-      }
-      const expression = this.#policyFieldExpression(
-        resolved.terminal,
-        current,
-        currentBase,
-        currentRoot,
-        currentParent,
-        true,
+      const result = this.#canonicalPolicyExpression(
+        entity,
+        path,
+        baseAlias,
+        rootAlias,
+        allowSubqueries,
         nextAlias,
+        parentId,
       )
-      const result = resolved.identity
-        ? { expression, field: { name: path, type: FieldType.ID as const } }
-        : { expression, field: { ...resolved.terminal, name: path } as QueryFieldDefinition }
       cache.set(path, result)
       return result
     }
     return resolve
+  }
+
+  /**
+   * Traverse one canonical policy variant to its terminal occurrence.
+   * @param entity - Policy entity where the path starts.
+   * @param path - Logical path.
+   * @param variant - Canonical physical variant.
+   * @param baseAlias - Alias of the table owning the policy entity's local fields.
+   * @param rootAlias - Alias of the joined `Entity` root row, when present.
+   * @param parentId - Identity expression for the starting occurrence.
+   * @param rootIdentity - Root occurrence identity for restriction guards.
+   * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
+   * @param nextAlias - Allocator for one collision-free subquery alias.
+   * @returns The terminal occurrence, its parent identity, and occurrence aliases.
+   */
+  #canonicalPolicyTraversal(
+    entity: EntityDefinition,
+    path: string,
+    variant: PhysicalPathVariant,
+    baseAlias: string | undefined,
+    rootAlias: string | undefined,
+    parentId: string | undefined,
+    rootIdentity: string | undefined,
+    allowSubqueries: boolean,
+    nextAlias: () => string,
+  ): {
+    readonly currentBase: string | undefined,
+    readonly currentEntity: EntityDefinition,
+    readonly currentRoot: string | undefined,
+    readonly occurrences: ReadonlyMap<string, string>,
+    readonly parentId: string | undefined,
+  } {
+    let currentEntity = entity
+    let currentBase = baseAlias
+    let currentRoot = rootAlias
+    let currentParent = parentId
+    let prefix = ''
+    const occurrences = new Map<string, string>()
+    if (rootIdentity !== undefined) occurrences.set('', rootIdentity)
+    for (const field of variant.fields.slice(0, -1)) {
+      if ('kind' in field) {
+        throw new Error(`Graph: policy path "${path}" contains a nested collection`)
+      }
+      if (field.type !== FieldType.Entity) {
+        throw new Error(`Graph: policy path "${path}" traverses non-reference field "${field.name}"`)
+      }
+      const expression = this.#policyFieldExpression(
+        field,
+        currentEntity,
+        currentBase,
+        currentRoot,
+        currentParent,
+        allowSubqueries,
+        nextAlias,
+      )
+      const target = field.target === 'Entity'
+        ? identityDefinition()
+        : this.#policyEntity(field.target)
+      if (!target) throw new Error(`Graph: policy path "${path}" has unknown target`)
+      currentEntity = target
+      currentBase = undefined
+      currentRoot = undefined
+      currentParent = expression
+      prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
+      occurrences.set(prefix, expression)
+    }
+    return {
+      currentBase,
+      currentEntity,
+      currentRoot,
+      occurrences,
+      parentId: currentParent,
+    }
+  }
+
+  /**
+   * Render one canonical policy variant's discriminator guard.
+   * @param path - Logical policy path.
+   * @param variant - Canonical physical variant.
+   * @param occurrences - Occurrence identities keyed by logical prefix.
+   * @returns The SQL guard, or `TRUE`.
+   */
+  #canonicalPolicyGuard(
+    path: string,
+    variant: PhysicalPathVariant,
+    occurrences: ReadonlyMap<string, string>,
+  ): string {
+    const guards = variant.restrictions.map(restriction => {
+      const prefixName = restriction.path === 'entity'
+        ? ''
+        : restriction.path.slice(0, -'.entity'.length)
+      const identity = occurrences.get(prefixName)
+      if (identity === undefined) {
+        throw new Error(
+          `Graph: policy path "${path}" restriction "${restriction.path}" ` +
+          'has no physical occurrence',
+        )
+      }
+      return `(SELECT ${quoteIdentifier('entity')} FROM ${quoteIdentifier('Entity')} ` +
+        `WHERE ${quoteIdentifier('id')} = ${identity}) IN (` +
+        `${restriction.entityTypes.map(type => literal(type)).join(', ')})`
+    })
+    return guards.length === 0 ? 'TRUE' : guards.join(' AND ')
   }
 
   /**
@@ -900,8 +937,8 @@ export class Graph {
    * @param allowSubqueries - Whether inherited fields may use correlated subqueries.
    * @param nextAlias - Allocator for one collision-free subquery alias.
    * @param parentId - Identity expression for a row reached through a reference hop.
-   * @returns The SQL expression and field metadata, or undefined.
-   * @throws {Error} When a canonical variant cannot be compiled.
+   * @returns The SQL expression and field metadata.
+   * @throws {Error} When a canonical variant cannot be compiled or the path is not policy-safe.
    */
   #canonicalPolicyExpression(
     entity: EntityDefinition,
@@ -911,91 +948,77 @@ export class Graph {
     allowSubqueries: boolean,
     nextAlias: () => string,
     parentId: string | undefined,
-  ): { readonly expression: string, readonly field: QueryFieldDefinition } | undefined {
+  ): { readonly expression: string, readonly field: QueryFieldDefinition } {
+    if (path.endsWith('.$total') || path.endsWith('.$matched')) {
+      throw new Error(`Graph: collection count path "${path}" is not policy-safe`)
+    }
     const resolved = resolvePredicatePath(entity, path, { definitions: this.definitions })
-    if ('kind' in resolved || 'kind' in resolved.terminal) return undefined
+    if ('kind' in resolved) this.#throwPolicyPathFailure(entity, path, resolved)
+    if ('kind' in resolved.terminal) {
+      throw new Error(`Graph: collection path "${entity.name}.${path}" is not policy-safe`)
+    }
     const branches = resolved.variants.map(variant => {
-      let currentEntity = entity
-      let currentBase = baseAlias
-      let currentRoot = rootAlias
-      let currentParent = parentId
-      let prefix = ''
-      const occurrences = new Map<string, string>()
       const rootIdentity = rootAlias !== undefined
         ? `${rootAlias}.${quoteIdentifier('id')}`
         : baseAlias !== undefined
           ? `${baseAlias}.${quoteIdentifier('id')}`
-          : currentParent
-      if (rootIdentity) occurrences.set('', rootIdentity)
-      for (const field of variant.fields.slice(0, -1)) {
-        if ('kind' in field) {
-          throw new Error(`Graph: policy path "${path}" contains a nested collection`)
-        }
-        if (field.type !== FieldType.Entity) {
-          throw new Error(`Graph: policy path "${path}" traverses non-reference field "${field.name}"`)
-        }
-        const expression = this.#policyFieldExpression(
-          field,
-          currentEntity,
-          currentBase,
-          currentRoot,
-          currentParent,
-          allowSubqueries,
-          nextAlias,
-        )
-        const target = field.target === 'Entity'
-          ? identityDefinition()
-          : this.#policyEntity(field.target)
-        if (!target) throw new Error(`Graph: policy path "${path}" has unknown target`)
-        currentEntity = target
-        currentBase = undefined
-        currentRoot = undefined
-        currentParent = expression
-        prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
-        occurrences.set(prefix, expression)
-      }
+          : parentId
+      const traversal = this.#canonicalPolicyTraversal(
+        entity,
+        path,
+        variant,
+        baseAlias,
+        rootAlias,
+        parentId,
+        rootIdentity,
+        allowSubqueries,
+        nextAlias,
+      )
       const terminal = variant.fields.at(-1)
       if (!terminal || 'kind' in terminal) {
         throw new Error(`Graph: policy path "${path}" has no scalar terminal`)
       }
-      const expression = this.#policyFieldExpression(
-        terminal,
-        currentEntity,
-        currentBase,
-        currentRoot,
-        currentParent,
-        true,
-        nextAlias,
-      )
-      const guards = variant.restrictions.map(restriction => {
-        const prefixName = restriction.path === 'entity'
-          ? ''
-          : restriction.path.slice(0, -'.entity'.length)
-        const identity = occurrences.get(prefixName)
-        if (identity === undefined) {
-          throw new Error(
-            `Graph: policy path "${path}" restriction "${restriction.path}" ` +
-            'has no physical occurrence',
-          )
-        }
-        return `(SELECT ${quoteIdentifier('entity')} FROM ${quoteIdentifier('Entity')} ` +
-          `WHERE ${quoteIdentifier('id')} = ${identity}) IN (` +
-          `${restriction.entityTypes.map(type => literal(type)).join(', ')})`
-      })
+      const previous = variant.fields.at(-2)
+      const referenceIdentity = terminal.name === 'id'
+        && previous !== undefined
+        && !('kind' in previous)
+        && previous.type === FieldType.Entity
+        && traversal.parentId !== undefined
+      let expression: string
+      if (referenceIdentity) {
+        expression = traversal.parentId as string
+      } else {
+        expression = this.#policyFieldExpression(
+          terminal,
+          traversal.currentEntity,
+          traversal.currentBase,
+          traversal.currentRoot,
+          traversal.parentId,
+          true,
+          nextAlias,
+        )
+      }
       return {
         expression,
-        guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+        guard: this.#canonicalPolicyGuard(path, variant, traversal.occurrences),
       }
     })
     const [first] = branches
     if (!first) throw new Error(`Graph: policy path "${path}" has no physical variants`)
+    const terminalField = resolved.variants[0]?.fields.at(-1)
+    const field = terminalField
+      && !('kind' in terminalField)
+      && terminalField.type === FieldType.Entity
+      && !path.endsWith('.id')
+      ? { ...resolved.terminal, name: `${path}.id` }
+      : resolved.terminal
     return {
       expression: branches.length === 1 && first.guard === 'TRUE'
         ? first.expression
         : `CASE ${branches.map(branch => (
           `WHEN ${branch.guard} THEN ${branch.expression}`
         )).join(' ')} ELSE NULL END`,
-      field: resolved.terminal,
+      field,
     }
   }
 
@@ -1067,50 +1090,15 @@ export class Graph {
     nextPolicyFieldAlias: () => string,
     depth = 0,
   ): CollectionScope | undefined {
-    const resolved = resolveCollectionPath(entity, name, {
-      resolve: value => this.#policyEntity(value),
-    })
-    if (!resolved) {
-      return this.#canonicalCollectionSqlScope(
-        entity,
-        name,
-        parentAlias,
-        baseAlias,
-        rootAlias,
-        allowSubqueries,
-        nextPolicyFieldAlias,
-        depth,
-      )
-    }
-    if ('kind' in resolved) {
-      const canonical = this.#canonicalCollectionSqlScope(
-        entity,
-        name,
-        parentAlias,
-        baseAlias,
-        rootAlias,
-        allowSubqueries,
-        nextPolicyFieldAlias,
-        depth,
-      )
-      if (canonical) return canonical
-      if (resolved.kind === 'depth') {
-        throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
-      }
-      return undefined
-    }
-    const collection = resolved.collection
-    const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries, nextPolicyFieldAlias)
-    const parentId = resolved.prefix === ''
-      ? `${parentAlias}.${quoteIdentifier('id')}`
-      : row(resolved.prefix).expression
-    return this.#collectionScopeForCollection(
-      collection,
-      parentId,
-      depth,
+    return this.#canonicalCollectionSqlScope(
+      entity,
+      name,
+      parentAlias,
+      baseAlias,
+      rootAlias,
       allowSubqueries,
       nextPolicyFieldAlias,
-      `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`,
+      depth,
     )
   }
 
@@ -1142,67 +1130,33 @@ export class Graph {
     const terminal = resolved.terminal
     if (!('kind' in terminal)) return undefined
     const scopes = resolved.variants.map((variant, index) => {
-      let currentEntity = entity
-      let currentBase = baseAlias
-      let currentRoot = rootAlias
-      let parentId = `${parentAlias}.${quoteIdentifier('id')}`
-      let prefix = ''
-      const occurrences = new Map<string, string>([['', parentId]])
-      for (const field of variant.fields.slice(0, -1)) {
-        if ('kind' in field) {
-          throw new Error(`Graph: collection path "${name}" contains a nested collection`)
-        }
-        if (field.type !== FieldType.Entity) {
-          throw new Error(`Graph: collection path "${name}" traverses non-reference field "${field.name}"`)
-        }
-        const expression = this.#policyFieldExpression(
-          field,
-          currentEntity,
-          currentBase,
-          currentRoot,
-          parentId,
-          allowSubqueries,
-          nextPolicyFieldAlias,
-        )
-        const target = field.target === 'Entity'
-          ? identityDefinition()
-          : this.#policyEntity(field.target)
-        if (!target) throw new Error(`Graph: collection path "${name}" has unknown target`)
-        currentEntity = target
-        currentBase = undefined
-        currentRoot = undefined
-        parentId = expression
-        prefix = prefix === '' ? field.name : `${prefix}.${field.name}`
-        occurrences.set(prefix, expression)
-      }
+      const parentId = `${parentAlias}.${quoteIdentifier('id')}`
+      const traversal = this.#canonicalPolicyTraversal(
+        entity,
+        name,
+        variant,
+        baseAlias,
+        rootAlias,
+        parentId,
+        parentId,
+        allowSubqueries,
+        nextPolicyFieldAlias,
+      )
       const terminalField = variant.fields.at(-1)
       if (!terminalField || !('kind' in terminalField)) {
         throw new Error(`Graph: collection path "${name}" has no collection terminal`)
       }
-      const guards = variant.restrictions.map(restriction => {
-        const prefixName = restriction.path === 'entity'
-          ? ''
-          : restriction.path.slice(0, -'.entity'.length)
-        const identity = occurrences.get(prefixName)
-        if (identity === undefined) {
-          throw new Error(
-            `Graph: collection path "${name}" restriction "${restriction.path}" ` +
-            'has no physical occurrence',
-          )
-        }
-        return `(SELECT ${quoteIdentifier('entity')} FROM ${quoteIdentifier('Entity')} ` +
-          `WHERE ${quoteIdentifier('id')} = ${identity}) IN (` +
-          `${restriction.entityTypes.map(type => literal(type)).join(', ')})`
-      })
       return {
-        guard: guards.length === 0 ? 'TRUE' : guards.join(' AND '),
+        guard: this.#canonicalPolicyGuard(name, variant, traversal.occurrences),
         scope: this.#collectionScopeForCollection(
           terminalField,
-          parentId,
+          traversal.parentId as string,
           depth,
           allowSubqueries,
           nextPolicyFieldAlias,
-          `${depth}_${index}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`,
+          resolved.variants.length === 1
+            ? `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
+            : `${depth}_${index}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`,
         ),
       }
     })
@@ -1267,7 +1221,12 @@ export class Graph {
         if (relationship !== undefined && normalized.startsWith(`${lowerFirst(relationship.name)}.`)) {
           throw new Error(`Graph: unknown relationship field "${normalized}"`)
         }
-        throw new Error(`Graph: unknown collection field "${target.name}.${normalized}"`)
+        const result = resolver(normalized)
+        expressions.set(result.field.name, result.expression)
+        if (result.field.type === FieldType.ID || normalized.endsWith('.id')) {
+          identities.add(result.field.name)
+        }
+        return result.field
       }
       if (member.relationshipProperty) {
         const property = normalized.slice(`${lowerFirst(relationship?.name ?? '')}.`.length)

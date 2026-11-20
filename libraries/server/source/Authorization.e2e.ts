@@ -11,6 +11,7 @@ import { createDatabase, openAdmin } from './Database'
 import { Constraint } from './EntityDefinitions'
 import { Action, ADMIN_ROLE_ID, Security } from './Graph'
 import { Graph } from './Graph'
+import { Operator } from './Operator'
 import type { MigrationArtifact } from './Schema'
 import { installBasis } from './Schema'
 import { Server } from './Server'
@@ -1010,6 +1011,109 @@ describe('Authorization RLS', () => {
       expect(await sectionsForActor(alice, privateDocumentB)).toEqual([])
       expect(await sectionsForActor(alice, privateDocumentC)).toEqual([])
       expect(await sectionsForActor(bob, privateDocumentB)).toEqual([privateSectionB])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 30_000)
+
+  test('authorizes nullable descendant member fields through relationship policies', async () => {
+    const memberGraph = new Graph({
+      entities: [
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Campaign',
+          security: { [Action.Read]: { where: 'members $contains (company = null)' } },
+        },
+        {
+          fields: [],
+          name: 'Person',
+          security: { [Action.Read]: Security.Public },
+        },
+        {
+          extends: 'Person',
+          fields: [{ field: 'company', nullable: true, type: 'String' }],
+          name: 'Client',
+        },
+        { extends: 'Person', fields: [], name: 'SystemUser' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+          { field: 'person', inverse: 'campaigns', target: 'Person' },
+        ],
+        fields: [],
+        name: 'CampaignMembership',
+      }],
+      security: {
+        CampaignMembership: { [Action.Read]: Security.Public },
+      },
+    })
+    const install = tempDirectory('basis-authorization-member-fields-')
+    const server = await start(install, memberGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const campaignClient = randomUUID()
+      const campaignSystem = randomUUID()
+      const client = randomUUID()
+      const systemUser = randomUUID()
+      await admin.sql.begin(async tx => {
+        await tx`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES
+            (${campaignClient}, 'Client Campaign', 'Campaign'),
+            (${campaignSystem}, 'System Campaign', 'Campaign'),
+            (${client}, 'Client Person', 'Client'),
+            (${systemUser}, 'System Person', 'SystemUser')
+        `
+        await tx`
+          INSERT INTO "Campaign" ("id", "title")
+          VALUES
+            (${campaignClient}, 'Client Campaign'),
+            (${campaignSystem}, 'System Campaign')
+        `
+        await tx`
+          INSERT INTO "Person" ("id")
+          VALUES (${client}), (${systemUser})
+        `
+        await tx`
+          INSERT INTO "Client" ("id", "company")
+          VALUES (${client}, ${null})
+        `
+        await tx`
+          INSERT INTO "SystemUser" ("id")
+          VALUES (${systemUser})
+        `
+        await tx`
+          INSERT INTO "CampaignMembership" ("campaign.id", "person.id")
+          VALUES
+            (${campaignClient}, ${client}),
+            (${campaignSystem}, ${systemUser})
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const read = () => asActor(null, () => server.db.query('Campaign', {
+        fields: ['id'],
+        orderBy: 'id',
+      }))
+      expect(await read()).toEqual([{ id: campaignClient }])
+      const source = await asActor(null, () => server.db.query('Campaign', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'members $contains (company = null)',
+      }))
+      const structured = await asActor(null, () => server.db.query('Campaign', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: {
+          field: 'members',
+          filters: [{ field: 'company', operator: Operator.Comparison.Equal, value: null }],
+          operator: Operator.Comparison.Contains,
+        },
+      }))
+      expect(source).toEqual([{ id: campaignClient }])
+      expect(structured).toEqual(source)
     } finally {
       await admin.close()
       await server.shutdown()
