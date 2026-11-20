@@ -433,6 +433,24 @@ const pets = await server.db.query<{
 
 Same-named descendant-only fields are accepted only when their logical contracts are compatible. The value is selected conditionally from the owning table for each concrete leaf; incompatible declarations fail while the Graph is constructed, before SQL runs.
 
+### Polymorphic predicates and absence
+
+Projection and predicate absence have different observable results. Projecting a descendant-only field yields `null` for leaves that do not declare it. Filtering on that field matches only concrete leaves that possess or inherit it; the missing field is not treated as `NULL`.
+
+For `A -> B(foo), C(foo), D`, `where: 'foo = 7'` requires the row to be a B or C **and** `foo = 7`. `foo = null` returns only B/C rows with an actual `NULL`; D is excluded. `NOT(foo = 7)` keeps the B/C guard outside the negation, so negation can never make D a match. `OR` preserves each operand's eligibility independently; an inherited operand makes the OR applicable everywhere while its sibling-only branch remains guarded.
+
+Reference paths apply eligibility at the correct occurrence. For `Section.document.workspace.members`, a descendant-only `workspace` on `PrivateDocument` restricts `document.entity`, not `Section.entity`, and then traverses that Document's collection.
+
+Collection and count predicates follow the same rule:
+
+- Descendant-only collections are applicable only on leaves that expose them. `$empty` distinguishes an applicable empty collection from an inapplicable collection.
+- `$contains` reads only the applicable sibling's physical relationship; sibling collections backed by different relationships cannot read one another's rows.
+- `$all` uses a total counterexample: a member that cannot satisfy the fully guarded member predicate, including one that does not declare a descendant-only member path, fails the universal. Ordinary negated member predicates remain guarded and do not match an inapplicable member. SQL compiles `$all` as `NOT EXISTS` over failing members through the existing correlated collection machinery.
+- `collection.$total`, `collection.$matched`, and native-array `array.$total` are Number predicates and retain the owning field's eligibility. Filtered `$matched` paths preserve their binds and placeholder order.
+- Sibling declaration order does not change results.
+
+Predicate traversal supports stored singular `Entity` references, inverse/relationship collections, and those count suffixes, up to the existing eight-reference-hop limit. Derived `inverse-one` singular navigations remain projection-only and are not yet predicate traversal paths. See [Query Language](./query-language.mdx#polymorphic-descendant-eligibility-implemented) for the complete canonical guard and composition rules.
+
 Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf. A reference targeting the universal `Entity` root derives leaf-owned fields and references from the actual target leaf; leaves without that field yield `null`:
 
 ```ts

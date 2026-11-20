@@ -45,6 +45,52 @@ const definitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 
+const eligibilityEntities = [
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'label', type: 'String' },
+    ],
+    name: 'A',
+  },
+  {
+    extends: 'A',
+    fields: [
+      { field: 'foo', nullable: true, type: 'Number' },
+      { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+      { cardinality: 'Many', field: 'items', inverse: 'ownerB', target: 'Item', type: 'Inverse' },
+    ],
+    name: 'B',
+  },
+  {
+    extends: 'A',
+    fields: [
+      { field: 'foo', nullable: true, type: 'Number' },
+      { cardinality: 'Many', field: 'items', inverse: 'ownerC', target: 'Item', type: 'Inverse' },
+    ],
+    name: 'C',
+  },
+  { extends: 'A', fields: [], name: 'D' },
+  {
+    fields: [
+      { field: 'id', format: 'UUID' },
+      { field: 'title', type: 'String' },
+      { field: 'ownerB', inverse: 'items', target: 'B', type: 'Entity' },
+      { field: 'ownerC', inverse: 'items', target: 'C', type: 'Entity' },
+    ],
+    name: 'Item',
+  },
+]
+const eligibilityDefinitions = EntityDefinitions.load(JSON.stringify({ entities: eligibilityEntities }))
+const eligibilityDefinitionsReversed = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    eligibilityEntities[0],
+    eligibilityEntities[2],
+    eligibilityEntities[1],
+    ...eligibilityEntities.slice(3),
+  ],
+}))
+
 const note = definitions.entity('Note')
 if (!note) throw new Error('missing Note entity')
 const identity = '00000000-0000-4000-8000-000000000001'
@@ -547,5 +593,46 @@ describe('Query parity gate', () => {
       filters: [],
       operator: Operator.Comparison.Contains,
     })).toThrow('non-empty filters')
+  })
+
+  test('compiles descendant eligibility guards for ordinary predicates', () => {
+    const compile = (
+      where: string,
+      model = eligibilityDefinitions,
+    ) => compileEntityQuery(model, 'A', { fields: ['id'], limit: null, where })
+
+    const equality = compile('foo = 7')
+    expect(equality.values).toEqual(['B', 'C', 7])
+    expect(equality.sql).toContain('"entity" IN ($1, $2)')
+    expect(compile('foo = null').values).toEqual(['B', 'C'])
+    expect(compile('NOT(foo = 7)').values).toEqual(['B', 'C', 7])
+    expect(compile("foo = 7 OR label = 'd'").values).toEqual(['B', 'C', 7, 'd'])
+    expect(() => compile('missing = 1')).toThrow('Unknown field')
+
+    const contains = compile("items $contains (title = 'match')")
+    expect(contains.values).toEqual(['B', 'C', 'match', 'match'])
+    expect(contains.sql).toContain('"ownerB.id"')
+    expect(contains.sql).toContain('"ownerC.id"')
+    expect(compile('items.$total = 0').values).toEqual(['B', 'C'])
+    expect(compile("items[title = 'match'].$matched >= 1").values)
+      .toEqual(['B', 'C', 'match', 'match', 1])
+
+    const scores = compile('scores.$total = 0')
+    expect(scores.values).toEqual(['B'])
+    expect(scores.sql).toContain('cardinality')
+    expect(compile('NOT(scores.$total > 0)').values).toEqual(['B'])
+    expect(compile('scores.$total = 0')).toEqual(compileEntityQuery(
+      eligibilityDefinitions,
+      'A',
+      {
+        fields: ['id'],
+        limit: null,
+        where: { field: 'scores.$total', operator: Operator.Comparison.Equal, value: 0 },
+      },
+    ))
+
+    const reversed = compile('foo = 7', eligibilityDefinitionsReversed)
+    expect([...reversed.values.slice(0, 2)].sort()).toEqual(['B', 'C'])
+    expect(reversed.sql).toContain('"entity" IN')
   })
 })
