@@ -131,7 +131,9 @@ Collection and count predicates use the same eligibility:
 
 Generated eligibility guards are ordinary canonical comparisons, not provenance-carrying nodes. An identical `document.entity $in [...]` filter behaves the same whether a caller authored it, a lowerer generated it, or it was copied or deserialized.
 
-Limits and exclusions: predicate traversal supports stored singular `Entity` references, inverse/relationship collections, and the count suffixes above, with the existing maximum of eight singular-reference hops. Derived `inverse-one` singular navigations remain projection-only and are not yet predicate traversal paths. Incompatible same-named sibling field contracts fail during Graph construction, as documented on the [database authoring page](./database.mdx#authored-hierarchy-validation).
+Authored contracts are validated once, when `Graph` or `EntityDefinitions` is constructed. An incompatible same-named declaration such as `A -> B(foo: String), C(foo: Number)` fails before a query or policy can reference it. Partial coverage remains valid: `A -> B(foo), D(no foo)` constructs successfully, with `foo` applicable only on B. The construction-time authority is the same logical contract used by the resolver; it is not re-derived per query. See the [database authoring page](./database.mdx#authored-hierarchy-validation) for the complete validation rule.
+
+Limits and exclusions: predicate traversal supports stored singular `Entity` references, inverse/relationship collections, and the count suffixes above, with the existing maximum of eight singular-reference hops. Derived `inverse-one` singular navigations remain projection-only and are not yet predicate traversal paths. Incompatible same-named sibling field contracts fail during Graph construction.
 
 ## Implemented scalar operators
 
