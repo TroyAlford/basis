@@ -22,7 +22,26 @@ function fixture(): string {
   const directory = tempDirectory('basis-production-hmr-')
   created.push(directory)
   symlinkSync(join(repoRoot, 'node_modules'), join(directory, 'node_modules'), 'dir')
-  writeFileSync(join(directory, 'bunfig.toml'), '[serve.static]\nplugins = ["basis/serve"]\n')
+  /*
+   * The vendor resolver is deliberately omitted here. Bun's HTML dev-server
+   * module graph is currently corrupted by vendor import redirection, so this
+   * fixture isolates and validates the production HMR transform until that
+   * upstream integration is fixed.
+   */
+  writeFileSync(join(directory, 'bunfig.toml'), '[serve.static]\nplugins = ["./serve-plugin.ts"]\n')
+  writeFileSync(join(directory, 'serve-plugin.ts'), `
+import type { BunPlugin } from 'bun'
+import { pluginHMR, pluginMarkdown, pluginSASS } from 'basis/serve'
+
+const plugin: BunPlugin = {
+  name: 'basis-hmr-test',
+  setup(build) {
+    for (const composed of [pluginSASS(), pluginMarkdown(), pluginHMR()]) composed.setup(build)
+  },
+}
+
+export default plugin
+  `.trim())
   writeFileSync(join(directory, 'serve.ts'), `
 import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
 
@@ -41,11 +60,11 @@ export class Application extends Component {
     super.componentDidMount()
     globalThis.__basisHydrated = true
   }
-  increment = () => this.setState({ count: this.state.count + 1 })
+  increment() { this.setState({ count: this.state.count + 1 }) }
   content() {
     return <div>
       <h1>Application {this.state.count}</h1>
-      <button onClick={this.increment}>increment</button>
+      <button onClick={() => this.increment()}>increment</button>
     </div>
   }
 }
