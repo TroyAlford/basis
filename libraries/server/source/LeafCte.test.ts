@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { compileEntityQuery } from './Database'
 import { Action, Graph, Security } from './Graph'
+import { compilePolymorphicQuery } from './PolymorphicQuery'
 
 const publicRead = { [Action.Read]: Security.Public } as const
 const graph = new Graph({
@@ -50,4 +51,55 @@ test('reuses one CTE definition for repeated references and omits unrelated leav
   })
   expect((sql.match(/"authorized_Workspace" AS NOT MATERIALIZED/g) ?? [])).toHaveLength(1)
   expect(sql).not.toContain('authorized_Unrelated')
+})
+
+test('projects inherited fields from the authorized CTE instead of external ancestors', () => {
+  const { sql } = compileEntityQuery(graph.definitions, 'Document', {
+    fields: ['id', 'workspace.name', 'card.name'],
+  })
+  expect(sql).toContain('"root"."name" AS "name"')
+  expect(sql).toContain('LEFT JOIN "authorized_Workspace" "b1"')
+  expect(sql).toContain('b1."name"')
+  expect(sql).not.toContain('FROM "authorized_Document" "t" JOIN "Entity"')
+})
+
+test('does not rewrite SQL literals or comments as relation references', () => {
+  const definition = graph.definitions.entity('Document')
+  if (!definition) throw new Error('Document definition missing')
+  const { sql } = compilePolymorphicQuery(graph.definitions, definition, {
+    fields: ['id'],
+    rawWhere: { sql: '1 = 1 /* FROM "Unrelated" */', values: [] },
+  })
+  expect(sql).toContain('/* FROM "Unrelated" */')
+  expect(sql).not.toContain('authorized_Unrelated')
+})
+
+test('uses authorized relations for nested collection correlations', () => {
+  const collectionGraph = new Graph({
+    entities: [
+      {
+        fields: [{
+          cardinality: 'Many',
+          field: 'books',
+          inverse: 'shelf',
+          target: 'Book',
+          type: 'Inverse',
+        }],
+        name: 'Shelf',
+        security: publicRead,
+      },
+      {
+        fields: [{ field: 'shelf', inverse: 'books', target: 'Shelf', type: 'Entity' }],
+        name: 'Book',
+        security: publicRead,
+      },
+    ],
+  })
+  const { sql } = compileEntityQuery(collectionGraph.definitions, 'Shelf', {
+    fields: ['id', 'books{$limit:1}'],
+  })
+  expect(sql).toContain('FROM "authorized_Shelf" "t"')
+  expect(sql).toContain('"authorized_Book" "ct')
+  expect(sql).toContain('"shelf.id"')
+  expect(sql).not.toContain('JOIN ("Book"')
 })

@@ -613,10 +613,9 @@ describe('SQL.where', () => {
     })
 
     expect(compiled.sql).toContain('FROM "authorized_User" "t"')
-    expect(compiled.sql).toContain('JOIN "Entity" "r" ON "r"."id" = "t"."id"')
-    expect(compiled.sql).toContain('r."entity" IN (\'SystemUser\', \'Client\')')
-    expect(compiled.sql).toContain('r."name" ILIKE $1 ESCAPE')
-    expect(compiled.sql).toContain('ORDER BY r."name" ASC, r."id" ASC')
+    expect(compiled.sql).toContain('t."entity" IN (\'SystemUser\', \'Client\')')
+    expect(compiled.sql).toContain('t."name" ILIKE $1 ESCAPE')
+    expect(compiled.sql).toContain('ORDER BY t."name" ASC, t."id" ASC')
     expect(compiled.values).toEqual(['%Ada%', 10, 0])
   })
 
@@ -625,7 +624,7 @@ describe('SQL.where', () => {
       fields: ['id'],
       orderBy: [],
     })
-    expect(compiled.sql).toContain('ORDER BY r."name" ASC, r."id" ASC')
+    expect(compiled.sql).toContain('ORDER BY t."name" ASC, t."id" ASC')
     expect(compiled.sql).not.toContain('ORDER BY ,')
   })
 
@@ -633,18 +632,20 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(graphDefinitions, 'User', {
       fields: ['id', 'entity', 'permissions', 'status'],
     })
-    expect(compiled.sql).toContain('LEFT JOIN "authorized_SystemUser"')
-    expect(compiled.sql).toContain('LEFT JOIN "authorized_Client"')
-    expect(compiled.sql).toContain('CASE WHEN r."entity" IN (\'SystemUser\')')
-    expect(compiled.sql).toContain('"status"')
-    expect(compiled.sql).toContain('"permissions"')
+    expect(compiled.sql).toContain('"authorized_SystemUser" AS NOT MATERIALIZED')
+    expect(compiled.sql).toContain('"authorized_Client" AS NOT MATERIALIZED')
+    expect(compiled.sql).toContain('LEFT JOIN "authorized_SystemUser" "o1"')
+    expect(compiled.sql).toContain('LEFT JOIN "authorized_Client" "o2"')
+    expect(compiled.sql).toContain('CASE WHEN t."entity" IN (\'SystemUser\')')
+    expect(compiled.sql).toContain('o1."permissions"')
+    expect(compiled.sql).toContain('o2."status"')
   })
 
   test('projects singular references and dotted paths with nested aliases', () => {
     const compiled = compileEntityQuery(graphDefinitions, 'Article', {
       fields: ['id', 'title', 'owner', 'owner.permissions', 'owner.manager.name'],
     })
-    expect(compiled.sql).toContain('LEFT JOIN ("authorized_User"')
+    expect(compiled.sql).toContain('LEFT JOIN "authorized_User" "b1"')
     expect(compiled.sql).toContain('"owner__id"')
     expect(compiled.sql).toContain('"owner__permissions"')
     expect(compiled.sql).toContain('"owner__manager__v0__name"')
@@ -656,9 +657,10 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(graphDefinitions, 'Article', {
       fields: ['favorite.name', 'favorite.permissions', 'favorite.owner.name'],
     })
-    expect(compiled.sql).toContain('LEFT JOIN "Entity"')
-    expect(compiled.sql).toContain('LEFT JOIN "authorized_SystemUser"')
-    expect(compiled.sql).toContain('LEFT JOIN "authorized_Article"')
+    expect(compiled.sql).toContain('LEFT JOIN "authorized_Entity" "r1"')
+    expect(compiled.sql).toContain('"authorized_Entity" AS NOT MATERIALIZED')
+    expect(compiled.sql).toContain('LEFT JOIN "authorized_User" "b2"')
+    expect(compiled.sql).toContain('"authorized_User" AS NOT MATERIALIZED')
     expect(compiled.sql).toContain('"favorite__id"')
     expect(compiled.sql).toContain('"favorite__name"')
     expect(compiled.sql).toContain('"favorite__permissions"')
@@ -820,7 +822,7 @@ describe('SQL.where', () => {
       fields: ['id'],
       orderBy: ['name', '-id'],
     })
-    expect(compiled.sql).toContain('ORDER BY r."name" ASC, t."id" DESC')
+    expect(compiled.sql).toContain('ORDER BY t."name" ASC, t."id" DESC')
   })
 
   test('projects multi-level collection paths', () => {
@@ -974,7 +976,8 @@ describe('SQL.where', () => {
       where: '$not (score = 5 $or score = 10)',
     })
 
-    const cte = 'WITH "authorized_Note" AS NOT MATERIALIZED (SELECT "leaf".* FROM "Note" "leaf")'
+    const cte = 'WITH "authorized_Note" AS NOT MATERIALIZED (' +
+      'SELECT "leaf"."score" AS "score", "leaf"."title" AS "title" FROM "Note" "leaf")'
     expect(compiled.sql).toMatchSQL(`
       ${cte}
       SELECT t."title" AS "title", t."score" AS "score"

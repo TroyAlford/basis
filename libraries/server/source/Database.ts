@@ -2,7 +2,7 @@ import { runAsync } from 'basis/utilities'
 import type { TransactionSQL } from 'bun'
 import { SQL } from 'bun'
 import { currentActor } from './ActorContext'
-import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions } from './EntityDefinitions'
+import type { EntityDefinitions } from './EntityDefinitions'
 import { ManagedPostgresService } from './ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from './Mutation'
 import { mutationRunner, snapshotWrittenSubjects, validateTransactionState } from './Mutation'
@@ -150,111 +150,8 @@ function prepareEntityQuery(
   const compiled = compilePolymorphicQuery(entities, definition, options)
   return {
     hydrate: compiled.hydrate,
-    query: { sql: authorizeEntityQuery(entities, compiled.sql), values: compiled.values },
+    query: { sql: compiled.sql, values: compiled.values },
   }
-}
-
-/**
- * Project one concrete leaf with its required ancestor storage.
- * @param definition - Concrete leaf definition.
- * @param fields - Effective fields to expose.
- * @returns A leaf-rooted SELECT relation.
- */
-function leafProjection(definition: EntityDefinition, fields: readonly EffectiveFieldDefinition[]): string {
-  const aliases = new Map<string, string>([[definition.name, 'leaf']])
-  const joins: string[] = []
-  const projection: string[] = []
-  for (const field of fields) {
-    let alias = aliases.get(field.owner)
-    if (alias === undefined) {
-      alias = field.owner === 'Entity' ? 'root' : `owner_${field.owner}`
-      aliases.set(field.owner, alias)
-      joins.push(`JOIN "${field.owner}" "${alias}" ON "${alias}"."id" = "leaf"."id"`)
-    }
-    const column = 'column' in field ? field.column : field.name
-    projection.push(`"${alias}"."${column}" AS "${column}"`)
-  }
-  return `SELECT ${projection.join(', ')} FROM "${definition.name}" "leaf" ${joins.join(' ')}`
-}
-
-/**
- * Select one concrete leaf without assuming optional ancestor storage exists.
- * The outer compiler still joins any ancestor relation it actually needs.
- * @param definition - Concrete leaf definition.
- * @param used - Relation names referenced by the compiled statement.
- * @param entities - Canonical entity definitions.
- * @returns A leaf-rooted SELECT relation.
- */
-function leafRelation(definition: EntityDefinition, used: ReadonlySet<string>, entities: EntityDefinitions): string {
-  const joins: string[] = []
-  let parent = definition.parent
-  const aliases = new Set<string>()
-  while (parent !== 'Entity') {
-    const ancestor = entities.entity(parent)
-    if (!ancestor) break
-    if (ancestor.name !== definition.name && used.has(ancestor.name) && !aliases.has(ancestor.name)) {
-      aliases.add(ancestor.name)
-      const alias = `owner_${ancestor.name}`
-      joins.push(`JOIN "${ancestor.name}" "${alias}" ON "${alias}"."id" = "leaf"."id"`)
-    }
-    parent = ancestor.parent
-  }
-  if (used.has('Entity')) {
-    joins.push('JOIN "Entity" "root" ON "root"."id" = "leaf"."id"')
-  }
-  return `SELECT "leaf".* FROM "${definition.name}" "leaf" ${joins.join(' ')}`
-}
-
-/**
- * Wrap concrete entity relations in reusable authorized leaf CTEs.
- *
- * The CTEs are intentionally restricted to entity tables. Ancestor storage such as
- * `Entity` remains an ordinary physical relation; concrete leaf RLS supplies the
- * entity authorization boundary.
- * @param entities - Canonical entity definitions.
- * @param sql - Compiled entity SQL.
- * @returns SQL with authorized relation CTEs.
- */
-function authorizeEntityQuery(entities: EntityDefinitions, sql: string): string {
-  const used = new Set<string>()
-  for (const match of sql.matchAll(/\b(?:FROM|JOIN)\s+\(?"([^"]+)"/g)) {
-    const name = match[1]
-    if (name !== undefined) used.add(name)
-  }
-  const definitions: string[] = []
-  const replacements = new Map<string, string>()
-  for (const name of used) {
-    const definition = entities.entity(name)
-    if (!definition || name === 'Entity') continue
-    const cte = `authorized_${name}`
-    replacements.set(name, cte)
-    if (definition.abstract) {
-      const leaves = entities.concreteDescendants(name)
-      const needed = new Set([
-        'id',
-        'name',
-        'entity',
-        ...definition.fields.map(field => field.name),
-      ])
-      const fields = definition.effectiveFields.filter(field => needed.has(field.name))
-      const union = leaves.map(leaf => leafProjection(leaf, fields)).join(' UNION ALL ')
-      definitions.push(
-        `"${cte}" AS NOT MATERIALIZED (${union.length === 0 ? 'SELECT FALSE AS "id" WHERE FALSE' : union})`,
-      )
-    } else {
-      definitions.push(`"${cte}" AS NOT MATERIALIZED (${leafRelation(definition, used, entities)})`)
-    }
-  }
-  if (definitions.length === 0) return sql
-  let body = sql
-  for (const [name, cte] of replacements) {
-    const escaped = name.replaceAll('"', '""')
-    body = body.replace(
-      new RegExp(`\\b(FROM|JOIN)(\\s+\\(?)"${escaped}"`, 'g'),
-      `$1$2"${cte}"`,
-    )
-  }
-  return `WITH ${definitions.join(', ')} ${body}`
 }
 
 /**

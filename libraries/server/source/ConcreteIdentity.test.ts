@@ -55,15 +55,16 @@ describe('concrete identity resolution', () => {
      * The public reference shape always includes name, so inherited storage is
      * required even when the caller selected only workspace.id.
      */
-    expect(sql).toMatch(/r\d+\."name" AS "workspace__name"/)
-    expect((sql.match(/INNER JOIN "Entity"/g) ?? [])).toHaveLength(1)
+    expect(sql).toContain('"root"."name" AS "name"')
+    expect(sql).toContain('b1."name" AS "workspace__name"')
+    expect(sql).toContain('"authorized_Workspace" AS NOT MATERIALIZED')
   })
 
   test('uses the runtime discriminator for an abstract target', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Document', {
       fields: ['id', 'card.id', 'card.name'],
     })
-    expect(sql).toMatch(/r\d+\."entity" AS "card__entity"/)
+    expect(sql).toContain('b1."entity" AS "card__entity"')
     expect(sql).not.toContain("'Card' AS \"card__entity\"")
   })
 
@@ -71,23 +72,24 @@ describe('concrete identity resolution', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Document', {
       fields: ['id', 'workspace.id'],
     })
-    expect(sql).toMatch(/r\d+\."name" AS "workspace__name"/)
-    expect((sql.match(/INNER JOIN "Entity"/g) ?? [])).toHaveLength(1)
+    expect(sql).toContain('"root"."name" AS "name"')
+    expect(sql).toContain('b1."name" AS "workspace__name"')
+    expect(sql).toContain('"authorized_Workspace" AS NOT MATERIALIZED')
   })
 
   test('uses one concrete/root occurrence for repeated reference fields', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Document', {
       fields: ['workspace', 'workspace.name', 'workspace.id'],
     })
-    expect((sql.match(/"Workspace"/g) ?? [])).toHaveLength(1)
-    expect((sql.match(/INNER JOIN "Entity"/g) ?? [])).toHaveLength(1)
+    expect((sql.match(/"authorized_Workspace" AS NOT MATERIALIZED/g) ?? [])).toHaveLength(1)
+    expect(sql).toContain('"authorized_Workspace" AS NOT MATERIALIZED')
   })
 
   test('preserves the universal reference path', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Link', {
       fields: ['id', 'target', 'target.name'],
     })
-    expect(sql).toContain('LEFT JOIN "Entity"')
+    expect(sql).toContain('LEFT JOIN "authorized_Entity"')
     expect(sql).toContain('target__entity')
     expect(sql).not.toContain('JOIN "Workspace"')
   })

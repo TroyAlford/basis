@@ -12,8 +12,12 @@ export interface CollectionSqlAliases {
   readonly relationship: string,
   /** Alias for the universal `Entity` root joined to the related row. */
   readonly root: string,
+  /** Authorized relation for the universal root, when supplied by the planner. */
+  readonly rootRelation?: string,
   /** Alias for the concrete related entity table, when it is not `Entity`. */
   readonly target: string,
+  /** Authorized relation for a concrete target, when supplied by the planner. */
+  readonly targetRelation?: string,
 }
 
 /** One compiled collection relation. */
@@ -86,22 +90,22 @@ export function collectionSqlRelation(
       const ownerId = `${quote(aliases.root)}.${quote('id')}`
       return {
         condition: `${ownerId} = ${parentId}`,
-        relation: `${quote('Entity')} ${quote(aliases.root)}`,
+        relation: `${quote(aliases.rootRelation ?? 'Entity')} ${quote(aliases.root)}`,
         resultType: 'entity',
         rootAlias: aliases.root,
         ...predicateEntry,
       }
     }
-    const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
-    const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
-    const targetId = `${quote(aliases.target)}.${quote('id')}`
-    const rootId = `${quote(aliases.root)}.${quote('id')}`
+    const targetSource = `${quote(aliases.targetRelation ?? targetName)} ${quote(aliases.target)}`
     const ownerId = `${quote(aliases.target)}.${quote(resolved.owner.column)}`
     return {
       condition: `${ownerId} = ${parentId}`,
-      relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
+      relation: aliases.targetRelation === undefined
+        ? `${targetSource} JOIN ${quote('Entity')} ${quote(aliases.root)} ` +
+          `ON ${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`
+        : targetSource,
       resultType: 'entity',
-      rootAlias: aliases.root,
+      rootAlias: aliases.targetRelation === undefined ? aliases.root : aliases.target,
       targetAlias: aliases.target,
       ...predicateEntry,
     }
@@ -116,28 +120,30 @@ export function collectionSqlRelation(
   const ownerId = `${quote(aliases.relationship)}.${quote(resolved.owner.column)}`
   const condition = `${ownerId} = ${parentId}`
   const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
-  const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
   const rootId = `${quote(aliases.root)}.${quote('id')}`
   const remoteId = `${quote(aliases.relationship)}.${remoteColumn}`
   if (targetName === 'Entity') {
     return {
       condition,
-      relation: `${relationshipSource} JOIN ${rootSource} ON ${rootId} = ${remoteId}`,
+      relation: `${relationshipSource} JOIN ${quote(aliases.rootRelation ?? 'Entity')} ` +
+        `${quote(aliases.root)} ON ${rootId} = ${remoteId}`,
       relationshipAlias: aliases.relationship,
       resultType: 'entity',
       rootAlias: aliases.root,
       ...predicateEntry,
     }
   }
-  const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
+  const targetSource = `${quote(aliases.targetRelation ?? targetName)} ${quote(aliases.target)}`
   const targetId = `${quote(aliases.target)}.${quote('id')}`
   const targetJoin = `${relationshipSource} JOIN ${targetSource} ON ${targetId} = ${remoteId}`
   return {
     condition,
-    relation: `${targetJoin} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
+    relation: aliases.targetRelation === undefined
+      ? `${targetJoin} JOIN ${quote('Entity')} ${quote(aliases.root)} ON ${rootId} = ${targetId}`
+      : targetJoin,
     relationshipAlias: aliases.relationship,
     resultType: 'entity',
-    rootAlias: aliases.root,
+    rootAlias: aliases.targetRelation === undefined ? aliases.root : aliases.target,
     targetAlias: aliases.target,
     ...predicateEntry,
   }

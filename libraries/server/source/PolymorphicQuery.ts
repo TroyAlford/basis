@@ -49,6 +49,8 @@ export interface PolymorphicQueryOptions {
   readonly projectionBudget?: ProjectionBudget,
   /** Internal raw root condition used to correlate a projected collection. */
   readonly rawWhere?: SqlFragment,
+  /** Internal CTE namespace for nested compiler scopes. */
+  readonly relationPrefix?: string,
   /** Internal root alias used by correlated projected collections. */
   readonly rootAlias?: string,
   /** Effective-field predicate. */
@@ -279,6 +281,240 @@ interface CollectionMemberAdapter {
   readonly orderable: ReadonlySet<string>,
 }
 
+/** One field required from an authorized entity relation. */
+interface AuthorizedField {
+  /** Stable output alias used by the outer query. */
+  readonly alias: string,
+  /** Effective field metadata. */
+  readonly field: EffectiveFieldDefinition,
+}
+
+/**
+ * Plan leaf-rooted authorized relations from Graph field requirements.
+ *
+ * Requirements are registered while the existing resolver walks fields,
+ * references, filters and collections. SQL is emitted only after all
+ * requirements are known; no finished statement is parsed or rewritten.
+ */
+class AuthorizedRelations {
+  /** Concrete and abstract entity relations keyed by entity name. */
+  readonly #relations = new Map<string, Map<string, AuthorizedField | null>>()
+  /** Canonical entity definitions. */
+  readonly #entities: EntityDefinitions
+  /** Prefix that prevents nested compiler CTEs from shadowing outer relations. */
+  readonly #prefix: string
+
+  /**
+   * Create one relation planner for a query compilation.
+   * @param entities - Canonical entity definitions.
+   * @param prefix - Nested compiler CTE prefix.
+   */
+  constructor(entities: EntityDefinitions, prefix = '') {
+    this.#entities = entities
+    this.#prefix = prefix
+  }
+
+  /**
+   * Require one entity relation and return its stable SQL name.
+   * @param name - Entity name.
+   * @returns Quoted authorized relation name.
+   */
+  relation(name: string): string {
+    this.#ensure(name)
+    return quote(this.relationName(name))
+  }
+
+  /**
+   * Resolve one authorized relation identifier without quoting.
+   * @param name - Entity name.
+   * @returns Stable relation identifier.
+   */
+  relationName(name: string): string {
+    this.#ensure(name)
+    return `authorized_${this.#prefix}${name}`
+  }
+
+  /**
+   * Register one effective field required from an entity relation.
+   * @param definition - Entity occurrence definition.
+   * @param field - Effective field accessed by the compiler.
+   */
+  register(definition: EntityDefinition, field: EffectiveFieldDefinition): void {
+    const alias = fieldAlias(field)
+    const fields = this.#ensure(definition.name)
+    fields.set(alias, { alias, field })
+    if (definition.abstract) {
+      for (const leaf of this.#entities.concreteDescendants(definition.name)) {
+        const leafFields = this.#ensure(leaf.name)
+        const available = leaf.effectiveFields.find(candidate => fieldAlias(candidate) === alias)
+        leafFields.set(alias, available === undefined
+          ? null
+          : { alias, field: available })
+      }
+    }
+  }
+
+  /**
+   * Register an output alias without an already resolved field.
+   * @param name - Entity name.
+   * @param alias - Required output alias.
+   */
+  registerAlias(name: string, alias: string): void {
+    const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+    if (!definition) throw new Error(`Unknown entity "${name}"`)
+    const field = definition.effectiveFields.find(candidate => fieldAlias(candidate) === alias)
+    if (field !== undefined) {
+      this.register(definition, field)
+      return
+    }
+    this.#ensure(name).set(alias, null)
+    if (definition.abstract) {
+      for (const leaf of this.#entities.concreteDescendants(name)) {
+        const leafField = leaf.effectiveFields.find(candidate => fieldAlias(candidate) === alias)
+        this.#ensure(leaf.name).set(alias, leafField === undefined ? null : { alias, field: leafField })
+      }
+    }
+  }
+
+  /**
+   * Require the universal identity columns for one occurrence.
+   * @param definition - Entity occurrence definition.
+   */
+  registerIdentity(definition: EntityDefinition): void {
+    for (const alias of ['id', 'name', 'entity']) this.registerAlias(definition.name, alias)
+  }
+
+  /**
+   * Emit reusable CTE definitions in dependency order.
+   * @returns Quoted CTE definitions, or an empty array.
+   */
+  definitions(): string[] {
+    for (const [name, required] of [...this.#relations]) {
+      const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+      if (!definition || (name !== 'Entity' && !definition.abstract)) continue
+      for (const leaf of this.#entities.concreteDescendants(name)) {
+        const leafFields = this.#ensure(leaf.name)
+        for (const alias of required.keys()) {
+          if (leafFields.has(alias)) continue
+          const field = leaf.effectiveFields.find(candidate => fieldAlias(candidate) === alias)
+          leafFields.set(alias, field === undefined ? null : { alias, field })
+        }
+      }
+    }
+    const names = [...this.#relations.keys()]
+    const concrete = names.filter(name => {
+      if (name === 'Entity') return false
+      const definition = this.#entities.entity(name)
+      return definition !== undefined && !definition.abstract
+    })
+    const abstract = names.filter(name => !concrete.includes(name))
+    return [
+      ...concrete.map(name => this.#concreteDefinition(name)),
+      ...abstract.map(name => this.#abstractDefinition(name)),
+    ].filter(definition => definition !== '')
+  }
+
+  /**
+   * Ensure one relation requirement bucket exists.
+   * @param name - Entity name.
+   * @returns Mutable requirement map.
+   */
+  #ensure(name: string): Map<string, AuthorizedField | null> {
+    let fields = this.#relations.get(name)
+    if (fields) return fields
+    const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+    if (!definition) throw new Error(`Unknown entity "${name}"`)
+    fields = new Map()
+    this.#relations.set(name, fields)
+    return fields
+  }
+
+  /**
+   * Emit one concrete leaf relation.
+   * @param name - Concrete entity name.
+   * @returns CTE definition.
+   */
+  #concreteDefinition(name: string): string {
+    const definition = this.#entities.entity(name)
+    if (!definition) return ''
+    return this.#leafDefinition(definition, this.#relations.get(name) ?? new Map())
+  }
+
+  /**
+   * Emit one abstract relation as a UNION ALL of concrete leaf relations.
+   * @param name - Abstract entity name, including `Entity`.
+   * @returns CTE definition.
+   */
+  #abstractDefinition(name: string): string {
+    const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+    if (!definition) return ''
+    const leaves = this.#entities.concreteDescendants(name)
+    const required = this.#relations.get(name) ?? new Map()
+    const aliases = [...required.keys()].sort()
+    if (aliases.length === 0) aliases.push('id')
+    const selects = leaves.map(leaf => {
+      const leafFields = this.#relations.get(leaf.name) ?? new Map()
+      for (const alias of aliases) {
+        if (!leafFields.has(alias)) {
+          const field = leaf.effectiveFields.find(candidate => fieldAlias(candidate) === alias)
+          leafFields.set(alias, field === undefined ? null : { alias, field })
+        }
+      }
+      return `SELECT ${aliases.map(alias => quote(alias)).join(', ')} ` +
+        `FROM ${quote(`authorized_${this.#prefix}${leaf.name}`)}`
+    })
+    const cte = quote(`authorized_${this.#prefix}${name}`)
+    if (selects.length === 0) {
+      return `${cte} AS NOT MATERIALIZED (` +
+        `SELECT ${aliases.map(alias => `NULL AS ${quote(alias)}`).join(', ')} WHERE FALSE)`
+    }
+    return `${cte} AS NOT MATERIALIZED (${selects.join(' UNION ALL ')})`
+  }
+
+  /**
+   * Project one concrete leaf with explicit output aliases.
+   * @param definition - Concrete entity.
+   * @param requirements - Required aliases and optional field metadata.
+   * @returns CTE definition.
+   */
+  #leafDefinition(
+    definition: EntityDefinition,
+    requirements: ReadonlyMap<string, AuthorizedField | null>,
+  ): string {
+    const aliases = [...requirements.keys()].sort()
+    if (aliases.length === 0) aliases.push('id')
+    const owners = new Map<string, string>([[definition.name, 'leaf']])
+    const joins: string[] = []
+    const projection = aliases.map(alias => {
+      const required = requirements.get(alias)
+      if (required === null || required === undefined) return `NULL AS ${quote(alias)}`
+      const owner = required.field.owner
+      let ownerAlias = owners.get(owner)
+      if (ownerAlias === undefined) {
+        ownerAlias = owner === 'Entity' ? 'root' : `owner_${owner}`
+        owners.set(owner, ownerAlias)
+        joins.push(
+          `JOIN ${quote(owner)} ${quote(ownerAlias)} ` +
+          `ON ${quote(ownerAlias)}.${quote('id')} = ${quote('leaf')}.${quote('id')}`,
+        )
+      }
+      return `${quote(ownerAlias)}.${quote(alias)} AS ${quote(alias)}`
+    })
+    const name = definition.name
+    return `${quote(`authorized_${this.#prefix}${name}`)} AS NOT MATERIALIZED (` +
+      `SELECT ${projection.join(', ')} FROM ${quote(name)} ${quote('leaf')} ${joins.join(' ')})`
+  }
+}
+
+/**
+ * Resolve the stable output alias for one effective field.
+ * @param field - Effective field.
+ * @returns Physical reference column or logical scalar name.
+ */
+function fieldAlias(field: EffectiveFieldDefinition): string {
+  return 'column' in field ? field.column : field.name
+}
+
 /**
  * Build one entity-scoped projection tree and its SQL relation set.
  *
@@ -295,6 +531,8 @@ class QueryProjection {
   readonly root: EntityContext
   /** Canonical entity definitions. */
   readonly #entities: EntityDefinitions
+  /** Authorized relation requirements and their CTE definitions. */
+  readonly #relations: AuthorizedRelations
   /** Next generated table alias number. */
   #alias = 0
   /** Filter-only expression overrides keyed by logical path. */
@@ -325,6 +563,8 @@ class QueryProjection {
   #valueStart = 1
   /** Prefix that keeps nested compiler aliases unique. */
   readonly #aliasPrefix: string
+  /** Namespace for CTE definitions in this compiler scope. */
+  readonly #relationPrefix: string
 
   /**
    * Create the root occurrence for one query.
@@ -333,6 +573,7 @@ class QueryProjection {
    * @param budget - Projection limits; defaults to the public query budget.
    * @param rootAlias - Root table alias for this query.
    * @param aliasPrefix - Prefix for nested compiler aliases.
+   * @param relationPrefix - Prefix for nested relation CTE names.
    */
   constructor(
     entities: EntityDefinitions,
@@ -340,10 +581,13 @@ class QueryProjection {
     budget: ProjectionBudget = PUBLIC_PROJECTION_BUDGET,
     rootAlias = 't',
     aliasPrefix = '',
+    relationPrefix = '',
   ) {
     this.#entities = entities
+    this.#relations = new AuthorizedRelations(entities, relationPrefix)
     this.#budget = budget
     this.#aliasPrefix = aliasPrefix
+    this.#relationPrefix = relationPrefix
     this.root = {
       baseAlias: rootAlias,
       collections: contextCollections(entities, definition),
@@ -424,6 +668,23 @@ class QueryProjection {
    */
   ensureRoot(): string {
     return this.#ensureRoot(this.root)
+  }
+
+  /**
+   * Resolve one authorized entity relation name.
+   * @param name - Entity name.
+   * @returns Quoted CTE relation name.
+   */
+  relation(name: string): string {
+    return this.#relations.relation(name)
+  }
+
+  /**
+   * Emit the planned authorized CTE definitions.
+   * @returns Ordered CTE definitions.
+   */
+  relationDefinitions(): string[] {
+    return this.#relations.definitions()
   }
 
   /**
@@ -556,6 +817,7 @@ class QueryProjection {
           field,
           sourceAlias,
           this.#filterJoinKey(current, nextPrefix, field, sourceAlias, resolved.variants.length),
+          current.definition,
           sink,
         )
         prefix = nextPrefix
@@ -657,6 +919,7 @@ class QueryProjection {
           && previous !== undefined
           && !('kind' in previous)
           && previous.type === FieldType.Entity)
+      this.#registerField(branch.context.definition, terminal)
       const expression = referenceTerminal
         ? `${this.#ownerAlias(branch.context, terminal.owner, true, sink)}.${quote(terminal.column)}`
         : this.#expression(branch.context, terminal, true, false, sink)
@@ -851,6 +1114,13 @@ class QueryProjection {
       : undefined
     const rootAlias = resolved.resultType === 'entity' ? this.#nextAlias('cr') : undefined
     const relationshipAlias = resolved.source.kind === 'relationship' ? this.#nextAlias('cj') : undefined
+    const relationName = resolved.resultType === 'entity' && targetName !== undefined
+      ? this.#relations.relationName(targetName)
+      : undefined
+    if (targetName !== undefined) {
+      this.#relations.registerAlias(targetName, 'id')
+      this.#relations.registerAlias(targetName, resolved.owner.column)
+    }
     const sql = collectionSqlRelation(
       this.#entities,
       resolved,
@@ -859,6 +1129,9 @@ class QueryProjection {
         relationship: relationshipAlias ?? '',
         root: rootAlias ?? '',
         target: targetAlias ?? '',
+        ...(relationName === undefined ? {} : {
+          [targetName === 'Entity' ? 'rootRelation' : 'targetRelation']: relationName,
+        }),
       },
     )
     const relationship = resolved.source.kind === 'relationship' ? resolved.source.relationship : undefined
@@ -881,8 +1154,8 @@ class QueryProjection {
       ...(sql.predicate === undefined ? {} : { predicate: sql.predicate }),
       ...(relationship === undefined ? {} : { relationship }),
       ...(relationshipAlias === undefined ? {} : { relationshipAlias }),
-      ...(rootAlias === undefined ? {} : { rootAlias }),
-      ...(targetAlias === undefined ? {} : { targetAlias }),
+      ...(sql.rootAlias === undefined ? {} : { rootAlias: sql.rootAlias }),
+      ...(sql.targetAlias === undefined ? {} : { targetAlias: sql.targetAlias }),
       ...(targetEndpoint === undefined ? {} : { targetEndpoint }),
     }
     this.#collectionPlans.set(planKey, plan)
@@ -1576,6 +1849,7 @@ class QueryProjection {
               variant.field,
               [...node.path, `${name}__v${index}`],
               sourceAlias,
+              node.context.definition,
             )
           })
           reference = {
@@ -1620,7 +1894,7 @@ class QueryProjection {
   #reference(source: ProjectionNode, field: EffectiveFieldDefinition): ProjectionNode {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
     const sourceAlias = this.#ownerAlias(source.context, field.owner, false)
-    return this.#target(field, [...source.path, field.name], sourceAlias)
+    return this.#target(field, [...source.path, field.name], sourceAlias, source.context.definition)
   }
 
   /**
@@ -1636,26 +1910,28 @@ class QueryProjection {
     path: readonly string[],
   ): ProjectionNode {
     this.#consume()
+    this.#relations.registerIdentity(source.context.definition)
     if (navigation.target === 'Entity') {
-      const rootAlias = this.#nextAlias('r')
+      const alias = this.#nextAlias('r')
+      this.#relations.registerAlias('Entity', 'id')
       this.joins.push(
-        `LEFT JOIN "Entity" "${rootAlias}" ON ` +
-        `"${rootAlias}"."id" = "${source.context.baseAlias}"."id"`,
+        `LEFT JOIN ${this.#relations.relation('Entity')} ${quote(alias)} ON ` +
+        `${quote(alias)}.${quote('id')} = "${source.context.baseAlias}"."id"`,
       )
-      const child = this.#node(rootContext(this.#entities, rootAlias), path)
+      const child = this.#node(rootContext(this.#entities, alias), path)
       this.#identity(child)
       return child
     }
     const target = this.#entities.entity(navigation.target)
     if (!target) throw new Error(`Unknown target entity "${navigation.target}"`)
-    const baseAlias = this.#nextAlias('b')
-    const rootAlias = this.#nextAlias('r')
+    const alias = this.#nextAlias('b')
+    this.#relations.registerAlias(target.name, navigation.reference.column)
     this.joins.push(
-      `LEFT JOIN ("${target.name}" "${baseAlias}" INNER JOIN "Entity" "${rootAlias}" ` +
-      `ON "${rootAlias}"."id" = "${baseAlias}"."id") ON ` +
-      `"${baseAlias}".${quote(navigation.reference.column)} = "${source.context.baseAlias}"."id"`,
+      `LEFT JOIN ${this.#relations.relation(target.name)} ${quote(alias)} ON ` +
+      `${quote(alias)}.${quote(navigation.reference.column)} = ` +
+      `"${source.context.baseAlias}"."id"`,
     )
-    const child = this.#node(targetContext(this.#entities, target, baseAlias, rootAlias), path)
+    const child = this.#node(targetContext(this.#entities, target, alias, alias), path)
     this.#identity(child)
     return child
   }
@@ -1665,14 +1941,17 @@ class QueryProjection {
    * @param field - Effective reference field.
    * @param path - Internal projection path for target aliases.
    * @param sourceAlias - Source table alias containing the reference column.
+   * @param source - Source entity definition owning the reference field.
    * @returns The target projection node.
    */
   #target(
     field: EffectiveFieldDefinition,
     path: readonly string[],
     sourceAlias: string,
+    source: EntityDefinition,
   ): ProjectionNode {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
+    this.#registerField(source, field)
     const key = path.some(segment => /__v\d+$/u.test(segment))
       ? path.join('.')
       : this.#filterPathKey(path)
@@ -1701,23 +1980,23 @@ class QueryProjection {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
     scope.consume()
     if (field.target === 'Entity') {
-      const rootAlias = scope.alias('r')
+      const alias = scope.alias('r')
+      this.#relations.registerAlias('Entity', 'id')
       scope.join(
-        `LEFT JOIN "Entity" "${rootAlias}" ON ` +
-        `"${rootAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
+        `LEFT JOIN ${this.#relations.relation('Entity')} ${quote(alias)} ON ` +
+        `${quote(alias)}.${quote('id')} = ${sourceAlias}.${quote(field.column)}`,
       )
-      return rootContext(this.#entities, rootAlias)
+      return rootContext(this.#entities, alias)
     }
     const target = this.#entities.entity(field.target)
     if (!target) throw new Error(`Unknown target entity "${field.target}"`)
-    const baseAlias = scope.alias('b')
-    const rootAlias = scope.alias('r')
+    const alias = scope.alias('b')
+    this.#relations.registerAlias(target.name, 'id')
     scope.join(
-      `LEFT JOIN ("${target.name}" "${baseAlias}" INNER JOIN "Entity" "${rootAlias}" ` +
-      `ON "${rootAlias}"."id" = "${baseAlias}"."id") ON ` +
-      `"${baseAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
+      `LEFT JOIN ${this.#relations.relation(target.name)} ${quote(alias)} ON ` +
+      `${quote(alias)}.${quote('id')} = ${sourceAlias}.${quote(field.column)}`,
     )
-    return targetContext(this.#entities, target, baseAlias, rootAlias)
+    return targetContext(this.#entities, target, alias, alias)
   }
 
   /**
@@ -1725,6 +2004,7 @@ class QueryProjection {
    * @param field - Effective reference field.
    * @param sourceAlias - Source table alias.
    * @param key - Stable logical prefix key.
+   * @param source - Source entity definition owning the reference field.
    * @param scope - Local SQL join sink for this resolution scope.
    * @returns The target occurrence.
    */
@@ -1732,8 +2012,10 @@ class QueryProjection {
     field: EffectiveFieldDefinition,
     sourceAlias: string,
     key: string,
+    source: EntityDefinition,
     scope: FilterJoinScope = this.#outerFilterScope(),
   ): EntityContext {
+    this.#registerField(source, field)
     const cached = scope.cache.get(key)
     if (cached) return cached
     const context = this.#joinTarget(field, sourceAlias, scope)
@@ -1908,6 +2190,7 @@ class QueryProjection {
         rawWhere: filtered
           ? this.#filteredCollectionCorrelation(plan, key, filter, childAlias)
           : this.#collectionCorrelation(plan, childAlias),
+        relationPrefix: `${this.#relationPrefix}nested_`,
         rootAlias: childAlias,
         ...(filter === undefined || filtered ? {} : { where: filter }),
       })
@@ -2111,10 +2394,11 @@ class QueryProjection {
     this.#consume()
     this.#ensureRoot(node.context)
     const branches = field.variants.map(variant => {
-      const owner = this.#ownerAlias(node.context, variant.owner, true)
+      this.#registerField(node.context.definition, variant.field)
+      const owner = this.#ownerAlias(node.context, variant.field.owner, true)
       const leaves = variant.leaves.map(quoteLiteral).join(', ')
-      return `WHEN ${node.context.rootAlias}.${quote('entity')} IN (${leaves}) ` +
-        `THEN ${owner}.${quote(field.name)}`
+      return `WHEN ${node.context.baseAlias}.${quote('entity')} IN (${leaves}) ` +
+        `THEN ${owner}.${quote(fieldAlias(variant.field))}`
     })
     const alias = columnAlias(node.path, field.name)
     this.columns.push(`CASE ${branches.join(' ')} ELSE NULL END AS ${quote(alias)}`)
@@ -2143,12 +2427,12 @@ class QueryProjection {
     const concrete = !node.context.rootOnly && !definition.abstract
     const entityExpression = concrete
       ? quoteLiteral(definition.name)
-      : `${node.context.rootAlias}.${quote('entity')}`
-    const rootAlias = this.#ensureRoot(node.context)
+      : `${node.context.baseAlias}.${quote('entity')}`
+    this.#ensureRoot(node.context)
     this.columns.push(
       `${entityExpression} AS ${quote(entity)}`,
       `${node.context.baseAlias}.${quote('id')} AS ${quote(id)}`,
-      `${rootAlias}.${quote('name')} AS ${quote(name)}`,
+      `${node.context.baseAlias}.${quote('name')} AS ${quote(name)}`,
     )
     node.identity = { entity, id, name }
   }
@@ -2171,32 +2455,50 @@ class QueryProjection {
   ): string {
     const filtered = useFilterOverride ? this.#filterExpressions.get(field.name) : undefined
     if (filtered) return filtered
-    if (field.name === 'id') return `${context.baseAlias}.${quote(field.name)}`
-    if (field.owner === 'Entity') {
-      return `${this.#ensureRoot(context, scope)}.${quote(field.name)}`
+    this.#registerField(context.definition, field)
+    if (this.#needsLeafJoin(context.definition, field)) {
+      return `${this.#ownerAlias(context, field.owner, forceLeft, scope)}.${quote(fieldAlias(field))}`
     }
-    return `${this.#ownerAlias(context, field.owner, forceLeft, scope)}.${quote(field.name)}`
+    return `${context.baseAlias}.${quote(fieldAlias(field))}`
   }
 
   /**
-   * Ensure a universal root join exists for one occurrence.
+   * Register one field on the relation that can actually supply it.
+   * @param context - Occurrence definition.
+   * @param field - Effective field.
+   */
+  #registerField(context: EntityDefinition, field: EffectiveFieldDefinition): void {
+    const owner = this.#entities.entity(field.owner)
+    const target = context.abstract && owner !== undefined && !owner.abstract ? owner : context
+    this.#relations.register(target, field)
+  }
+
+  /**
+   * Whether a field must come from a concrete-leaf CTE joined to an abstract row.
+   * @param context - Occurrence definition.
+   * @param field - Effective field.
+   * @returns `true` for concrete-owner fields on an abstract occurrence.
+   */
+  #needsLeafJoin(context: EntityDefinition, field: EffectiveFieldDefinition): boolean {
+    if (!context.abstract || field.owner === context.name || field.owner === 'Entity') return false
+    const owner = this.#entities.entity(field.owner)
+    return owner !== undefined && !owner.abstract
+  }
+
+  /**
+   * Ensure a universal root relation exists for one occurrence.
    * @param context - Entity occurrence.
-   * @param scope - Local SQL join sink for this resolution scope.
+   * @param scope - Local SQL join sink retained for call compatibility.
    * @returns Root table alias.
    */
   #ensureRoot(
     context: EntityContext,
     scope: FilterJoinScope = this.#outerFilterScope(),
   ): string {
-    if (context.rootOnly || context.rootJoined) return context.rootAlias
-    const join = context.isTarget ? 'LEFT JOIN' : 'JOIN'
-    scope.consume()
-    scope.join(
-      `${join} "Entity" "${context.rootAlias}" ON ` +
-      `"${context.rootAlias}"."id" = "${context.baseAlias}"."id"`,
-    )
+    void scope
+    this.#relations.registerIdentity(context.definition)
     context.rootJoined = true
-    return context.rootAlias
+    return context.baseAlias
   }
 
   /**
@@ -2213,18 +2515,20 @@ class QueryProjection {
     forceLeft: boolean,
     scope: FilterJoinScope = this.#outerFilterScope(),
   ): string {
-    if (owner === 'Entity') return this.#ensureRoot(context, scope)
-    if (owner === context.definition.name) return context.baseAlias
-    const existing = context.ownerAliases.get(owner)
-    if (existing) return existing
-    const alias = scope.alias('o')
-    const join = context.isTarget || forceLeft ? 'LEFT JOIN' : 'JOIN'
-    scope.consume()
-    scope.join(
-      `${join} "${owner}" "${alias}" ON "${alias}"."id" = "${context.baseAlias}"."id"`,
-    )
-    context.ownerAliases.set(owner, alias)
-    return alias
+    if (owner === 'Entity' || owner === context.definition.name) return context.baseAlias
+    const ownerDefinition = this.#entities.entity(owner)
+    if (context.definition.abstract && ownerDefinition !== undefined && !ownerDefinition.abstract) {
+      const existing = context.ownerAliases.get(owner)
+      if (existing) return existing
+      const alias = scope.alias('o')
+      scope.join(
+        `LEFT JOIN ${this.#relations.relation(owner)} ${quote(alias)} ` +
+        `ON ${quote(alias)}.${quote('id')} = ${quote(context.baseAlias)}.${quote('id')}`,
+      )
+      context.ownerAliases.set(owner, alias)
+      return alias
+    }
+    return context.baseAlias
   }
 
   /**
@@ -2314,6 +2618,7 @@ export function compilePolymorphicQuery(
     options.projectionBudget,
     options.rootAlias,
     options.aliasPrefix,
+    options.relationPrefix,
   )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
@@ -2354,11 +2659,11 @@ export function compilePolymorphicQuery(
   let ordering = ''
   if (options.orderBy !== undefined) {
     ordering = SQL.orderBy(entities, definition.name, options.orderBy, scope).sql
-    if (ordering !== '' && definition.abstract) ordering += `, ${projection.root.rootAlias}."id" ASC`
+    if (ordering !== '' && definition.abstract) ordering += `, ${projection.root.baseAlias}."id" ASC`
   }
   if (ordering === '' && definition.abstract) {
-    ordering = `ORDER BY ${projection.root.rootAlias}."name" ASC, ` +
-      `${projection.root.rootAlias}."id" ASC`
+    ordering = `ORDER BY ${projection.root.baseAlias}."name" ASC, ` +
+      `${projection.root.baseAlias}."id" ASC`
   }
   const rawStart = predicate.values.length + 1
   const rawSql = options.rawWhere === undefined
@@ -2366,13 +2671,15 @@ export function compilePolymorphicQuery(
     : SQL.compose([options.rawWhere], { startIndex: rawStart }).sql
   const rawValues = options.rawWhere?.values ?? []
   const hydrate = projection.build(options.fields, predicate.values.length + rawValues.length + 1)
+  const rootRelation = projection.relation(definition.name)
+  const relationDefinitions = projection.relationDefinitions()
 
   const leaves = definition.abstract
     ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
     : []
   const leafFilter = leaves.length === 0
     ? 'FALSE'
-    : `${projection.root.rootAlias}."entity" IN (${leaves.join(', ')})`
+    : `${projection.root.baseAlias}."entity" IN (${leaves.join(', ')})`
   const conditions = [
     ...(definition.abstract ? [leafFilter] : []),
     ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')]),
@@ -2392,8 +2699,11 @@ export function compilePolymorphicQuery(
   return {
     hydrate,
     sql: [
+      relationDefinitions.length === 0
+        ? ''
+        : `WITH ${relationDefinitions.join(', ')}`,
       `SELECT ${projection.columns.join(', ')}`,
-      `FROM ${quote(definition.name)} "${projection.root.baseAlias}"`,
+      `FROM ${rootRelation} "${projection.root.baseAlias}"`,
       ...projection.joins,
       whereSql,
       ordering,

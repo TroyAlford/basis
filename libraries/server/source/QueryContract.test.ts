@@ -319,7 +319,7 @@ describe('Query contract', () => {
       where: "owner.name = 'Ada'",
     })
     expect(source).toEqual(structured)
-    expect(structured.sql).toContain('JOIN ("authorized_User"')
+    expect(structured.sql).toContain('JOIN "authorized_User"')
     expect(structured.sql).toContain('WHERE')
 
     expect(compileEntityQuery(definitions, 'Pet', {
@@ -416,7 +416,7 @@ describe('Query contract', () => {
       fields: ['id'],
       where: { 'owner.manager': identity },
     })
-    expect(nested.sql.match(/LEFT JOIN \("authorized_Person"/g)).toHaveLength(1)
+    expect(nested.sql.match(/LEFT JOIN "authorized_Person"/g)).toHaveLength(1)
     expect(nested.values).toEqual([identity, 25, 0])
   })
 
@@ -432,15 +432,15 @@ describe('Query contract', () => {
       },
     })
     expect(filterOnly.sql).not.toContain('owner__id')
-    expect(filterOnly.sql.match(/LEFT JOIN \("authorized_User"/g)).toHaveLength(1)
+    expect(filterOnly.sql.match(/LEFT JOIN "authorized_User"/g)).toHaveLength(1)
     expect(filterOnly.sql).toContain('"SystemUser"')
 
     const combined = compileEntityQuery(definitions, 'Pet', {
       fields: ['id', 'owner'],
       where: { 'owner.name': 'Ada' },
     })
-    expect(combined.sql.match(/LEFT JOIN \("authorized_User"/g)).toHaveLength(1)
-    expect(combined.sql.match(/INNER JOIN "Entity"/g)).toHaveLength(1)
+    expect(combined.sql.match(/LEFT JOIN "authorized_User"/g)).toHaveLength(1)
+    expect(combined.sql).toContain('"authorized_User" AS NOT MATERIALIZED')
     expect(combined.sql).toContain('owner__id')
   })
 
@@ -915,7 +915,7 @@ describe('Query contract', () => {
     expect(compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $contains (owner.title = 'Ada')",
-    }).sql).toContain('LEFT JOIN ("authorized_User"')
+    }).sql).toContain('LEFT JOIN "authorized_User"')
     expect(compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
       where: "members $contains (membership.role = 'GM')",
