@@ -40,6 +40,7 @@ import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
 import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import type { VendorBuild } from './Vendor'
 import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
 /** Request-scoped data supplied to a {@link Server.context} loader. */
@@ -177,6 +178,7 @@ export class Server<
   #status: HealthStatus = 'starting'
   #title = 'Document'
   #version = 'development'
+  #vendorBuild: VendorBuild | null = null
   #vendorScripts: readonly string[] = []
 
   constructor() {
@@ -460,7 +462,7 @@ export class Server<
     const asset = await publicStaticFile(filePath)
     if (!asset) return Server.NotFound
 
-    if (vendor) return this.#serveVendor(uri, asset, request)
+    if (vendor) return this.#serveVendor(uri, asset, request, filePath)
 
     const version = asset.lastModified.toString()
 
@@ -487,16 +489,19 @@ export class Server<
    * @param uri - The vendor request URI.
    * @param asset - The resolved vendor file.
    * @param request - The incoming request, when available.
+   * @param filePath - Absolute path of the requested vendor file or source map.
    * @returns The versioned asset, a redirect to the current version, or a 304.
    */
   async #serveVendor(
     uri: URI,
     asset: ReturnType<typeof Bun.file>,
     request: Request | undefined,
+    filePath: string,
   ): Promise<Response> {
     try {
-      const bytes = new Uint8Array(await asset.arrayBuffer())
-      const hash = createHash('sha256').update(bytes).digest('hex')
+      const active = this.#activeVendorAsset(filePath)
+      const bytes = active?.contents ?? new Uint8Array(await asset.arrayBuffer())
+      const hash = active?.hash ?? createHash('sha256').update(bytes).digest('hex')
       const etag = `"${hash}"`
       const immutable = 'public, max-age=31536000, immutable'
 
@@ -522,6 +527,21 @@ export class Server<
     } catch {
       return Server.NotFound
     }
+  }
+
+  /**
+   * Resolve the active immutable bytes for one vendor file or source map.
+   * @param filePath - Absolute path being requested.
+   * @returns The active hash and contents, or null when no active build owns it.
+   */
+  #activeVendorAsset(filePath: string): { contents: Uint8Array<ArrayBuffer>, hash: string } | null {
+    for (const asset of this.#vendorBuild?.assets ?? []) {
+      if (asset.file === filePath) return { contents: asset.contents, hash: asset.hash }
+      if (asset.sourceMap?.file === filePath) {
+        return { contents: asset.sourceMap.contents, hash: asset.sourceMap.hash }
+      }
+    }
+    return null
   }
 
   /**
@@ -635,7 +655,7 @@ export class Server<
         plugins: [pluginSASS(), pluginMarkdown()],
         root: this.#root,
       })
-      await buildVendorBundle({ root: this.#root, specifiers })
+      this.#vendorBuild = await buildVendorBundle({ root: this.#root, specifiers })
       return new Set(specifiers)
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error))
@@ -643,7 +663,7 @@ export class Server<
       if (process.env.NODE_ENV === 'production') {
         throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: error })
       }
-      await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => undefined)
+      this.#vendorBuild = await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => null)
       return new Set()
     }
   }
@@ -849,6 +869,7 @@ export class Server<
       if (fs.existsSync(assets)) this.#assets = assets
     }
 
+    this.#vendorBuild = null
     this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
     const entrypoints = this.#mainPath
       ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
@@ -947,6 +968,7 @@ export class Server<
     this.#server?.stop()
     this.#server = null
     setVendorSpecifiers(null)
+    this.#vendorBuild = null
 
     if (!this.#closing) {
       const closing = this.#database.close()

@@ -40,6 +40,46 @@ function artifact(build: VendorBuild, name: string): VendorAsset {
   return found
 }
 
+interface ActiveVendorSnapshot {
+  bytes: string,
+  hash: string,
+  mapBytes: string,
+  mapHash: string,
+  mapUrl: string,
+  url: string,
+}
+
+/**
+ * Resolve the running server's active vendor script and source map through their
+ * unversioned redirects, then read their immutable bytes.
+ * @param base - The application origin.
+ * @returns The active snapshot metadata and bytes.
+ */
+async function activeVendorSnapshot(base: string): Promise<ActiveVendorSnapshot> {
+  const html = await Bun.fetch(base).then(response => response.text())
+  const source = /<script[^>]+src="([^"]*vendor[^"]*)"/.exec(html)?.[1]
+  if (!source) throw new Error('missing vendor script')
+  const vendorRedirect = await Bun.fetch(new URL(source, base), { redirect: 'manual' })
+  const location = vendorRedirect.headers.get('location')
+  if (!location) throw new Error('missing vendor redirect location')
+  const url = new URL(location, base).toString()
+  const hash = new URL(url).searchParams.get('v')
+  if (!hash) throw new Error('missing vendor hash')
+
+  const mapRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js.map', base), {
+    redirect: 'manual',
+  })
+  const mapLocation = mapRedirect.headers.get('location')
+  if (!mapLocation) throw new Error('missing vendor map redirect location')
+  const mapUrl = new URL(mapLocation, base).toString()
+  const mapHash = new URL(mapUrl).searchParams.get('v')
+  if (!mapHash) throw new Error('missing vendor map hash')
+
+  const bytes = await Bun.fetch(url).then(response => response.text())
+  const mapBytes = await Bun.fetch(mapUrl).then(response => response.text())
+  return { bytes, hash, mapBytes, mapHash, mapUrl, url }
+}
+
 describe('vendor assets', () => {
   test('builds deterministic, isolated, content-versioned artifacts', async () => {
     const root = tempDirectory('basis-vendor-build-')
@@ -153,7 +193,7 @@ describe('vendor assets', () => {
     expect(vendor.headers.get('location')).toContain('?v=')
   })
 
-  test('reuses unchanged cache entries and invalidates changed chunks over HTTP', async () => {
+  test('preserves vendor HTTP cache headers and standalone chunk identity', async () => {
     const root = tempDirectory('basis-vendor-http-')
 
     try {
@@ -215,29 +255,21 @@ describe('vendor assets', () => {
       expect(mapResponse.status).toBe(200)
       expect(await mapResponse.text()).toContain('sourcesContent')
 
+      await application.stop()
+
+      /*
+       * The standalone builder may rewrite files after the server has stopped.
+       * A running Server's active snapshot is covered by the immutable-snapshot
+       * test below.
+       */
       const rebuilt = await buildVendor(options)
       expect(artifact(rebuilt, 'alpha').hash).toBe(alpha.hash)
       expect(artifact(rebuilt, 'beta').hash).toBe(beta.hash)
-      expect((await Bun.fetch(`${application.url}${artifact(rebuilt, 'alpha').url}`)).status).toBe(200)
-      expect(await Bun.fetch(`${application.url}${artifact(rebuilt, 'beta').url}`).then(result => result.text()))
-        .toContain('stable')
 
       await writeEntries(root, { alpha: 'globalThis.Alpha = "two"\n' })
       const changed = await buildVendor(options)
       expect(artifact(changed, 'alpha').hash).not.toBe(alpha.hash)
       expect(artifact(changed, 'beta').hash).toBe(beta.hash)
-
-      const updated = await Bun.fetch(`${application.url}${artifact(changed, 'alpha').url}`)
-      expect(updated.status).toBe(200)
-      expect(await updated.text()).toContain('two')
-
-      const stale = await Bun.fetch(`${application.url}${alpha.url}`, { redirect: 'manual' })
-      expect(stale.status).toBe(307)
-      expect(stale.headers.get('location')).toContain(`?v=${artifact(changed, 'alpha').hash}`)
-
-      const stable = await Bun.fetch(`${application.url}${beta.url}`)
-      expect(stable.status).toBe(200)
-      expect(await stable.text()).toContain('stable')
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -283,6 +315,7 @@ export class Application extends Component {
       return Bun.fetch(new URL(source, url)).then(response => response.text())
     }
 
+    let firstHash: string | undefined
     try {
       const first = await useApplication({
         cwd: root,
@@ -292,7 +325,45 @@ export class Application extends Component {
       })
       try {
         expect(await Bun.fetch(first.url).then(response => response.text())).toContain('one')
-        expect(await readVendor(first.url)).toContain('one')
+        const snapshot = await activeVendorSnapshot(first.url)
+        firstHash = snapshot.hash
+        expect(snapshot.bytes).toContain('one')
+        expect(snapshot.mapBytes).toContain('sourcesContent')
+
+        /*
+         * Replace the files at the same paths while the server is running. The
+         * active URL must continue to identify the bytes activated at startup,
+         * not the replacement now sitting on disk.
+         */
+        await writeFile(join(root, 'dist', 'vendor', 'vendor.js'), 'globalThis.__replacement = true\n')
+        await writeFile(
+          join(root, 'dist', 'vendor', 'vendor.js.map'),
+          JSON.stringify({ mappings: '', names: [], sources: ['replacement.ts'], version: 3 }),
+        )
+
+        const oldVendor = await Bun.fetch(snapshot.url, { redirect: 'manual' })
+        expect(oldVendor.status).toBe(200)
+        const oldBytes = await oldVendor.text()
+        expect(oldBytes).toContain('one')
+        expect(oldBytes).not.toContain('__replacement')
+        expect(await Bun.fetch(snapshot.url).then(response => response.text())).toBe(oldBytes)
+
+        const oldMap = await Bun.fetch(snapshot.mapUrl, { redirect: 'manual' })
+        expect(oldMap.status).toBe(200)
+        expect(await oldMap.text()).toBe(snapshot.mapBytes)
+
+        const oldRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js', first.url), {
+          redirect: 'manual',
+        })
+        expect(oldRedirect.status).toBe(307)
+        expect(oldRedirect.headers.get('location')).toContain(`?v=${snapshot.hash}`)
+
+        const stale = await Bun.fetch(`${first.url}/assets/vendor/vendor.js?v=stale`, {
+          redirect: 'manual',
+        })
+        expect(stale.status).toBe(307)
+        expect(stale.headers.get('location')).toContain(`?v=${snapshot.hash}`)
+
         await writeFile(join(probe, 'index.js'), 'export const probe = "two"\n')
         expect(await readVendor(first.url)).toContain('one')
       } finally {
@@ -307,7 +378,9 @@ export class Application extends Component {
       })
       try {
         expect(await Bun.fetch(second.url).then(response => response.text())).toContain('two')
-        expect(await readVendor(second.url)).toContain('two')
+        const snapshot = await activeVendorSnapshot(second.url)
+        expect(snapshot.bytes).toContain('two')
+        expect(snapshot.hash).not.toBe(firstHash)
       } finally {
         await second.stop()
       }

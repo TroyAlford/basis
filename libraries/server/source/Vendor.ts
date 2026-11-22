@@ -58,6 +58,8 @@ export interface VendorBundleOptions {
 export interface VendorSourceMap {
   /** Byte size of the source map. */
   bytes: number,
+  /** Immutable source-map bytes captured at build time. */
+  contents: Uint8Array<ArrayBuffer>,
   /** Absolute path to the source map. */
   file: string,
   /** SHA-256 of the source map bytes. */
@@ -70,6 +72,8 @@ export interface VendorSourceMap {
 export interface VendorAsset {
   /** Byte size of the emitted file. */
   bytes: number,
+  /** Immutable artifact bytes captured at build time. */
+  contents: Uint8Array<ArrayBuffer>,
   /** Absolute path to the emitted file. */
   file: string,
   /** SHA-256 of the emitted bytes, used as the content version. */
@@ -284,6 +288,7 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
       const mapHash = createHash('sha256').update(mapBytes).digest('hex')
       sourceMap = {
         bytes: mapBytes.byteLength,
+        contents: mapBytes,
         file: mapOutput.path,
         hash: mapHash,
         url: `/assets/vendor/${entry.name}.js.map?v=${mapHash}`,
@@ -291,6 +296,7 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
     }
     assets.push({
       bytes: bytes.byteLength,
+      contents: bytes,
       file: output.path,
       hash,
       name: entry.name,
