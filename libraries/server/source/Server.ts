@@ -889,11 +889,17 @@ export class Server<
       if (fs.existsSync(assets)) this.#assets = assets
     }
 
+    const servingHmr = hmr ?? process.env.NODE_ENV !== 'production'
     this.#vendorBuild = null
     this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
-    const entrypoints = this.#mainPath
-      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
-      : []
+    const entrypoints: string[] = []
+    if (this.#mainPath) {
+      entrypoints.push(writeHydrationEntry({
+        directory: path.join(this.#root, '.basis'),
+        mainPath: this.#mainPath,
+        monitorRelease: !servingHmr,
+      }))
+    }
     const vendorReady = entrypoints.length > 0
       ? this.#prepareVendor(entrypoints)
       : Promise.resolve(new Set<string>())
@@ -936,7 +942,6 @@ export class Server<
     this.#status = 'starting'
     const watcherReady = this.#watchMain()
 
-    const servingHmr = hmr ?? process.env.NODE_ENV !== 'production'
     this.#server = Bun.serve({
       development: servingHmr ? { hmr: true } : false,
       fetch: this.handle,

@@ -94,7 +94,7 @@ The server builds the vendor bundle during startup. If a consumer needs a custom
 
 Development and explicit previews use Bun's live compilation and HMR. Supported class-component edits preserve mounted state; instance-owned functions and runtime-private members follow the documented remount fallback, and unsupported module updates fall back to Bun's normal reload. Normal production runs with HMR disabled and uses Bun's cached production output. Installed vendor dependency changes require a server restart so the vendor artifact and global map stay aligned.
 
-Production deployment is a separate lifecycle from class HMR. Command Center publishes a new release and restarts the application; production replacement does not preserve mounted React instances across releases. Automatic browser reconnection, release-version comparison, and a single reload onto the new release are a planned contract in [#357](https://github.com/TroyAlford/basis/issues/357), not yet implemented behavior. Until that feature and its two-lifetime browser tests pass, production clients must not be assumed to update themselves after a release replacement.
+Production deployment is a separate lifecycle from class HMR. Command Center publishes a new release and restarts the application; production replacement does not preserve mounted React instances across releases. Production documents carry the server's authoritative release version and poll `/api/health` for changes. After a server replacement, a browser retries with bounded backoff, waits for readiness, and performs exactly one document reload when the ready server reports a different version. Same-version interruptions reconnect without reloading.
 
 ## Live transports
 

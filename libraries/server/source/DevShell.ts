@@ -93,6 +93,8 @@ export interface HydrationEntryOptions {
   directory: string,
   /** Absolute path to the application module. */
   mainPath: string,
+  /** Watch the server's authoritative release version and reload after replacement. */
+  monitorRelease?: boolean,
 }
 
 /**
@@ -100,15 +102,16 @@ export interface HydrationEntryOptions {
  * @param options - The output directory and application module.
  * @param options.directory - Directory the generated entry is written to.
  * @param options.mainPath - Absolute path to the application module.
+ * @param options.monitorRelease - Whether to monitor release replacement.
  * @returns The absolute path to the generated entry.
  */
-export function writeHydrationEntry({ directory, mainPath }: HydrationEntryOptions): string {
+export function writeHydrationEntry({ directory, mainPath, monitorRelease = false }: HydrationEntryOptions): string {
   fs.mkdirSync(directory, { recursive: true })
   const relative = path.relative(directory, mainPath).split(path.sep).join('/')
   const source = `import * as React from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import { attachRoot } from 'basis/react/hmr'
-import { HeadProvider } from 'basis/react'
+import { HeadProvider${monitorRelease ? ', readBasisRuntime, startReleaseMonitor' : ''} } from 'basis/react'
 import * as Main from '${relative.startsWith('.') ? relative : `./${relative}`}'
 
 const rootElement = document.getElementById('root')
@@ -126,6 +129,9 @@ const root = hydrating ? hydrateRoot(rootElement, application()) : createRoot(ro
 
 if (!hydrating) root.render(application())
 if (import.meta.hot) attachRoot(() => root.render(application()))
+${monitorRelease ? `const loadedVersion = readBasisRuntime().version
+if (loadedVersion) startReleaseMonitor({ loadedVersion })
+` : ''}
 `
   const file = path.join(directory, 'hydrate.tsx')
   fs.writeFileSync(file, source)

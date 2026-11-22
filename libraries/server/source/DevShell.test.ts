@@ -74,6 +74,26 @@ describe('writeDevShell', () => {
 })
 
 describe('writeHydrationEntry', () => {
+  test('starts the release monitor only when requested', async () => {
+    const dir = tempDirectory('basis-hydration-monitor')
+
+    try {
+      const main = join(dir, 'Application.tsx')
+      await Bun.write(main, 'export const Application = null')
+      const file = writeHydrationEntry({
+        directory: join(dir, '.basis'),
+        mainPath: main,
+        monitorRelease: true,
+      })
+      const source = await Bun.file(file).text()
+
+      expect(source).toContain('readBasisRuntime, startReleaseMonitor')
+      expect(source).toContain('startReleaseMonitor({ loadedVersion })')
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  })
+
   test('attaches the root renderer for production HMR', async () => {
     const dir = tempDirectory('basis-hydration-entry')
 

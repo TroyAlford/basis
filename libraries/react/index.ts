@@ -78,6 +78,8 @@ export { ServerSocket } from './runtime/ServerSocket'
 export type { SubscriptionDefinition, SubscriptionTransport } from './runtime/ServerSubscriptions'
 export { ServerSubscriptions } from './runtime/ServerSubscriptions'
 export { BASIS_RUNTIME_ELEMENT_ID, readBasisRuntime } from './runtime/readBasisRuntime'
+export type { ReleaseHealth, ReleaseMonitorOptions } from './runtime/release'
+export { startReleaseMonitor } from './runtime/release'
 
 export { Circle } from './icons/parts/Circle'
 export { IconBase } from './icons/IconBase/IconBase'
