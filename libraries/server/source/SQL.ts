@@ -160,24 +160,6 @@ function isSqlFragment(value: unknown): value is SqlFragment {
 }
 
 /**
- * Coerce a text-only legacy fragment without inventing placeholder slots.
- * @param value - Candidate fragment.
- * @returns A structural fragment.
- */
-function asSqlFragment(value: unknown): SqlFragment {
-  if (isSqlFragment(value)) return value
-  if (typeof value === 'object'
-    && value !== null
-    && 'sql' in value
-    && 'values' in value
-    && Array.isArray((value as { values: unknown[] }).values)
-    && (value as { values: unknown[] }).values.length === 0) {
-    return sqlText(String((value as { sql: unknown }).sql))
-  }
-  throw new Error('SQL fragment is not structurally parameterized')
-}
-
-/**
  * Build one fragment from template text and nested values.
  * @param strings - Template literal text.
  * @param values - Interpolated values and nested fragments.
@@ -189,18 +171,8 @@ export function sqlFragment(strings: TemplateStringsArray, ...values: readonly u
     pieces.push(text)
     if (index >= values.length) return
     const value = values[index]
-    if (isSqlFragment(value) || (typeof value === 'object' && value !== null && 'sql' in value)) {
-      const nested = asSqlFragment(value)
-      pieces.push(...(nested.pieces ?? []))
-    } else if (Array.isArray(value)) {
-      value.forEach((entry, entryIndex) => {
-        if (entryIndex > 0) pieces.push(' ')
-        if (isSqlFragment(entry) || (typeof entry === 'object' && entry !== null && 'sql' in entry)) {
-          const nested = asSqlFragment(entry)
-          pieces.push(...(nested.pieces ?? []))
-        } else pieces.push({ value: entry })
-      })
-    } else pieces.push({ value })
+    if (isSqlFragment(value)) pieces.push(...value.pieces)
+    else pieces.push({ value })
   })
   return fragmentOf(pieces)
 }

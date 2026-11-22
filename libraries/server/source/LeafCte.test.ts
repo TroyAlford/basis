@@ -4,6 +4,7 @@ import { collectionSqlRelation } from './CollectionSql'
 import { compileEntityQuery } from './Database'
 import { Action, Graph, Security } from './Graph'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
+import { sqlText } from './SQL'
 
 const publicRead = { [Action.Read]: Security.Public } as const
 const graph = new Graph({
@@ -75,7 +76,7 @@ test('does not rewrite SQL literals or comments as relation references', () => {
   if (!definition) throw new Error('Document definition missing')
   const { sql } = compilePolymorphicQuery(graph.definitions, definition, {
     fields: ['id'],
-    rawWhere: { sql: '1 = 1 /* FROM "Unrelated" */', values: [] },
+    rawWhere: sqlText('1 = 1 /* FROM "Unrelated" */'),
   })
   expect(sql).toContain('/* FROM "Unrelated" */')
   expect(sql).not.toContain('authorized_Unrelated')

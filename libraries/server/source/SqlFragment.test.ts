@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { sqlConcat, sqlFragment } from './SQL'
+import { sqlConcat, sqlFragment, sqlValue } from './SQL'
 
 describe('SQL fragments', () => {
   test('renders nested structural fragments once', () => {
@@ -17,4 +17,21 @@ describe('SQL fragments', () => {
     )
     expect(appended.values).toHaveLength(13)
   })
+})
+
+test('treats ordinary objects and arrays as bound values', () => {
+  const object = { sql: 'not a fragment', values: [1] }
+  const array = ['a', 'b']
+  const objectQuery = sqlFragment`SELECT ${object}`
+  expect(objectQuery.sql).toBe('SELECT $1')
+  expect(objectQuery.values).toEqual([object])
+
+  const arrayQuery = sqlFragment`SELECT ${array}`
+  expect(arrayQuery.sql).toBe('SELECT $1')
+  expect(arrayQuery.values).toEqual([array])
+
+  const explicit = sqlConcat([sqlFragment`a = ${'x'}`, sqlFragment`b = ${'y'}`], ' AND ')
+  expect(explicit.sql).toBe('a = $1 AND b = $2')
+  expect(explicit.values).toEqual(['x', 'y'])
+  expect(sqlValue(1).sql).toBe('$1')
 })

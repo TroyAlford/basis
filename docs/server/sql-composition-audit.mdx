@@ -28,7 +28,7 @@ SQL construction now uses ordered pieces:
 
 - A literal piece is a string.
 - A parameter piece is an object containing one value.
-- Nested fragments splat their pieces in place.
+- Nested fragments splat their pieces in place; ordinary objects and arrays are bound values.
 - Combining fragments concatenates pieces and values in source order.
 - `compilePieces` walks the pieces once and assigns `$1`, `$2`, … in final SQL order.
 
@@ -36,6 +36,6 @@ No regex, placeholder scanner, or placeholder renumbering remains in SQL constru
 
 ## Verification
 
-- Unit suite: 2,120 pass, 50 skip, 0 fail; two unrelated parallel-only flaky tests passed individually.
+- Unit suite: 2,123 pass, 50 skip, 0 fail.
 - Database lane: 92 pass, 0 fail.
 - Authorization and explicit-collection PostgreSQL suites: 35 pass, 0 fail.
