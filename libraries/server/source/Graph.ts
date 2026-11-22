@@ -289,17 +289,22 @@ export class Graph {
   ): PhysicalSchema {
     const base = this.definitions.physicalSchema()
     if (!includeAuthorization) return base
-    const tables: PhysicalTable[] = base.tables.map(table => ({
-      ...table,
-      forceRowSecurity: superuser,
-      indexes: [
-        ...table.indexes,
-        ...this.#indexes().filter(index => (
-          index.table === table.name && !table.indexes.some(existing => existing.name === index.name)
-        )),
-      ],
-      rowSecurity: true,
-    }))
+    const tables: PhysicalTable[] = base.tables.map(table => {
+      const entity = this.definitions.entity(table.name)
+      const authorizationBoundary = table.name !== 'Entity'
+        && (entity === undefined || !entity.abstract)
+      return {
+        ...table,
+        forceRowSecurity: superuser && authorizationBoundary,
+        indexes: [
+          ...table.indexes,
+          ...this.#indexes().filter(index => (
+            index.table === table.name && !table.indexes.some(existing => existing.name === index.name)
+          )),
+        ],
+        rowSecurity: authorizationBoundary,
+      }
+    })
     const policies = this.#policies(appRole)
     const functions = [
       ...base.functions,
@@ -1414,12 +1419,14 @@ export class Graph {
       ...this.definitions.relationships.map(relationship => relationship.name)]
     for (const table of tables) {
       const relationship = this.definitions.relationship(table)
+      const abstractEntity = this.definitions.entity(table)?.abstract === true
       for (const [action, command] of [
         [Action.Read, 'SELECT'],
         [Action.Create, 'INSERT'],
         [Action.Update, 'UPDATE'],
         [Action.Delete, 'DELETE'],
       ] as const) {
+        if (action === Action.Read && (table === 'Entity' || abstractEntity)) continue
         const expression = table === 'Entity'
           ? this.#entityRootExpression(action)
           : relationship
