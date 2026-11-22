@@ -13,7 +13,7 @@ This page records the query-planning investigation and Stage 3 correction eviden
 - Collection-count correction: `ba8f4ed`
 - Original MTG workload: Printing-rooted resource aggregate
 - Original metrics: 24,659 SQL bytes, 73 `Entity` joins, 823 SubPlans, 6,890 JIT functions, ~39.4 seconds JIT compilation, ~39.5 seconds execution
-- Audit artifacts used during investigation: `/tmp/opencode/slow.sql`, `/tmp/opencode/plan-analyze.txt`, `/tmp/opencode/entity-join-audit.md`, `/tmp/opencode/entity-join-occurrences.csv`
+- Audit artifacts used during investigation: `/tmp/opencode/original-sql.sql`, `/tmp/opencode/phase3-sql.sql`, `/tmp/opencode/plan-analyze.txt`, `/tmp/opencode/entity-join-audit.md`, `/tmp/opencode/entity-join-occurrences.csv`
 
 ## Original occurrence breakdown
 
@@ -108,7 +108,7 @@ WHERE "cj3"."deck.id" = "t"."id"
   AND "cj3"."printing.id" = "__child"."id"
 ```
 
-Stage 3 reduced the saved MTG SQL from 24,659 bytes / 73 `Entity` joins to 12,063 bytes / 30 `Entity` joins. The remaining 30 joins are identity occurrences in the item and minimal count/existence scopes; this is not an authorization fix.
+Stage 3 reduced the saved MTG SQL from 24,659 bytes / 73 `Entity` joins to 11,817 bytes / 28 `Entity` joins. The remaining 28 joins are identity occurrences in the item and minimal count/existence scopes; this is not an authorization fix.
 
 ## Deferred
 
