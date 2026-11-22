@@ -206,3 +206,25 @@ The universal `Entity` SELECT policy and its per-query expansion are unchanged. 
 | faces:matched | 2 | 1 | 1 |
 | deckEntries:existence | 1 | 1 | 0 |
 | **Total** | **73** | **28** | **45** |
+
+## Baseline and current structural tests
+
+The same test files were run against upstream `main` (`b251da6`) and the corrected branch.
+
+| Test | Baseline | Current |
+|---|---|---|
+| Concrete ID/type uses concrete storage and records inherited-name root requirement | FAIL | PASS |
+| Abstract target retains runtime discriminator | PASS | PASS |
+| Public reference contract name resolves from root storage | FAIL | PASS |
+| Repeated reference fields reuse one concrete/root occurrence | FAIL | PASS |
+| Universal `Entity` reference path retained | PASS | PASS |
+| Collection filter does not duplicate nested item projection for counts | FAIL | PASS |
+| Edge projection does not duplicate target traversal | FAIL | PASS |
+| `$total` and `$matched` use the correct row sets | FAIL | PASS |
+| Nested resources are not expanded for matched/total counts | FAIL | PASS |
+| Quantity is read from the collection edge | PASS | PASS |
+| Existence does not project nested item fields | PASS | PASS |
+| Deterministic SQL and bindings | PASS | PASS |
+| Unrelated entity definitions do not change concrete collection SQL | PASS | PASS |
+
+The baseline failures detect the pre-correction SQL shape: root ID/name access, separate concrete/root joins, full nested projections in count scopes, and target/root traversal in the edge projection. Current focused suite: 13 pass.
