@@ -171,11 +171,6 @@ describe('Basis Code CI', () => {
     for (const id of [...workflowJobs, 'required']) {
       const job = code.jobs?.[id]
       expect(job).toBeDefined()
-      if (id === 'toolchain' || id === 'production-hmr') {
-        // Toolchain and production HMR proofs must also run for Draft pull requests.
-        expect(job?.if).toBeUndefined()
-        continue
-      }
       expect(job?.if).toContain('!github.event.pull_request.draft')
       expect(job?.if).not.toContain('github.event.action')
     }
@@ -230,9 +225,9 @@ describe('Basis Code CI', () => {
     expect(verify).toContain('1.4.6-canary.1+b15f51302')
   })
 
-  test('runs the combined production HMR browser proof on drafts', () => {
+  test('runs the combined production HMR browser proof only for Ready PRs', () => {
     const job = code.jobs?.['production-hmr']
-    expect(job?.if).toBeUndefined()
+    expect(job?.if).toContain('!github.event.pull_request.draft')
     const command = job?.steps?.find(step => step.name === 'Run production HMR browser tests')?.run ?? ''
     expect(command).toContain('application.production-hmr.e2e.ts')
     expect(command).toContain('application.production-hmr.isolated.e2e.ts')
@@ -310,6 +305,16 @@ describe('Basis Code CI', () => {
     expect(script).toContain('compliance impact knip consumer-install toolchain production-hmr')
     expect(script).toContain('!= "success"')
     expect(script).toContain('DECISION_HASH')
+  })
+
+  test('fails required when a new proof fails or is unexpectedly skipped', () => {
+    const script = gateScript(code)
+    const allSuccess = Object.fromEntries(workflowJobs.map(id => [id, { result: 'success' }]))
+
+    for (const job of ['toolchain', 'production-hmr']) {
+      expect(runGate(script, { ...allSuccess, [job]: { result: 'failure' } }).code).toBe(1)
+      expect(runGate(script, { ...allSuccess, [job]: { result: 'skipped' } }).code).toBe(1)
+    }
   })
 
   test('fails the gate for failures, missing jobs, malformed evidence and needed skips', () => {
