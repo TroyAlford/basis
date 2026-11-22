@@ -1,0 +1,42 @@
+---
+title: SQL Composition Audit
+---
+
+# SQL Composition Audit
+
+Status: audit and partial cleanup. The compiled-query API remains inspectable: `compileEntityQuery()` returns `{ sql, values }`.
+
+## Bun API verification
+
+Verified against the installed Bun 1.4.4 runtime and PostgreSQL:
+
+- Tagged templates support nested query fragments.
+- Fragments compose across SQL clients when nested in a tagged template.
+- `sql(identifier)` quotes dynamic identifiers; Graph metadata supplies the identifiers.
+- Values containing `$1` or `?` remain bound values.
+- `SQL.Query` is lazy and has no public API that returns its SQL text and parameter list before execution. Result metadata exposes `statement.string` only after execution.
+
+## Removed
+
+- Policy expression placeholder substitution in `Graph.inline()`.
+- `WHERE` stripping with `replace(/^WHERE…/)` in Graph policies, polymorphic compilation, and collection predicate compilation.
+- Graph policy predicates now use a literal binder directly; collection predicates retain a bare expression.
+
+## Remaining
+
+`SQL.compose()`, `SQL.bindFragment()`, and `SQL.validateFragment()` still normalize positional placeholders between generated fragments. Their production callers are the polymorphic collection and final statement assembly paths.
+
+These helpers are not regex parsers of arbitrary SQL, but they do scan generated `$n` placeholders and rebase values. Replacing them requires solving one of these problems:
+
+1. **Keep `{ sql, values }`** — retain a textual fragment representation and some form of placeholder rebasing. Bun cannot provide the text before execution.
+2. **Return `SQL.Query`** — execute natively, but lose compile-time SQL inspection, `.toMatchIndented()` assertions, SQL-size measurements, and direct `EXPLAIN` generation unless a custom renderer is added.
+3. **Compile against a live client and execute once to obtain `statement`** — not a pure compile operation and unsuitable for unit/planner tests.
+4. **Introduce a token/fragment model** — would solve rebasing without regex but is a new custom fragment manager, which is outside the agreed architecture.
+
+The current decision is to preserve `{ sql, values }` and not invent a renderer. No change is made to the remaining helpers until the fragment/inspection boundary is decided.
+
+## Verification
+
+- Unit suite: 2,127 pass, 50 skip, 0 fail.
+- Database lane: 92 pass, 0 fail.
+- Authorization and explicit-collection PostgreSQL suites: 35 pass, 0 fail.
