@@ -160,7 +160,7 @@ function prepareEntityQuery(
  * @param fields - Effective fields to expose.
  * @returns A leaf-rooted SELECT relation.
  */
-function leafSelect(definition: EntityDefinition, fields: readonly EffectiveFieldDefinition[]): string {
+function leafProjection(definition: EntityDefinition, fields: readonly EffectiveFieldDefinition[]): string {
   const aliases = new Map<string, string>([[definition.name, 'leaf']])
   const joins: string[] = []
   const projection: string[] = []
@@ -175,6 +175,34 @@ function leafSelect(definition: EntityDefinition, fields: readonly EffectiveFiel
     projection.push(`"${alias}"."${column}" AS "${column}"`)
   }
   return `SELECT ${projection.join(', ')} FROM "${definition.name}" "leaf" ${joins.join(' ')}`
+}
+
+/**
+ * Select one concrete leaf without assuming optional ancestor storage exists.
+ * The outer compiler still joins any ancestor relation it actually needs.
+ * @param definition - Concrete leaf definition.
+ * @param used - Relation names referenced by the compiled statement.
+ * @param entities - Canonical entity definitions.
+ * @returns A leaf-rooted SELECT relation.
+ */
+function leafRelation(definition: EntityDefinition, used: ReadonlySet<string>, entities: EntityDefinitions): string {
+  const joins: string[] = []
+  let parent = definition.parent
+  const aliases = new Set<string>()
+  while (parent !== 'Entity') {
+    const ancestor = entities.entity(parent)
+    if (!ancestor) break
+    if (ancestor.name !== definition.name && used.has(ancestor.name) && !aliases.has(ancestor.name)) {
+      aliases.add(ancestor.name)
+      const alias = `owner_${ancestor.name}`
+      joins.push(`JOIN "${ancestor.name}" "${alias}" ON "${alias}"."id" = "leaf"."id"`)
+    }
+    parent = ancestor.parent
+  }
+  if (used.has('Entity')) {
+    joins.push('JOIN "Entity" "root" ON "root"."id" = "leaf"."id"')
+  }
+  return `SELECT "leaf".* FROM "${definition.name}" "leaf" ${joins.join(' ')}`
 }
 
 /**
@@ -202,13 +230,19 @@ function authorizeEntityQuery(entities: EntityDefinitions, sql: string): string 
     replacements.set(name, cte)
     if (definition.abstract) {
       const leaves = entities.concreteDescendants(name)
-      const fields = definition.effectiveFields
-      const union = leaves.map(leaf => leafSelect(leaf, fields)).join(' UNION ALL ')
+      const needed = new Set([
+        'id',
+        'name',
+        'entity',
+        ...definition.fields.map(field => field.name),
+      ])
+      const fields = definition.effectiveFields.filter(field => needed.has(field.name))
+      const union = leaves.map(leaf => leafProjection(leaf, fields)).join(' UNION ALL ')
       definitions.push(
         `"${cte}" AS NOT MATERIALIZED (${union.length === 0 ? 'SELECT FALSE AS "id" WHERE FALSE' : union})`,
       )
     } else {
-      definitions.push(`"${cte}" AS NOT MATERIALIZED (${leafSelect(definition, definition.effectiveFields)})`)
+      definitions.push(`"${cte}" AS NOT MATERIALIZED (${leafRelation(definition, used, entities)})`)
     }
   }
   if (definitions.length === 0) return sql

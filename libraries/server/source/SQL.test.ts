@@ -974,16 +974,7 @@ describe('SQL.where', () => {
       where: '$not (score = 5 $or score = 10)',
     })
 
-    const cte = [
-      'WITH "authorized_Note" AS NOT MATERIALIZED (',
-      'SELECT "root"."id" AS "id", "root"."name" AS "name",',
-      '"root"."entity" AS "entity", "root"."lastUpdatedBy.id" AS "lastUpdatedBy.id",',
-      '"root"."lastUpdatedAt" AS "lastUpdatedAt", "leaf"."active" AS "active",',
-      '"leaf"."createdAt" AS "createdAt", "leaf"."dueOn" AS "dueOn",',
-      '"leaf"."externalId" AS "externalId", "leaf"."favoriteIds" AS "favoriteIds",',
-      '"leaf"."score" AS "score", "leaf"."title" AS "title"',
-      'FROM "Note" "leaf" JOIN "Entity" "root" ON "root"."id" = "leaf"."id")',
-    ].join(' ')
+    const cte = 'WITH "authorized_Note" AS NOT MATERIALIZED (SELECT "leaf".* FROM "Note" "leaf")'
     expect(compiled.sql).toMatchSQL(`
       ${cte}
       SELECT t."title" AS "title", t."score" AS "score"
