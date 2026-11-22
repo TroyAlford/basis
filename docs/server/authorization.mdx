@@ -350,6 +350,8 @@ With a graph configured, `server.db`, `RouteContext.db`, and request-scoped quer
 
 The administrative connection is an internal provisioning capability and is not available to ordinary handlers. The application role must be `NOSUPERUSER`, `NOBYPASSRLS`, and not the table owner. Bootstrap and schema DDL remain trusted administrative operations. RLS is enabled on the root, MTI/relationships, and security metadata; `FORCE ROW LEVEL SECURITY` is applied when provisioning runs with owner privilege.
 
+Graph authorization is guaranteed for Basis-generated operations. Raw SQL operates under the privileges of its database connection and is not automatically constrained to Basis's Graph query semantics.
+
 ## Inspection and administration
 
 `server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists the expanded capability/role grants effective for a user, including explicit Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
