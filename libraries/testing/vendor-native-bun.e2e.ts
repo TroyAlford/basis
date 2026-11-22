@@ -116,6 +116,52 @@ async function fixture(): Promise<string> {
     '',
   ].join('\n'))
 
+  await writeSource(root, 'src/vendor.ts', [
+    'import * as React from "react"',
+    'import * as ReactDOM from "react-dom"',
+    'import * as ReactDOMClient from "react-dom/client"',
+    'import * as JSXRuntime from "react/jsx-runtime"',
+    'import * as LiveVendor from "live-vendor"',
+    '',
+    'export const vendorMarker = "native-vendor-entry-marker"',
+    'export const vendorModules = { React, ReactDOM, ReactDOMClient, JSXRuntime, LiveVendor }',
+    '',
+  ].join('\n'))
+  await writeSource(root, 'src/app-c.tsx', [
+    'import { vendorModules } from "./vendor"',
+    'import defaultLive, { named, value, bump, vendorMarker } from "live-vendor"',
+    'import * as liveNamespace from "live-vendor"',
+    'import "side-effects"',
+    'import { sideEffectValue } from "side-effects"',
+    'import { reexportLabel, value as reexportedValue, bump as reexportedBump } from "./live"',
+    'import { Shared } from "./shared"',
+    'import { Second } from "./second"',
+    '',
+    'const React = vendorModules.React',
+    'const createRoot = vendorModules.ReactDOMClient.createRoot',
+    'function App() {',
+    '  const [tick, setTick] = React.useState(0)',
+    '  const [lazy, setLazy] = React.useState("")',
+    '  globalThis.__reactVersion = React.version',
+    '  return React.createElement("main", { "data-testid": "app", "data-app-marker": "native-app-marker" },',
+    '    React.createElement("h1", null, `Native vendor ${value}`),',
+    '    React.createElement("p", { "data-testid": "imports" }, `${defaultLive} ${named} ${liveNamespace.named}`),',
+    '    React.createElement("p", { "data-testid": "side" }, `${sideEffectValue} ${globalThis.__sideEffectCount}`),',
+    '    React.createElement("p", { "data-testid": "reexport" }, `${reexportLabel} ${reexportedValue}`),',
+    '    React.createElement("p", { "data-testid": "vendor-marker" }, vendorMarker),',
+    '    React.createElement("p", { "data-testid": "vendor-runtime" }, `${vendorModules.ReactDOM.version} ${vendorModules.JSXRuntime.jsx ? "jsx" : "no-jsx"}`),',
+    '    React.createElement(Shared),',
+    '    React.createElement(Second),',
+    '    React.createElement("button", { "data-testid": "bump", onClick: () => { bump(); reexportedBump(); setTick(tick + 1) } }, "bump"),',
+    '    React.createElement("button", { "data-testid": "lazy", onClick: () => import("./lazy").then(module => setLazy(module.lazyValue)) }, "lazy"),',
+    '    lazy ? React.createElement("span", { "data-testid": "lazy-result" }, lazy) : null,',
+    '  )',
+    '}',
+    'const root = document.getElementById("root")',
+    'if (!root) throw new Error("missing root")',
+    'createRoot(root).render(React.createElement(App))',
+    '',
+  ].join('\n'))
   await writeFile(join(root, 'index.html'), '<!doctype html><html><body><div id="root"></div><script type="module" src="./src/app.tsx"></script></body></html>')
   await writeFile(join(root, 'serve-a.ts'), `
 import index from './index.html'
@@ -153,6 +199,48 @@ const appName = appOutput.path.split('/').pop()
 const html = \`<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/\${appName}"></script></body></html>\`
 const files = new Set(await readdir(dist))
 // eslint-disable-next-line @basis/no-custom-test-server -- Native Bun startup splitting diagnostic.
+Bun.serve({
+  development: false,
+  hostname: '127.0.0.1',
+  port: Number(Bun.env.PORT ?? 0),
+  routes: {
+    '/': () => new Response(html, { headers: { 'Content-Type': 'text/html' } }),
+    '/assets/*': request => {
+      const name = new URL(request.url).pathname.slice('/assets/'.length)
+      if (!files.has(name)) return new Response('not found', { status: 404 })
+      return new Response(Bun.file(join(dist, name)))
+    },
+    '/api/health': () => new Response('ok'),
+  },
+})
+`.trim())
+  await writeFile(join(root, 'serve-c.ts'), `
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const dist = join(import.meta.dir, 'dist')
+await rm(dist, { force: true, recursive: true })
+await mkdir(dist, { recursive: true })
+const build = await Bun.build({
+  entrypoints: [
+    join(import.meta.dir, 'src', 'app-c.tsx'),
+    join(import.meta.dir, 'src', 'vendor.ts'),
+  ],
+  target: 'browser',
+  format: 'esm',
+  splitting: true,
+  metafile: true,
+  naming: { entry: '[name]-[hash].[ext]', chunk: 'chunk-[hash].[ext]' },
+  outdir: dist,
+})
+if (!build.success) throw new Error(build.logs.map(log => log.message).join('\\n'))
+if (build.metafile) await writeFile(join(dist, 'meta.json'), JSON.stringify(build.metafile))
+const appOutput = build.outputs.find(output => output.kind === 'entry-point' && output.path.includes('app-c-'))
+if (!appOutput) throw new Error('missing app-c entry output')
+const appName = appOutput.path.split('/').pop()
+const html = \`<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/\${appName}"></script></body></html>\`
+const files = new Set(await readdir(dist))
+// eslint-disable-next-line @basis/no-custom-test-server -- Explicit native vendor-entrypoint diagnostic.
 Bun.serve({
   development: false,
   hostname: '127.0.0.1',
@@ -352,6 +440,45 @@ test('Experiment B: native Bun startup splitting identity', async () => {
   expect(vendorAfterDependency).not.toEqual(vendorAfterApp)
   expect(hashes(appChanged, 'app')).not.toEqual(hashes(first, 'app'))
   process.stdout.write(`[native-vendor] B first=${JSON.stringify(first.chunks)} app=${JSON.stringify(appChanged.chunks)} dependency=${JSON.stringify(dependencyChanged.chunks)}\n`)
+}, 120_000)
+
+test('Experiment C: explicit vendor entrypoint built with the application', async () => {
+  const root = await fixture()
+  const appSource = join(root, 'src', 'app-c.tsx')
+  const original = await Bun.file(appSource).text()
+  const first = await observe(root, './serve-c.ts', 'first')
+  const firstMeta = JSON.parse(await Bun.file(join(root, 'dist', 'meta.json')).text()) as {
+    outputs: Record<string, unknown>,
+  }
+  await writeFile(appSource, original.replace('Native vendor ${value}', 'Native vendor updated ${value}'))
+  const appChanged = await observe(root, './serve-c.ts', 'app-changed', 1, 'Native vendor updated')
+  const appMeta = JSON.parse(await Bun.file(join(root, 'dist', 'meta.json')).text()) as {
+    outputs: Record<string, unknown>,
+  }
+  await writeFile(appSource, original)
+  await writeFile(join(root, 'node_modules', 'live-vendor', 'index.js'), [
+    'export let value = 10',
+    'export function bump() { value += 1; return value }',
+    'export const named = "named-updated"',
+    'export const vendorMarker = "vendor-stable-marker"',
+    'export default "default-updated"',
+    '',
+  ].join('\n'))
+  const dependencyChanged = await observe(root, './serve-c.ts', 'dependency-changed', 10, 'Native vendor', 'default-updated', 'named-updated')
+  const dependencyMeta = JSON.parse(await Bun.file(join(root, 'dist', 'meta.json')).text()) as {
+    outputs: Record<string, unknown>,
+  }
+  process.stdout.write(`[native-vendor] C first=${JSON.stringify({ chunks: first.chunks, outputs: firstMeta.outputs })}\n`)
+  process.stdout.write(`[native-vendor] C app=${JSON.stringify({ chunks: appChanged.chunks, outputs: appMeta.outputs })}\n`)
+  process.stdout.write(`[native-vendor] C dependency=${JSON.stringify({ chunks: dependencyChanged.chunks, outputs: dependencyMeta.outputs })}\n`)
+  expect(first.requests).toBeGreaterThan(1)
+  const vendorFirst = hashes(first, 'vendor')
+  const vendorAfterApp = hashes(appChanged, 'vendor')
+  const vendorAfterDependency = hashes(dependencyChanged, 'vendor')
+  expect(vendorFirst.length).toBeGreaterThan(0)
+  expect(vendorAfterApp).toEqual(vendorFirst)
+  expect(vendorAfterDependency).not.toEqual(vendorAfterApp)
+  expect(hashes(appChanged, 'app')).not.toEqual(hashes(first, 'app'))
 }, 120_000)
 
 test('Current Basis vendor baseline (existing managed fixture)', async () => {
