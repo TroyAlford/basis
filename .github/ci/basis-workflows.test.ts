@@ -12,6 +12,11 @@ interface Job {
   'permissions'?: Record<string, string>,
   'runs-on'?: string,
   'steps'?: Step[],
+  'strategy'?: {
+    matrix?: {
+      os?: string[],
+    },
+  },
 }
 
 interface Step {
@@ -133,7 +138,7 @@ const laneGroups: Record<string, string[]> = {
 
 /** Every code job the required gate judges. */
 const workflowJobs = [
-  'compliance', 'impact', 'unit', 'database', 'e2e', 'lifecycle',
+  'compliance', 'impact', 'toolchain', 'unit', 'database', 'e2e', 'lifecycle',
   'knip', 'consumer-install',
 ]
 
@@ -166,6 +171,11 @@ describe('Basis Code CI', () => {
     for (const id of [...workflowJobs, 'required']) {
       const job = code.jobs?.[id]
       expect(job).toBeDefined()
+      if (id === 'toolchain') {
+        // Toolchain proof must also run for Draft pull requests.
+        expect(job?.if).toBeUndefined()
+        continue
+      }
       expect(job?.if).toContain('!github.event.pull_request.draft')
       expect(job?.if).not.toContain('github.event.action')
     }
@@ -190,18 +200,34 @@ describe('Basis Code CI', () => {
   test('sets up the pinned Bun toolchain and frozen dependencies', () => {
     const jobs = workflowJobs
     for (const id of jobs) {
+      if (id === 'toolchain') continue
       const steps = code.jobs?.[id]?.steps ?? []
-      const setup = steps.find(step => step.uses === 'oven-sh/setup-bun@v2')
-      expect(setup?.with?.['bun-version-file']).toBe('.tool-versions')
+      const setup = steps.find(step => step.uses === 'jdx/mise-action@v5')
+      expect(setup).toBeDefined()
       expect(steps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
     }
 
     const databaseImage = loadWorkflow('.github/workflows/database-image.yml')
     const databaseSteps = databaseImage.jobs?.publish?.steps ?? []
-    expect(databaseSteps.find(step => step.uses === 'oven-sh/setup-bun@v2')?.with?.['bun-version-file'])
-      .toBe('.tool-versions')
+    expect(databaseSteps.find(step => step.uses === 'jdx/mise-action@v5')).toBeDefined()
     expect(databaseSteps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+
+    const mise = readFileSync(join(root, 'mise.toml'), 'utf8')
+    expect(mise).toContain('npm.package_manager = "npm"')
+    expect(mise).toContain('"npm:bun" = { version = "1.4.5-canary.20261121.1"')
+    expect(mise).toContain('allow_builds = true')
+    expect(existsSync(join(root, '.tool-versions'))).toBe(false)
     expect(existsSync(join(root, '.github/actions/asdf-setup'))).toBe(false)
+  })
+
+  test('verifies the pinned Bun canary on Linux and macOS', () => {
+    const toolchain = code.jobs?.toolchain
+    expect(toolchain?.strategy?.matrix?.os).toEqual(['ubuntu-latest', 'macos-latest'])
+    const verify = toolchain?.steps?.find(step => step.name === 'Verify the pinned Bun canary')?.run ?? ''
+    expect(verify).toContain('bun --version')
+    expect(verify).toContain('1.4.6')
+    expect(verify).toContain('bun --revision')
+    expect(verify).toContain('1.4.6-canary.1+b15f51302')
   })
 
   test('preflights trusted change impact before split lane jobs', () => {
@@ -266,14 +292,14 @@ describe('Basis Code CI', () => {
     expect(required?.if).toContain('always()')
     expect(required?.if).toContain('!github.event.pull_request.draft')
     expect(required?.needs).toEqual([
-      'compliance', 'impact', 'unit', 'database', 'e2e', 'lifecycle',
+      'compliance', 'impact', 'toolchain', 'unit', 'database', 'e2e', 'lifecycle',
       'knip', 'consumer-install',
     ])
 
     const script = gateScript(code)
     expect(script).not.toContain('gh api')
     expect(script).not.toContain('REUSE_')
-    expect(script).toContain('compliance impact knip consumer-install')
+    expect(script).toContain('compliance impact knip consumer-install toolchain')
     expect(script).toContain('!= "success"')
     expect(script).toContain('DECISION_HASH')
   })

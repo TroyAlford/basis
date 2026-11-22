@@ -313,7 +313,8 @@ describe('conservative policy rules', () => {
   })
 
   test('a toolchain change runs every code suite', async () => {
-    const decision = await decide({ '.tool-versions': 'bun 1.4.2\n' }, [change('.tool-versions')])
+    const toolchain = '[tools]\n"npm:bun" = "1.4.5-canary.20261121.1"\n'
+    const decision = await decide({ 'mise.toml': toolchain }, [change('mise.toml')])
     expect(needed(decision)).toEqual(['quality', 'unit', 'visual'])
   })
 

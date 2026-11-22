@@ -57,7 +57,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -93,7 +93,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -147,7 +147,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -175,7 +175,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -206,7 +206,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",

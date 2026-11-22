@@ -4,7 +4,7 @@ This directory contains a collection of reusable GitHub Actions designed to auto
 
 These actions are provided to create reusable pieces of a standard GitHub repository setup. They assume the following:
 
-- **Explicit toolchain setup**: Callers install their own toolchain before using these actions. Basis workflows use `oven-sh/setup-bun@v2` with the Bun version pinned in `.tool-versions` and install dependencies with `bun install --frozen-lockfile`.
+- **Explicit toolchain setup**: Callers install their own toolchain before using these actions. Basis workflows use `jdx/mise-action@v5` with the Bun build pinned in `mise.toml` and install dependencies with `bun install --frozen-lockfile`.
 
 - **Conventional Commits with Squash-and-Merge Strategy**: You are using the Conventional Commits specification, with a squash-and-merge strategy for pull requests. This means each merged PR results in a single squashed commit, with the PR title forming part of the commit message. This approach helps maintain a clean and understandable commit history. If you're not familiar with setting up this strategy in GitHub, you may want to configure your repository settings to enforce squash merging and ensure PR titles are formatted according to Conventional Commits.
 
