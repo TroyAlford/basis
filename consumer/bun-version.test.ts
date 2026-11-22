@@ -54,6 +54,7 @@ describe('Basis Server Bun support', () => {
   test('rejects malformed runtime metadata', () => {
     expect(supportsBasisServer({ revision: 'unknown', version: 'unknown' })).toBe(false)
     expect(supportsBasisServer({ version: '' })).toBe(false)
+    expect(supportsBasisServer({ revision: '1.4.6+stable', version: '1.4.6.7' })).toBe(false)
   })
 
   test('explains the required runtime and installation method', () => {

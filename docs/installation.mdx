@@ -40,12 +40,10 @@ Install the approved canary through mise’s npm installer rather than mise’s 
 [settings]
 npm.package_manager = "npm"
 
-[tools]
-"npm:bun" = {
-  allow_builds = true,
-  npm_args = "--include=optional --ignore-scripts=false",
-  version = "1.4.5-canary.20261121.1",
-}
+[tools."npm:bun"]
+allow_builds = true
+npm_args = "--include=optional --ignore-scripts=false"
+version = "1.4.5-canary.20261121.1"
 ```
 
 ```bash

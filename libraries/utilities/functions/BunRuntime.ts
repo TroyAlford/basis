@@ -85,6 +85,7 @@ export const supportsBasisServer = (
   runtime: BunRuntimeInfo = { revision: Bun.revision, version: Bun.version },
 ): boolean => {
   const version = runtime.version.trim()
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) return false
   const parsed = parseBunVersion(version)
   const minimum = parseBunVersion(MINIMUM_BUN_FOR_SERVER)
   if (parsed === null || minimum === null) return false

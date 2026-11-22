@@ -70,7 +70,7 @@ describe('transformProductionModule', () => {
     expect(result?.contents).not.toContain('react-refresh')
   })
 
-  test('leaves a class-free non-style TypeScript module to Bun', () => {
+  test('leaves an unsupported module without an accept boundary so Bun reloads it', () => {
     expect(transformProductionModule('export const x = 1', '/app/util.ts', '/app')).toBeNull()
   })
 })
