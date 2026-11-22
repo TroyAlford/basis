@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { APPROVED_BUN_SERVER_PACKAGE, APPROVED_BUN_SERVER_REVISION, assertBasisServerCompatible, basisServerUnsupportedReason, bunCheckUnsupportedReason, parseBunVersion, supportsBasisServer, supportsBunCheck } from './bun-version'
+import { APPROVED_BUN_SERVER_COMMIT, APPROVED_BUN_SERVER_PACKAGE, APPROVED_BUN_SERVER_REVISION, assertBasisServerCompatible, basisServerUnsupportedReason, bunCheckUnsupportedReason, currentBunRuntime, parseBunVersion, supportsBasisServer, supportsBunCheck } from './bun-version'
 
 describe('Bun type-check support', () => {
   test('parses numeric versions and ignores pre-release metadata', () => {
@@ -35,6 +35,10 @@ describe('Basis Server Bun support', () => {
       revision: APPROVED_BUN_SERVER_REVISION,
       version: '1.4.6',
     })).toBe(true)
+    expect(supportsBasisServer({
+      revision: APPROVED_BUN_SERVER_COMMIT,
+      version: '1.4.6',
+    })).toBe(true)
     expect(supportsBasisServer({ revision: '1.4.6+stable', version: '1.4.6' })).toBe(true)
     expect(supportsBasisServer({ revision: '1.5.0+stable', version: '1.5.0' })).toBe(true)
     expect(supportsBasisServer({ revision: '2.0.0+stable', version: '2.0.0' })).toBe(true)
@@ -49,6 +53,14 @@ describe('Basis Server Bun support', () => {
     expect(supportsBasisServer({ revision: '1.4.6-canary.2+abc', version: '1.4.6-canary.2' })).toBe(false)
     expect(supportsBasisServer({ revision: '1.4.6-canary.2+abc', version: '1.4.6' })).toBe(false)
     expect(supportsBasisServer({ revision: '1.4.7-canary.1+abc', version: '1.4.7-canary.1' })).toBe(false)
+  })
+
+  test('rejects missing, malformed, or mismatched revision metadata', () => {
+    expect(supportsBasisServer({ version: '1.4.6' })).toBe(false)
+    expect(supportsBasisServer({ revision: '', version: '1.4.6' })).toBe(false)
+    expect(supportsBasisServer({ revision: 'unknown', version: '1.4.6' })).toBe(false)
+    expect(supportsBasisServer({ revision: '1.4.7+stable', version: '1.4.6' })).toBe(false)
+    expect(supportsBasisServer({ revision: 'a7733435cf40429e3b35c36072769df2052b80f1', version: '1.4.6' })).toBe(false)
   })
 
   test('rejects malformed runtime metadata', () => {
@@ -69,5 +81,7 @@ describe('Basis Server Bun support', () => {
       revision: APPROVED_BUN_SERVER_REVISION,
       version: '1.4.6',
     })).toBeUndefined()
+    expect(currentBunRuntime().version).toBe('1.4.6')
+    expect(basisServerUnsupportedReason()).toBeNull()
   })
 })

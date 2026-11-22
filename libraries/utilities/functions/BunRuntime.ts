@@ -1,3 +1,6 @@
+import { Logger } from './Logger'
+import { run } from './run'
+
 /** The first stable Bun release with the built-in TypeScript checker. */
 export const MINIMUM_BUN_FOR_CHECK = '1.4.3'
 
@@ -10,6 +13,9 @@ export const MINIMUM_BUN_FOR_SERVER = '1.4.6'
 /** The exact canary runtime revision approved for Basis Server. */
 export const APPROVED_BUN_SERVER_REVISION = '1.4.6-canary.1+b15f51302'
 
+/** The exact commit prefix in the running Bun runtime's `revision` field. */
+export const APPROVED_BUN_SERVER_COMMIT = 'b15f51302'
+
 /** The npm distribution of the approved canary runtime. */
 export const APPROVED_BUN_SERVER_PACKAGE = 'bun@1.4.5-canary.20261121.1'
 
@@ -18,11 +24,45 @@ export type ParsedVersion = readonly [major: number, minor: number, patch: numbe
 
 /** Version metadata reported by a Bun runtime. */
 export interface BunRuntimeInfo {
-  /** `Bun.revision`, when available. */
+  /** Full `bun --revision` output, or `Bun.revision` when that is unavailable. */
   revision?: string,
   /** `Bun.version`, for example `1.4.6` or `1.4.6-canary.1`. */
   version: string,
 }
+
+/** The detailed revision string, read once from the running executable. */
+let detailedRevision: string | undefined
+
+/**
+ * Read the running Bun's detailed revision without relying on `Bun.version`,
+ * which omits the prerelease channel for canary builds.
+ * @returns The detailed revision, or undefined when it cannot be read.
+ */
+function readDetailedRevision(): string | undefined {
+  if (detailedRevision !== undefined) return detailedRevision
+  try {
+    const result = run(process.execPath, ['--revision'], {
+      logger: new Logger({ silent: true }),
+      timeoutMs: 5_000,
+    })
+    if (result.exitCode === 0) {
+      const value = result.stdout.trim()
+      if (value !== '') detailedRevision = value
+    }
+  } catch {
+    // Fall back to Bun.revision below.
+  }
+  return detailedRevision
+}
+
+/**
+ * Read the current runtime metadata used by the compatibility gate.
+ * @returns The runtime version and identifiable revision.
+ */
+export const currentBunRuntime = (): BunRuntimeInfo => ({
+  revision: readDetailedRevision() ?? Bun.revision,
+  version: Bun.version,
+})
 
 /**
  * Parses the numeric part of a Bun version, ignoring pre-release and build metadata.
@@ -82,7 +122,7 @@ export const supportsBunCheck = (version: string): boolean => {
  * @returns Whether the runtime is supported.
  */
 export const supportsBasisServer = (
-  runtime: BunRuntimeInfo = { revision: Bun.revision, version: Bun.version },
+  runtime: BunRuntimeInfo = currentBunRuntime(),
 ): boolean => {
   const version = runtime.version.trim()
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) return false
@@ -90,11 +130,26 @@ export const supportsBasisServer = (
   const minimum = parseBunVersion(MINIMUM_BUN_FOR_SERVER)
   if (parsed === null || minimum === null) return false
 
-  if (runtime.revision === APPROVED_BUN_SERVER_REVISION && compareVersions(parsed, minimum) >= 0) {
+  const revision = runtime.revision?.trim()
+  if (revision === undefined || revision === '') return false
+  if (
+    (revision === APPROVED_BUN_SERVER_REVISION || revision.startsWith(APPROVED_BUN_SERVER_COMMIT))
+    && compareVersions(parsed, minimum) >= 0
+  ) {
     return true
   }
 
-  if (hasPrerelease(version) || hasPrerelease(runtime.revision)) return false
+  /*
+   * The runtime must identify itself. A bare numeric version is not enough:
+   * the approved canary reports `Bun.version === "1.4.6"`, so a prerelease with
+   * missing or spoofed revision metadata would otherwise look stable. Stable
+   * releases identify the same numeric version in their revision metadata,
+   * with optional build metadata and no prerelease identifier.
+   */
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(revision)) return false
+  const revisionParsed = parseBunVersion(revision)
+  if (revisionParsed === null || compareVersions(revisionParsed, parsed) !== 0) return false
+  if (hasPrerelease(version) || hasPrerelease(revision)) return false
   return compareVersions(parsed, minimum) >= 0
 }
 
@@ -115,7 +170,7 @@ export const bunCheckUnsupportedReason = (version: string = Bun.version): string
  * @returns The actionable message, or null when the runtime is supported.
  */
 export const basisServerUnsupportedReason = (
-  runtime: BunRuntimeInfo = { revision: Bun.revision, version: Bun.version },
+  runtime: BunRuntimeInfo = currentBunRuntime(),
 ): string | null => {
   if (supportsBasisServer(runtime)) return null
   const revision = runtime.revision === undefined ? '' : ` (revision ${runtime.revision})`
@@ -130,7 +185,7 @@ export const basisServerUnsupportedReason = (
  * @param runtime - The runtime metadata; defaults to the running Bun.
  */
 export const assertBasisServerCompatible = (
-  runtime: BunRuntimeInfo = { revision: Bun.revision, version: Bun.version },
+  runtime: BunRuntimeInfo = currentBunRuntime(),
 ): void => {
   const reason = basisServerUnsupportedReason(runtime)
   if (reason !== null) throw new Error(reason)
