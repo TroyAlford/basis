@@ -228,3 +228,12 @@ The same test files were run against upstream `main` (`b251da6`) and the correct
 | Unrelated entity definitions do not change concrete collection SQL | PASS | PASS |
 
 The baseline failures detect the pre-correction SQL shape: root ID/name access, separate concrete/root joins, full nested projections in count scopes, and target/root traversal in the edge projection. Current focused suite: 13 pass.
+
+## Final Phase 2 and Phase 3 test corrections
+
+- `keeps total and matched counts over their correct row sets` now uses `countSubqueries()` for both count scopes. It asserts the matched title predicate, the unfiltered total, no nested Card/Face/Panel/Art projection, item-only pagination, and ordered bindings `["One", 2, 1, "One", 25, 0]`.
+- `extracts balanced count scopes without parsing quoted parentheses` covers SQL string literals with parentheses and doubled quote escapes. This is a test-local extractor, not a production SQL parser.
+- `keeps independently filtered uses of one collection isolated` compiles one collection projection filtered by `title = "A"` together with an independent root existence predicate on `enabled = true`. It verifies both predicates, ordered bindings, separate scopes, and no nested target projection.
+- `CollectionFilterIsolation.e2e.ts` proves the same behavior against PostgreSQL with P1 = (A, false), P2 = (B, true), and P3 = (A, true). The projection returns P1 and P3; the existence predicate is satisfied independently, and `$matched` is 2 while `$total` is 3.
+
+All corrected focused tests pass: 11 compiler/e2e tests across `CollectionPlanning.test.ts` and `CollectionFilterIsolation.e2e.ts`.

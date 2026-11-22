@@ -8,6 +8,7 @@ const graph = new Graph({
     {
       fields: [
         { field: 'title', type: 'String' },
+        { field: 'enabled', type: 'Boolean' },
         { field: 'card', target: 'Card', type: 'Entity' },
         {
           cardinality: 'Many',
@@ -146,26 +147,22 @@ describe('collection planning', () => {
   })
 
   test('keeps total and matched counts over their correct row sets', () => {
-    const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
+    const { sql, values } = compileEntityQuery(graph.definitions, 'Deck', {
       fields: [
         'id',
         "printings[title = 'One']{$limit:2,$offset:1}",
         'printings.card.name',
       ],
     })
-    const [matched, total] = sql.split('AS "__matched"')
-    expect(matched).toContain('ct1."title"')
-    expect(total).toContain('AS "__total"')
-    expect(total).not.toContain('ct1."title"')
-    expect((sql.match(/OFFSET/g) ?? [])).toHaveLength(2)
-
     const countScopes = countSubqueries(sql)
     expect(countScopes).toHaveLength(2)
     expect(countScopes[0]).toContain('ct1."title"')
     expect(countScopes[1]).not.toContain('ct1."title"')
     for (const scope of countScopes) {
-      expect(scope).not.toMatch(/"Card"|"Art"/)
+      expect(scope).not.toMatch(/"Card"|"Face"|"Panel"|"Art"/)
     }
+    expect((sql.match(/OFFSET/g) ?? [])).toHaveLength(2)
+    expect(values).toEqual(['One', 2, 1, 'One', 25, 0])
   })
 
   test('does not expand nested resources for matched or total counts', () => {
@@ -193,6 +190,28 @@ describe('collection planning', () => {
     expect(sql).toContain('json_build_object( \'quantity\', "cj')
     expect(sql).toContain('"cj3"."deck.id" = "t"."id"')
     expect(sql).toContain('"cj3"."printing.id" = "__child"."id"')
+  })
+
+  test('extracts balanced count scopes without parsing quoted parentheses', () => {
+    const sample = [
+      'SELECT count(*)::int FROM (',
+      'SELECT \'literal ) with ( parens\' AS "odd)column", ',
+      '\'it\'\'s (still) literal\' FROM t)',
+    ].join('')
+    expect(countSubqueries(sample)).toEqual([sample])
+  })
+
+  test('keeps independently filtered uses of one collection isolated', () => {
+    const compiled = compileEntityQuery(graph.definitions, 'Deck', {
+      fields: ['id', "printings[title = 'A']{$limit:null}", 'printings.title'],
+      where: 'printings $contains (enabled = true)',
+    })
+    expect(compiled.sql).toContain('"title"')
+    expect(compiled.sql).toContain('"enabled"')
+    expect(compiled.values).toEqual([true, 'A', 'A', 25, 0])
+    expect(countSubqueries(compiled.sql).every(scope => (
+      !scope.includes('"Card"') && !scope.includes('"Face"')
+    ))).toBe(true)
   })
 
   test('existence does not project nested item fields', () => {
