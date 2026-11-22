@@ -237,3 +237,29 @@ The baseline failures detect the pre-correction SQL shape: root ID/name access, 
 - `CollectionFilterIsolation.e2e.ts` proves the same behavior against PostgreSQL with P1 = (A, false), P2 = (B, true), and P3 = (A, true). The projection returns P1 and P3; the existence predicate is satisfied independently, and `$matched` is 2 while `$total` is 3.
 
 All corrected focused tests pass: 11 compiler/e2e tests across `CollectionPlanning.test.ts` and `CollectionFilterIsolation.e2e.ts`.
+
+## Acceptance table
+
+| Requirement | Test or source | Baseline | Current |
+|---|---|---|---|
+| Full 73-row occurrence audit | `docs/server/query-planning-audit.mdx` | N/A | PASS |
+| Mechanical 73 → 28 reconciliation | Audit subtotals and SQL artifacts | N/A | PASS |
+| Original/current SQL artifacts | `original.sql`, `current.sql` | N/A | PASS |
+| Concrete ID from concrete storage | `ConcreteIdentity.test.ts` — uses concrete storage for ID and static type while retaining required inherited name access | FAIL | PASS |
+| Static concrete discriminator | Same test | FAIL | PASS |
+| Abstract runtime discriminator | `ConcreteIdentity.test.ts` — uses the runtime discriminator for an abstract target | PASS | PASS |
+| Inherited name from root storage | `ConcreteIdentity.test.ts` — keeps the public reference contract name and resolves it from root storage | FAIL | PASS |
+| Repeated reference field occurrence reuse | `ConcreteIdentity.test.ts` — uses one concrete/root occurrence for repeated reference fields | FAIL | PASS |
+| Optional inaccessible reference | `ConcreteIdentity.e2e.ts` — preserves an optional concrete reference when its target is inaccessible | N/A | PASS |
+| Count scopes avoid nested projections | `CollectionPlanning.test.ts` — does not expand nested resources for matched or total counts | FAIL | PASS |
+| Balanced count extraction | `CollectionPlanning.test.ts` — extracts balanced count scopes without parsing quoted parentheses | N/A | PASS |
+| Matched/total row sets and bindings | `CollectionPlanning.test.ts` — keeps total and matched counts over their correct row sets | FAIL | PASS |
+| Item pagination only | Same test | FAIL | PASS |
+| Edge quantity from the correct edge | `CollectionPlanning.test.ts` — keeps quantity on the collection edge | PASS | PASS |
+| Edge projection avoids target traversal | `CollectionPlanning.test.ts` — an edge projection does not duplicate target traversal | FAIL | PASS |
+| Independent filtered uses of one navigation | `CollectionPlanning.test.ts` — keeps independently filtered uses of one collection isolated | N/A | PASS |
+| PostgreSQL independent filter evidence | `CollectionFilterIsolation.e2e.ts` | N/A | PASS |
+| PostgreSQL filtered/paginated collection behavior | `ExplicitCollection.e2e.ts` | N/A | PASS |
+| Deterministic SQL and bindings | `CollectionPlanning.test.ts` | PASS | PASS |
+| Unrelated entity definitions do not alter SQL | `CollectionPlanning.test.ts` | PASS | PASS |
+| Authorization unresolved and unchanged | Audit limitations | N/A | PASS |
