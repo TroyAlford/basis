@@ -13,7 +13,7 @@ This page records the query-planning investigation and Stage 3 correction eviden
 - Collection-count correction: `ba8f4ed`
 - Original MTG workload: Printing-rooted resource aggregate
 - Original metrics: 24,659 SQL bytes, 73 `Entity` joins, 823 SubPlans, 6,890 JIT functions, ~39.4 seconds JIT compilation, ~39.5 seconds execution
-- Audit artifacts used during investigation: `/tmp/opencode/original-sql.sql`, `/tmp/opencode/phase3-sql.sql`, `/tmp/opencode/plan-analyze.txt`, `/tmp/opencode/entity-join-audit.md`, `/tmp/opencode/entity-join-occurrences.csv`
+- Version-controlled SQL artifacts: [`original.sql`](query-planning-audit/original.sql) (24,659 bytes, 73 joins) and [`current.sql`](query-planning-audit/current.sql) (11,817 bytes, 28 joins). The original/current hashes are recorded in the repository history.
 
 ## Original occurrence breakdown
 
@@ -113,3 +113,96 @@ Stage 3 reduced the saved MTG SQL from 24,659 bytes / 73 `Entity` joins to 11,81
 ## Deferred
 
 The universal `Entity` SELECT policy and its per-query expansion are unchanged. Stage 4 will establish the current PostgreSQL permission/RLS contract and compare the root storage access alternatives. No Graph policy or collection-planning change is part of this correction.
+
+## Full 73-occurrence reconciliation
+
+| # | Original alias | Original scope | Graph path | Type | Root supplies | Output | Current alias/scope | Disposition |
+|---:|---|---|---|---|---|---|---|---|
+| 1 | `r6` | outer SELECT | `CustomPrinting.card` | Card | entity, id, name | reference | new #1 (r6) | retained outer reference identity |
+| 2 | `r8` | outer SELECT | `CustomPrinting.workspace` | Workspace | entity, id, name | reference | new #2 (r8) | retained outer reference identity |
+| 3 | `r10` | outer SELECT | `CustomPrinting.edition` | CardEdition | entity, id, name | reference | new #3 (r10) | retained outer reference identity |
+| 4 | `r13` | outer SELECT | `CustomPrinting.card.workspace` | Workspace | entity, id, name | reference | new #4 (r13) | retained outer reference identity |
+| 5 | `r` | panels:items | `CustomPrinting.panels identity` | PrintingPanel | entity, id, name | items | new #5 (r) | retained item/edge identity |
+| 6 | `c16_r2` | panels:items | `panels.art identity` | Art | entity, id, name | items | new #6 (c16_r2) | retained item/edge identity |
+| 7 | `c16_r4` | panels:items | `panels.art.owner identity` | User | entity, id, name | items | new #7 (c16_r4) | retained item/edge identity |
+| 8 | `r` | panels:items | `panels.faces item identity` | CardFace | entity, id, name | items | new #8 (r) | retained item/edge identity |
+| 9 | `c16_cr6` | panels:items | `panels.faces edge target` | CardFace | entity, id, name | items | new #9 (c16_cr6) | retained item/edge identity |
+| 10 | `r` | panels:items | `panels.faces matched identity` | CardFace | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 11 | `c16_cr6` | panels:items | `panels.faces matched edge target` | CardFace | entity, id, name | items | new #10 (c16_cr6) | retained item/edge identity |
+| 12 | `c16_cr11` | panels:items | `panels.art.tagLinks item edge target` | Tag | entity, id, name | items | new #12 (c16_cr12) | retained item/edge identity |
+| 13 | `r` | panels:items | `panels.art.tagLinks item identity` | Tag | entity, id, name | items | new #11 (r) | retained item/edge identity |
+| 14 | `c16_cr11` | panels:items | `panels.art.tagLinks matched edge target` | Tag | entity, id, name | items | new #13 (c16_cr12) | retained item/edge identity |
+| 15 | `c16_cr11` | panels:items | `panels.art.tagLinks matched identity` | Tag | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 16 | `r` | panels:items | `panels.art.tagLinks edge identity` | Tag | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 17 | `c16_cr11` | panels:items | `panels.art.tagLinks edge target` | Tag | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 18 | `cr15` | panels:items | `panels source/existence target` | PrintingPanel | entity, id, name | items | new #14 (cr15) | retained item/edge identity |
+| 19 | `r` | panels:matched | `CustomPrinting.panels identity` | PrintingPanel | entity, id, name | matched | new #15 (cr15) | retained count-only panel identity |
+| 20 | `c16_r2` | panels:matched | `panels.art identity` | Art | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 21 | `c16_r4` | panels:matched | `panels.art.owner identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 22 | `r` | panels:matched | `panels.faces item identity` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 23 | `c16_cr6` | panels:matched | `panels.faces edge target` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 24 | `r` | panels:matched | `panels.faces matched identity` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 25 | `c16_cr6` | panels:matched | `panels.faces matched edge target` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 26 | `c16_cr11` | panels:matched | `panels.art.tagLinks item edge target` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 27 | `r` | panels:matched | `panels.art.tagLinks item identity` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 28 | `c16_cr11` | panels:matched | `panels.art.tagLinks matched edge target` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 29 | `c16_cr11` | panels:matched | `panels.art.tagLinks matched identity` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 30 | `r` | panels:matched | `panels.art.tagLinks edge identity` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 31 | `c16_cr11` | panels:matched | `panels.art.tagLinks edge target` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 32 | `cr15` | panels:matched | `panels source/existence target` | PrintingPanel | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 33 | `r` | decks:items | `CustomPrinting.decks identity` | Deck | entity, id, name | items | new #16 (r) | retained item identity/edge occurrence |
+| 34 | `c21_r2` | decks:items | `decks.createdBy identity` | User | entity, id, name | items | new #17 (c22_r2) | retained item identity/edge occurrence |
+| 35 | `c21_cr4` | decks:items | `decks.members item edge target` | User | entity, id, name | items | new #19 (c22_cr4) | retained item identity/edge occurrence |
+| 36 | `r` | decks:items | `decks.members item identity` | User | entity, id, name | items | new #18 (r) | retained item identity/edge occurrence |
+| 37 | `c21_cr4` | decks:items | `decks.members matched edge target` | User | entity, id, name | items | new #20 (c22_cr4) | retained item identity/edge occurrence |
+| 38 | `c21_cr4` | decks:items | `decks.members edge projection target` | User | entity, id, name | items | new #21 (c22_cr4) | retained item identity/edge occurrence |
+| 39 | `r` | decks:items | `decks.members matched identity` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 40 | `c21_cr4` | decks:items | `decks.members edge projection target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 41 | `c21_cr4` | decks:items | `decks.members item edge target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 42 | `r` | decks:items | `decks.members matched edge target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 43 | `c21_cr4` | decks:items | `decks.members edge projection target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 44 | `cr19` | decks:items | `decks edge target` | Deck | entity, id, name | items | new #22 (cr20) | retained item identity/edge occurrence |
+| 45 | `r` | decks:matched | `CustomPrinting.decks identity` | Deck | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 46 | `c21_r2` | decks:matched | `decks.createdBy identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 47 | `c21_cr4` | decks:matched | `decks.members item edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 48 | `r` | decks:matched | `decks.members item identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 49 | `c21_cr4` | decks:matched | `decks.members matched edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 50 | `c21_cr4` | decks:matched | `decks.members edge projection target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 51 | `r` | decks:matched | `decks.members matched identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 52 | `c21_cr4` | decks:matched | `decks.members edge projection target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 53 | `c21_cr4` | decks:matched | `decks.members item edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 54 | `r` | decks:matched | `decks.members matched edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 55 | `c21_cr4` | decks:matched | `decks.members edge projection target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 56 | `cr19` | decks:matched | `decks edge target` | Deck | entity, id, name | matched | new #23 (cr20) | retained item identity/edge occurrence |
+| 57 | `r` | decks:total | `CustomPrinting.decks identity` | Deck | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 58 | `c21_r2` | decks:total | `decks.createdBy identity` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 59 | `c21_cr4` | decks:total | `decks.members item edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 60 | `r` | decks:total | `decks.members item identity` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 61 | `c21_cr4` | decks:total | `decks.members matched edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 62 | `c21_cr4` | decks:total | `decks.members edge projection target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 63 | `r` | decks:total | `decks.members matched identity` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 64 | `c21_cr4` | decks:total | `decks.members edge projection target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 65 | `c21_cr4` | decks:total | `decks.members item edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 66 | `r` | decks:total | `decks.members matched edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 67 | `c21_cr4` | decks:total | `decks.members edge projection target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 68 | `cr19` | decks:total | `decks edge target` | Deck | entity, id, name | total | new #24 (cr20) | retained item identity/edge occurrence |
+| 69 | `r` | faces:items | `CustomPrinting.card.faces item identity` | CardFace | entity, id, name | items | new #25 (r) | retained identity occurrence |
+| 70 | `cr26` | faces:items | `card.faces item edge target` | CardFace | entity, id, name | items | new #26 (cr28) | retained identity occurrence |
+| 71 | `r` | faces:matched | `card.faces matched identity` | CardFace | entity, id, name | matched | new #27 (cr28) | retained identity occurrence |
+| 72 | `cr26` | faces:matched | `card.faces matched edge target` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope does not need the edge target identity |
+| 73 | `cr2` | deckEntries:existence | `deckEntries.deck target` | Deck | entity, id, name | existence | new #28 (cr2) | retained root existence correlation |
+
+### Scope subtotals
+
+| Original scope | Original joins | Retained | Eliminated |
+|---|---:|---:|---:|
+| outer SELECT | 4 | 4 | 0 |
+| panels:items | 14 | 10 | 4 |
+| panels:matched | 14 | 1 | 13 |
+| decks:items | 12 | 7 | 5 |
+| decks:matched | 12 | 1 | 11 |
+| decks:total | 12 | 1 | 11 |
+| faces:items | 2 | 2 | 0 |
+| faces:matched | 2 | 1 | 1 |
+| deckEntries:existence | 1 | 1 | 0 |
+| **Total** | **73** | **28** | **45** |
