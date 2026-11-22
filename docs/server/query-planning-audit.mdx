@@ -264,14 +264,10 @@ All corrected focused tests pass: 11 compiler/e2e tests across `CollectionPlanni
 | Unrelated entity definitions do not alter SQL | `CollectionPlanning.test.ts` | PASS | PASS |
 | Authorization unresolved and unchanged | Audit limitations | N/A | PASS |
 
-## Ancestor-read privilege blocker
+## Ancestor-read contract
 
-The leaf-authorized CTE design cannot yet be implemented against the current restricted role without changing the ancestor privilege contract.
+Graph authorization is guaranteed for Basis-generated operations. Raw SQL operates under the privileges of its database connection and is not automatically constrained to Basis's Graph query semantics.
 
-- With `Entity` RLS enabled and no root read policy, `FROM "CustomPrinting" leaf INNER JOIN "Entity" root ON root.id = leaf.id` returns zero rows under the app role.
-- Revoking `SELECT` on `Entity` makes the same join fail with `permission denied for table "Entity"`.
-- Granting `SELECT` and disabling or bypassing RLS lets the app role read arbitrary ancestor rows directly.
+Concrete leaf tables remain the RLS authorization boundary. Ancestor storage such as `Entity` is not an entity authorization boundary and must not install read RLS policies. Leaf-rooted CTEs may join ancestor storage for inherited fields. Privileged raw SQL may read ancestor storage outside the Graph contract; that is documented behavior, not a role-separation requirement.
 
-PostgreSQL privileges are not join-context sensitive. A security-definer function is excluded by the architectural contract; a view with invoker rights still needs the base grant, while an owner-rights view needs a second authorization predicate/registry. No RLS or Graph authorization change has been made.
-
-Operator approval is required for the smallest viable ancestor-read boundary. The preferred model is a privilege-separated trusted Basis execution role plus a separate untrusted SQL role with no domain-table access. A controlled ancestor projection view is a fallback only if the role split cannot be made operationally safe.
+Removing the universal root read policy requires the leaf CTE compiler first, because the current compiler still roots abstract queries at their ancestor table and relies on root policies for write/read enforcement. Step 1 therefore remains part of the next compiler increment.
