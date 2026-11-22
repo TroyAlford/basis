@@ -100,6 +100,13 @@ describe('collection planning', () => {
     })
     expect(count(edge.sql, /\("Card"/g)).toBe(1)
     expect(count(edge.sql, /json_build_object\( 'quantity'/g)).toBe(1)
+    const edgeProjection = edge.sql.slice(
+      edge.sql.indexOf('json_build_object'),
+      edge.sql.indexOf('AS "__edge"'),
+    )
+    expect(edgeProjection).toContain('FROM  "DeckPrinting"')
+    expect(edgeProjection).not.toContain('JOIN "Printing"')
+    expect(edgeProjection).not.toContain('JOIN "Entity"')
   })
 
   test('keeps total and matched counts over their correct row sets', () => {
@@ -115,6 +122,15 @@ describe('collection planning', () => {
     expect(total).toContain('AS "__total"')
     expect(total).not.toContain('ct1."title"')
     expect((sql.match(/OFFSET/g) ?? [])).toHaveLength(2)
+
+    const countScopes = sql.split('SELECT count(*)::int FROM (')
+    expect(countScopes.length).toBe(3)
+    for (const scope of countScopes.slice(1)) {
+      expect(scope).not.toContain('("Card"')
+      expect(scope).not.toContain('FROM "Face"')
+      expect(scope).not.toContain('FROM "Panel"')
+      expect(scope).not.toContain('("Art"')
+    }
   })
 
   test('does not expand nested resources for matched or total counts', () => {

@@ -2124,6 +2124,12 @@ class QueryProjection {
 
   /**
    * Select the default identity for a reference target.
+   *
+   * The public reference hydration contract always contains `entity`, `id`, and
+   * `name`. A final concrete type can supply its ID from the concrete row and
+   * its type from Graph metadata, but its inherited name still lives on
+   * `Entity`; the root join below is therefore required even for a path that
+   * requested only the ID.
    * @param node - Reference target occurrence.
    */
   #identity(node: ProjectionNode): void {

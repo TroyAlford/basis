@@ -43,14 +43,20 @@ const graph = new Graph({
 })
 
 describe('concrete identity resolution', () => {
-  test('does not use the root alias for a final concrete id or type', () => {
+  test('uses concrete storage for ID and static type while retaining required inherited name access', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Document', {
-      fields: ['id', 'workspace.id', 'workspace.name'],
+      fields: ['id', 'workspace.id'],
     })
     expect(sql).toMatch(/b\d+\."id" AS "workspace__id"/)
     expect(sql).not.toMatch(/r\d+\."id" AS "workspace__id"/)
     expect(sql).toContain('\'Workspace\' AS "workspace__entity"')
     expect(sql).not.toMatch(/r\d+\."entity" AS "workspace__entity"/)
+    /*
+     * The public reference shape always includes name, so inherited storage is
+     * required even when the caller selected only workspace.id.
+     */
+    expect(sql).toMatch(/r\d+\."name" AS "workspace__name"/)
+    expect((sql.match(/INNER JOIN "Entity"/g) ?? [])).toHaveLength(1)
   })
 
   test('uses the runtime discriminator for an abstract target', () => {
