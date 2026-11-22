@@ -70,8 +70,11 @@ test('keeps production React and hot-replaces a mounted class component', async 
     const bundle = await Bun.fetch(new URL(source, app.url)).then(response => response.text())
     expect(bundle).not.toContain('react-refresh')
     expect(bundle).not.toContain('jsxDEV')
+    expect(bundle).not.toContain('react.production')
     expect(bundle).toContain('__basisVendor')
     expect(bundle).toContain('Application.tsx:Application')
+    expect(html.indexOf('/assets/vendor/vendor.js')).toBeGreaterThan(-1)
+    expect(html.indexOf(source)).toBeGreaterThan(html.indexOf('/assets/vendor/vendor.js'))
 
     let hydrated = false
     const errors: string[] = []
@@ -110,6 +113,13 @@ test('keeps production React and hot-replaces a mounted class component', async 
 
       // A full reload would clear the marker and reset the class state to zero.
       expect(await page.evaluate(() => (globalThis as { __basisHMRSurvived?: string }).__basisHMRSurvived)).toBe('yes')
+
+      await page.click('button')
+      await page.waitForFunction(
+        () => document.querySelector('h1')?.textContent === 'Application Updated 2',
+        undefined,
+        { timeout: 30_000 },
+      )
     })
 
     expect(hydrated).toBe(true)

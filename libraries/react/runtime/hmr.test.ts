@@ -98,6 +98,21 @@ describe('production HMR runtime', () => {
     expect(new Second().read()).toBe(2)
   })
 
+  test('replaces a class with instance function fields so React remounts it', () => {
+    class First {
+      onClick = () => 'old'
+    }
+
+    register('runtime:arrow', First, true)
+
+    class Second {
+      onClick = () => 'new'
+    }
+
+    expect(register('runtime:arrow', Second, true)).toBe(Second)
+    expect(new Second().onClick()).toBe('new')
+  })
+
   test('renders changed methods through nested mounted classes', async () => {
     class Child extends Component {
       text(): string {

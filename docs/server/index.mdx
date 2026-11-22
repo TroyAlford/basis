@@ -90,6 +90,12 @@ new Server()
 
 The server builds the vendor bundle during startup. If a consumer needs a custom chunk layout, `buildVendor` can still produce deterministic named chunks with exact module-to-global mappings.
 
+## Development, preview, and production updates
+
+Development and preview use Bun's live compilation and HMR. Supported class-component edits preserve mounted state; instance-owned functions and runtime-private members follow the documented remount fallback, and unsupported module updates fall back to Bun's normal reload. Installed vendor dependency changes require a server restart so the vendor artifact and global map stay aligned.
+
+Production deployment is a separate lifecycle from class HMR. Command Center publishes a new release and restarts the application; production replacement does not preserve mounted React instances across releases. Automatic browser reconnection, release-version comparison, and a single reload onto the new release are a planned contract in [#357](https://github.com/TroyAlford/basis/issues/357), not yet implemented behavior. Until that feature and its two-lifetime browser tests pass, production clients must not be assumed to update themselves after a release replacement.
+
 ## Live transports
 
 `sse(route, handler)` registers a GET event stream and owns framing, disconnect cleanup, and a bounded buffer. `socket(route, handlers)` registers a WebSocket route with the same `open`/`message`/`close` lifecycle used by the server's own HMR transport.
