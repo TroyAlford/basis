@@ -21,8 +21,8 @@
     "@basis/oauth": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2"
