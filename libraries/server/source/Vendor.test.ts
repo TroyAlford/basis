@@ -352,6 +352,53 @@ export class Application extends Component {
         expect(oldMap.status).toBe(200)
         expect(await oldMap.text()).toBe(snapshot.mapBytes)
 
+        /*
+         * The active snapshot owns the bytes even after its backing files are
+         * deleted. Resolve the snapshot before requiring the file to exist.
+         */
+        await rm(join(root, 'dist', 'vendor', 'vendor.js'), { force: true })
+        await rm(join(root, 'dist', 'vendor', 'vendor.js.map'), { force: true })
+
+        const deletedVendor = await Bun.fetch(snapshot.url, { redirect: 'manual' })
+        expect(deletedVendor.status).toBe(200)
+        expect(await deletedVendor.text()).toBe(oldBytes)
+        expect(deletedVendor.headers.get('etag')).toBe(`"${snapshot.hash}"`)
+        expect(deletedVendor.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
+        const deletedMap = await Bun.fetch(snapshot.mapUrl, { redirect: 'manual' })
+        expect(deletedMap.status).toBe(200)
+        expect(await deletedMap.text()).toBe(snapshot.mapBytes)
+        expect(deletedMap.headers.get('etag')).toBe(`"${snapshot.mapHash}"`)
+        expect(deletedMap.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
+        const deletedRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js', first.url), {
+          redirect: 'manual',
+        })
+        expect(deletedRedirect.status).toBe(307)
+        expect(deletedRedirect.headers.get('location')).toContain(`?v=${snapshot.hash}`)
+
+        const deletedMapRedirect = await Bun.fetch(
+          new URL('/assets/vendor/vendor.js.map', first.url),
+          { redirect: 'manual' },
+        )
+        expect(deletedMapRedirect.status).toBe(307)
+        expect(deletedMapRedirect.headers.get('location')).toContain(`?v=${snapshot.mapHash}`)
+
+        const notModifiedVendor = await Bun.fetch(snapshot.url, {
+          headers: { 'If-None-Match': `"${snapshot.hash}"` },
+        })
+        expect(notModifiedVendor.status).toBe(304)
+        expect(notModifiedVendor.headers.get('etag')).toBe(`"${snapshot.hash}"`)
+
+        const notModifiedMap = await Bun.fetch(snapshot.mapUrl, {
+          headers: { 'If-None-Match': `"${snapshot.mapHash}"` },
+        })
+        expect(notModifiedMap.status).toBe(304)
+        expect(notModifiedMap.headers.get('etag')).toBe(`"${snapshot.mapHash}"`)
+
+        expect((await Bun.fetch(new URL('/assets/vendor/missing.js', first.url))).status).toBe(404)
+        expect((await Bun.fetch(new URL('/assets/vendor/.basis/secret', first.url))).status).toBe(404)
+
         const oldRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js', first.url), {
           redirect: 'manual',
         })

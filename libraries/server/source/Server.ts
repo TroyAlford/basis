@@ -459,10 +459,13 @@ export class Server<
       return Server.NotFound
     }
 
+    const active = vendor ? this.#activeVendorAsset(filePath) : null
+    if (active) return this.#serveVendor(uri, active, null, request, Bun.file(filePath).type)
+
     const asset = await publicStaticFile(filePath)
     if (!asset) return Server.NotFound
 
-    if (vendor) return this.#serveVendor(uri, asset, request, filePath)
+    if (vendor) return this.#serveVendor(uri, null, asset, request, asset.type)
 
     const version = asset.lastModified.toString()
 
@@ -487,20 +490,21 @@ export class Server<
   /**
    * Serve one content-versioned vendor artifact.
    * @param uri - The vendor request URI.
+   * @param active - The active immutable snapshot, or null for file fallback.
    * @param asset - The resolved vendor file.
    * @param request - The incoming request, when available.
-   * @param filePath - Absolute path of the requested vendor file or source map.
+   * @param type - The response content type.
    * @returns The versioned asset, a redirect to the current version, or a 304.
    */
   async #serveVendor(
     uri: URI,
-    asset: ReturnType<typeof Bun.file>,
+    active: { contents: Uint8Array<ArrayBuffer>, hash: string } | null,
+    asset: ReturnType<typeof Bun.file> | null,
     request: Request | undefined,
-    filePath: string,
+    type: string,
   ): Promise<Response> {
     try {
-      const active = this.#activeVendorAsset(filePath)
-      const bytes = active?.contents ?? new Uint8Array(await asset.arrayBuffer())
+      const bytes = active?.contents ?? new Uint8Array(await asset?.arrayBuffer() ?? [])
       const hash = active?.hash ?? createHash('sha256').update(bytes).digest('hex')
       const etag = `"${hash}"`
       const immutable = 'public, max-age=31536000, immutable'
@@ -521,7 +525,7 @@ export class Server<
       }
 
       return new Response(bytes, {
-        headers: { 'Cache-Control': immutable, 'Content-Type': asset.type, 'ETag': etag },
+        headers: { 'Cache-Control': immutable, 'Content-Type': type, 'ETag': etag },
         status: 200,
       })
     } catch {
