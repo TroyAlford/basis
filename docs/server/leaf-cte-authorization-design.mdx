@@ -4,7 +4,7 @@ title: Leaf-Authorized CTE Authorization Design
 
 # Leaf-Authorized CTE Authorization Design
 
-Status: implementation design. No new database roles, security-definer functions, ancestor RLS policies, or denormalized storage are introduced.
+Status: read compiler implemented through leaf-authorized CTEs. No new database roles, security-definer functions, ancestor RLS policies, or denormalized storage are introduced.
 
 ## Contract
 
@@ -39,15 +39,19 @@ SELECT ...
 FROM authorized_printings p;
 ```
 
+The CTE projection is driven by the field requirements registered while the existing resolver walks projections, filters, ordering, references, and collections. The compiler emits only the required output aliases. It does not parse or rewrite already-generated SQL, and it does not infer entity types from SQL text.
+
 Concrete leaf RLS authorizes the leaf rows. Ancestor joins supply `name` and other inherited fields. Abstract targets compose one authorized CTE per relevant concrete leaf with `UNION ALL` and expose the actual concrete discriminator.
 
 For the current implementation phase, ancestor tables such as `Entity` and abstract MTI tables are not entity authorization boundaries and must not install read RLS policies or an RLS-driven row filter. Concrete leaves remain protected by RLS. Direct privileged SQL may read ancestor storage; that is part of the documented raw-SQL contract.
 
 ## Query/CTE responsibilities
 
-- `PolymorphicQuery` resolves logical occurrences and required leaf types before emitting SQL.
-- One reusable CTE is planned per concrete leaf and equivalent relational requirement.
+- `PolymorphicQuery` resolves logical occurrences, physical owners, identity requirements, and required leaf types while building the projection, predicate, ordering, and collection plans. Final SQL is emitted only after those requirements are complete.
+- One reusable CTE is planned per concrete leaf and equivalent relational requirement. Concrete CTEs explicitly project required columns from the leaf and their owning ancestor tables.
+- Abstract CTEs union concrete leaf CTEs and project a compatible common column set with `UNION ALL`. Fields owned only by a concrete descendant are read from that descendant's authorized CTE through an occurrence-specific alias, so incompatible sibling declarations retain their physical types.
 - Multiple references to the same authorized relation reuse the CTE definition but retain independent aliases and correlations.
+- Nested compiler scopes use a separate CTE namespace so an inner relation cannot shadow the outer relation used by a collection correlation.
 - Collection item projections use full requested fields; `$matched` and `$total` use minimal authorized member relations; edge fields use relationship storage.
 - The final statement remains one SQL statement per `.query(...)`.
 - Actor context is established by Basis's existing transaction path. Raw SQL's ability to set `actor.id` remains the accepted privileged-SQL behavior and is not a new role boundary.
@@ -125,12 +129,13 @@ These enforce MTI root/leaf integrity, not entity read authorization. They remai
 Steps 1–4 are implemented:
 
 - Concrete leaves own read policies. Abstract MTI tables and `Entity` no longer install read policies or a universal dispatcher.
-- `Database.prepareEntityQuery` routes compiled entity reads through `authorizeEntityQuery`, which emits one reusable CTE per referenced entity table.
-- A concrete CTE starts from the leaf and joins only ancestor storage referenced by the compiled statement. The outer query reads inherited fields from those joins; the CTE does not assume optional ancestor columns exist.
-- An abstract CTE starts from each concrete leaf, projects identity, the actual `entity` discriminator, and abstract-local fields, then unions the leaves with `UNION ALL`.
+- `PolymorphicQuery` owns an authorized relation planner. Field access, identity, references, filters, ordering, and collection correlation register requirements; the compiler emits CTE definitions from those requirements before emitting the final statement.
+- A concrete CTE starts from the leaf and joins only ancestor storage required by the registered fields. It explicitly projects each required column under a stable alias; the outer query does not reconstruct ancestor field access.
+- An abstract CTE starts from each concrete leaf CTE, projects the required common column set, and unions the leaves with `UNION ALL`. The actual `entity` discriminator is preserved. Concrete-only fields use authorized leaf CTE joins.
 - Filters, references, collection items, `$matched`/`$total` counts, and existence checks all reference the authorized CTEs. Repeated references reuse one CTE definition with independent aliases.
+- `Database.prepareEntityQuery` passes the compiler's final SQL through unchanged. There is no post-generation table-name rewriting pass.
 - Raw SQL remains outside the Graph guarantee, as documented in `authorization.mdx`.
 
-Evidence is covered by `LeafPolicy.test.ts`, `LeafCte.test.ts`, `SQL.test.ts`, `QueryContract.test.ts`, and the PostgreSQL authorization suites. The polymorphic navigation regression verifies that an unauthorized concrete descendant is absent from both collection items and `$matched` counts.
+Evidence is covered by `LeafPolicy.test.ts`, `LeafCte.test.ts`, `SQL.test.ts`, `QueryContract.test.ts`, and the PostgreSQL authorization suites. `LeafCte.test.ts` rejects rewriting of SQL literals and comments, verifies inherited fields are read from CTE output aliases, and covers nested collection correlations. The polymorphic navigation regression verifies that an unauthorized concrete descendant is absent from both collection items and `$matched` counts.
 
 The PostgreSQL authorization suite, including raw-SQL write checks, passes with the leaf CTE read compiler. Replacing the remaining write policies and Graph-generated helpers remains the next independent phase; it is not part of the read compiler increments.
