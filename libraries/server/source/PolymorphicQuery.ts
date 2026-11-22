@@ -1789,13 +1789,21 @@ class QueryProjection {
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, effective)
       : this.#entityMember(plan, effective, key)
+    const countAdapter = plan.resultType === 'record'
+      ? this.#recordMember(plan, effective, true)
+      : this.#entityMember(plan, effective, key, true)
     const orderings = collectionOrderings(plan, effective.orderBy, adapter)
     const matched = adapter.compile(filter)
-    const total = filter === undefined ? undefined : adapter.compile(undefined)
-    const matchedCount = collectionIdentityCount(matched, adapter.identity, adapter.identityUnique)
+    const matchedForCount = countAdapter.compile(filter)
+    const total = filter === undefined ? undefined : countAdapter.compile(undefined)
+    const matchedCount = collectionIdentityCount(
+      matchedForCount,
+      countAdapter.identity,
+      countAdapter.identityUnique,
+    )
     const totalCount = total === undefined
       ? undefined
-      : collectionIdentityCount(total, adapter.identity, adapter.identityUnique)
+      : collectionIdentityCount(total, countAdapter.identity, countAdapter.identityUnique)
     const page = collectionIdentityPage(
       matched,
       adapter.identity,
@@ -2037,7 +2045,8 @@ class QueryProjection {
       ? undefined
       : SQL.compose([' AND (', plan.predicate, ')'])
     return SQL.compose([
-      '(SELECT json_build_object(', values.join(', '), ') FROM ', plan.relation,
+      '(SELECT json_build_object(', values.join(', '), ') FROM ',
+      `${quote(relationship.name)} ${quote(relationshipAlias)}`,
       ' WHERE ', plan.condition, predicate, ' AND ',
       `${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
         `${quote('__child')}.${quote('id')})`,
