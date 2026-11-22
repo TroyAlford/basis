@@ -208,7 +208,7 @@ describe('collection planning', () => {
     })
     expect(compiled.sql).toContain('"title"')
     expect(compiled.sql).toContain('"enabled"')
-    expect(compiled.values).toEqual([true, 'A', 'A', 25, 0])
+    expect(compiled.values).toEqual(['A', 'A', true, 25, 0])
     expect(countSubqueries(compiled.sql).every(scope => (
       !scope.includes('"Card"') && !scope.includes('"Face"')
     ))).toBe(true)

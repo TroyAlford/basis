@@ -3,7 +3,7 @@ import type { EntityDefinitions, QueryFieldDefinition } from './EntityDefinition
 import { FieldType, relationshipView } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
-import type { QueryScope, SQLPredicate } from './SQL'
+import type { QueryScope, SqlFragment, SQLPredicate } from './SQL'
 import { SQL } from './SQL'
 
 /** Aliases used to compile one collection relation. */
@@ -200,6 +200,7 @@ function sourcePredicate(
   const where = SQL.where(definitions, relationship.name, filter, scope)
   const result = { sql: where.predicate ?? '', values: where.values }
   Object.defineProperty(result, 'predicate', { enumerable: false, value: where.predicate })
+  Object.defineProperty(result, 'pieces', { enumerable: false, value: (where as SqlFragment).pieces })
   return result as typeof where
 }
 

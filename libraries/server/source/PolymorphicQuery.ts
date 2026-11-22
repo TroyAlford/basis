@@ -10,7 +10,7 @@ import { arrayItemField, Predicate } from './Predicate'
 import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope, SqlFragment, SQLPredicate } from './SQL'
-import { SQL } from './SQL'
+import { SQL, sqlConcat, sqlFragment, sqlText } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
 const MAX_REFERENCE_DEPTH = 8
@@ -172,7 +172,7 @@ interface FilterJoinScope {
   /** Consume finite compiler work. */
   consume(units?: number): void,
   /** Append one SQL join to the active relation. */
-  join(sql: string): void,
+  join(sql: SqlFragment | string): void,
 }
 
 /** One canonical physical path branch with its SQL occurrence aliases. */
@@ -524,9 +524,9 @@ function fieldAlias(field: EffectiveFieldDefinition): string {
  */
 class QueryProjection {
   /** Selected SQL column expressions. */
-  readonly columns: string[] = []
+  readonly columns: SqlFragment[] = []
   /** Additional joins required by the projection. */
-  readonly joins: string[] = []
+  readonly joins: SqlFragment[] = []
   /** Root query occurrence. */
   readonly root: EntityContext
   /** Canonical entity definitions. */
@@ -538,7 +538,7 @@ class QueryProjection {
   /** Filter-only expression overrides keyed by logical path. */
   readonly #filterExpressions = new Map<string, string>()
   /** Predicate-only renderers that bind filtered collection count values. */
-  readonly #filterRenders = new Map<string, (bind: (value: BoundScalar) => string) => string>()
+  readonly #filterRenders = new Map<string, (bind: (value: BoundScalar) => SqlFragment) => SqlFragment | string>()
   /** Filter-only resolved fields keyed by logical path. */
   readonly #filterFields = new Map<string, QueryFieldDefinition>()
   /** Reusable collection relation plans keyed by logical collection path. */
@@ -559,8 +559,6 @@ class QueryProjection {
   readonly #budget: ProjectionBudget
   /** Values bound by collection subqueries. */
   readonly values: unknown[] = []
-  /** Starting placeholder index for collection values. */
-  #valueStart = 1
   /** Prefix that keeps nested compiler aliases unique. */
   readonly #aliasPrefix: string
   /** Namespace for CTE definitions in this compiler scope. */
@@ -608,17 +606,17 @@ class QueryProjection {
   /**
    * Build the requested projection paths.
    * @param fields - Effective scalar names or dotted singular-reference paths.
-   * @param valueStart - First placeholder index available to collection queries.
+   * @param _valueStart - Retained value-start compatibility argument.
    * @returns A row hydrator for the requested nested shape.
    * @throws {Error} When a path is invalid or an expansion is not supported.
    */
   build(
     fields: readonly string[],
-    valueStart: number,
+    _valueStart: number,
   ): (row: Record<string, unknown>) => Record<string, unknown> {
+    void _valueStart
     if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
     this.#validateBudget(fields)
-    this.#valueStart = valueStart
     const root = this.#node(this.root, [])
     for (const field of fields) this.#addPath(root, splitFieldPath(field), undefined, 0)
     const nodes: ProjectionNode[] = [root]
@@ -658,7 +656,7 @@ class QueryProjection {
       alias: prefix => this.#nextAlias(prefix),
       cache: this.#filterContexts,
       consume: units => this.#consume(units),
-      join: sql => this.joins.push(sql),
+      join: sql => this.joins.push(typeof sql === 'string' ? sqlText(sql) : sql),
     }
   }
 
@@ -693,7 +691,7 @@ class QueryProjection {
    * @param bind - Optional predicate value binder for filtered counts.
    * @returns Physical SQL expression.
    */
-  expression(field: QueryFieldDefinition, bind?: (value: BoundScalar) => string): string {
+  expression(field: QueryFieldDefinition, bind?: (value: BoundScalar) => SqlFragment): SqlFragment | string {
     const render = this.#filterRenders.get(field.name)
     if (render) {
       if (!bind) throw new Error(`Collection $matched field "${field.name}" is only valid in a predicate`)
@@ -731,7 +729,7 @@ class QueryProjection {
     expression: string,
     field: QueryFieldDefinition,
     identity: boolean,
-    render?: (bind: (value: BoundScalar) => string) => string,
+    render?: (bind: (value: BoundScalar) => SqlFragment) => SqlFragment | string,
   } {
     const resolved = resolvePredicatePath(context.definition, name, {
       definitions: this.#entities,
@@ -982,7 +980,7 @@ class QueryProjection {
     expression: string,
     field: QueryFieldDefinition,
     identity: boolean,
-    render?: (bind: (value: BoundScalar) => string) => string,
+    render?: (bind: (value: BoundScalar) => SqlFragment) => SqlFragment | string,
   } {
     const segments = splitFieldPath(name)
     const ownerSegment = segments[segments.length - 2]
@@ -1016,9 +1014,11 @@ class QueryProjection {
           }
         }
         const count = this.#collectionCountExpression(plan, key)
-        const render = count.render ?? (count.fragment === undefined
-          ? undefined
-          : (bind: (value: BoundScalar) => string) => `(${SQL.bindFragment(count.fragment as SqlFragment, bind)})`)
+        const fragmentRender = (_bind: (value: BoundScalar) => SqlFragment): SqlFragment => {
+          void _bind
+          return sqlFragment`(${count.fragment as SqlFragment})`
+        }
+        const render = count.render ?? (count.fragment === undefined ? undefined : fragmentRender)
         return { count, expression: count.expression, guard, render }
       }
       if (terminal.type !== FieldType.Array) {
@@ -1057,11 +1057,11 @@ class QueryProjection {
         identity: false,
       }
     }
-    const render = (bind: (value: BoundScalar) => string): string => (
-      `CASE ${parts.map(part => {
-        const value = part.render === undefined ? part.expression as string : part.render(bind)
-        return `WHEN ${part.guard} THEN (${value})`
-      }).join(' ')} ELSE 0 END`
+    const render = (bind: (value: BoundScalar) => SqlFragment): SqlFragment => (
+      sqlFragment`CASE ${sqlConcat(parts.map(part => {
+        const value = part.render === undefined ? sqlText(part.expression as string) : part.render(bind)
+        return sqlFragment`WHEN ${sqlText(part.guard)} THEN (${value})`
+      }), ' ')} ELSE 0 END`
     )
     if (filter !== undefined) {
       return { expression: '', field, identity: false, render }
@@ -1069,8 +1069,8 @@ class QueryProjection {
     if (parts.some(part => part.render !== undefined)) {
       return {
         count: {
-          empty: bind => `COALESCE((${render(bind)}), 0) = 0`,
-          exists: bind => `COALESCE((${render(bind)}), 0) > 0`,
+          empty: bind => sqlFragment`COALESCE((${render(bind)}), 0) = 0`,
+          exists: bind => sqlFragment`COALESCE((${render(bind)}), 0) > 0`,
           expression: '',
           render,
         },
@@ -1079,7 +1079,7 @@ class QueryProjection {
         identity: false,
       }
     }
-    const expression = render(() => '')
+    const expression = render(() => sqlText('')).sql
     return {
       count: {
         empty: `COALESCE((${expression}), 0) = 0`,
@@ -1172,12 +1172,12 @@ class QueryProjection {
   #collectionCorrelation(plan: CollectionRelationPlan, alias: string): SqlFragment {
     const predicate = plan.predicate === undefined
       ? undefined
-      : SQL.compose([' AND (', plan.predicate, ')'])
+      : sqlConcat([' AND (', plan.predicate, ')'])
     const rootAlias = plan.rootAlias
     if (rootAlias === undefined) {
       throw new Error(`Entity collection "${plan.collection.name}" has no identity root`)
     }
-    return SQL.compose([
+    return sqlConcat([
       'EXISTS (SELECT 1 FROM ', plan.relation, ' WHERE ', plan.condition, predicate,
       ' AND ', `${quote(rootAlias)}.${quote('id')} = ${quote(alias)}.${quote('id')}`, ')',
     ])
@@ -1230,11 +1230,11 @@ class QueryProjection {
     const identity = scope.expression(scope.field('id'))
     const filterFragment = predicate.sql === ''
       ? undefined
-      : { predicate: predicate.predicate ?? '', sql: predicate.predicate ?? '', values: predicate.values }
-    return SQL.compose([
+      : predicate as SqlFragment
+    return sqlConcat([
       'EXISTS (SELECT 1 FROM ', scope.relation, ' WHERE ', scope.condition,
-      scope.predicate === undefined ? undefined : SQL.compose([' AND (', scope.predicate, ')']),
-      filterFragment === undefined ? undefined : SQL.compose([' AND (', filterFragment, ')']),
+      scope.predicate === undefined ? undefined : sqlConcat([' AND (', scope.predicate, ')']),
+      filterFragment === undefined ? undefined : sqlConcat([' AND (', filterFragment, ')']),
       ' AND ', identity, ' = ', `${quote(alias)}.${quote('id')}`, ')',
     ])
   }
@@ -1248,7 +1248,7 @@ class QueryProjection {
   #collectionMatchedRenderer(
     plan: CollectionRelationPlan,
     filter: string,
-  ): (bind: (value: BoundScalar) => string) => string {
+  ): (bind: (value: BoundScalar) => SqlFragment) => SqlFragment {
     const spec: ProjectedCollectionSpec = {
       collection: plan.collection,
       directivesSeen: true,
@@ -1259,8 +1259,12 @@ class QueryProjection {
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, plan.collection.name, true)
-    const count = collectionIdentityCount(adapter.compile(filter), adapter.identity, adapter.identityUnique)
-    return bind => `(${SQL.bindFragment(count, bind)})`
+    const member = adapter.compile(filter)
+    const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
+    return _bind => {
+      void _bind
+      return sqlFragment`(${count})`
+    }
   }
 
   /**
@@ -1420,14 +1424,14 @@ class QueryProjection {
     const counts = new Map<string, CountScope>()
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
-    const renders = new Map<string, (bind: (value: BoundScalar) => string) => string>()
+    const renders = new Map<string, (bind: (value: BoundScalar) => SqlFragment) => SqlFragment | string>()
     const resolvedFields = new Map<string, QueryFieldDefinition>()
-    const joins: string[] = []
+    const joins: SqlFragment[] = []
     const sink: FilterJoinScope = {
       alias: prefix => this.#nextAlias(prefix),
       cache: new Map(),
       consume: units => this.#consume(units),
-      join: sql => joins.push(sql),
+      join: sql => joins.push(typeof sql === 'string' ? sqlText(sql) : sql),
     }
     const resolve = (path: string): QueryFieldDefinition => {
       const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
@@ -1516,7 +1520,7 @@ class QueryProjection {
       filterCount: path => counts.get(path),
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
       predicate: plan.predicate,
-      get relation() { return [plan.relation, ...joins].join(' ') },
+      get relation() { return sqlConcat([plan.relation, ...joins]).sql },
       get work() { return plan.work + joins.length },
     }
     return scope
@@ -1544,14 +1548,23 @@ class QueryProjection {
       : this.#entityMember(plan, spec, key, true)
     const member = adapter.compile(undefined)
     const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
-    const exists = SQL.compose(['EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
-    const empty = SQL.compose(['NOT EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
+    const exists = sqlConcat(['EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
+    const empty = sqlConcat(['NOT EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const scope: CountScope = {
-      empty: bind => SQL.bindFragment(empty, bind),
-      exists: bind => SQL.bindFragment(exists, bind),
+      empty: _bind => {
+        void _bind
+        return empty
+      },
+      exists: _bind => {
+        void _bind
+        return exists
+      },
       expression: count.values.length === 0 ? `(${count.sql})` : '',
       fragment: count,
-      render: bind => `(${SQL.bindFragment(count, bind)})`,
+      render: _bind => {
+        void _bind
+        return sqlFragment`(${count})`
+      },
     }
     this.#countScopes.set(cacheKey, scope)
     return scope
@@ -1915,10 +1928,10 @@ class QueryProjection {
     if (navigation.target === 'Entity') {
       const alias = this.#nextAlias('r')
       this.#relations.registerAlias('Entity', 'id')
-      this.joins.push(
+      this.joins.push(sqlText(
         `LEFT JOIN ${this.#relations.relation('Entity')} ${quote(alias)} ON ` +
         `${quote(alias)}.${quote('id')} = "${source.context.baseAlias}"."id"`,
-      )
+      ))
       const child = this.#node(rootContext(this.#entities, alias), path)
       this.#identity(child)
       return child
@@ -1927,11 +1940,11 @@ class QueryProjection {
     if (!target) throw new Error(`Unknown target entity "${navigation.target}"`)
     const alias = this.#nextAlias('b')
     this.#relations.registerAlias(target.name, navigation.reference.column)
-    this.joins.push(
+    this.joins.push(sqlText(
       `LEFT JOIN ${this.#relations.relation(target.name)} ${quote(alias)} ON ` +
       `${quote(alias)}.${quote(navigation.reference.column)} = ` +
       `"${source.context.baseAlias}"."id"`,
-    )
+    ))
     const child = this.#node(targetContext(this.#entities, target, alias, alias), path)
     this.#identity(child)
     return child
@@ -2100,21 +2113,19 @@ class QueryProjection {
     const matchedAlias = `${alias}__matched`
     const totalAlias = totalCount === undefined ? matchedAlias : `${alias}__total`
     const lateralAlias = this.#nextAlias('pc')
-    const lateral = SQL.compose([
+    const lateral = sqlConcat([
       'LEFT JOIN LATERAL (SELECT (', items, ') AS "__items", (', matchedCount,
       ') AS "__matched"',
-      totalCount === undefined ? undefined : SQL.compose([', (', totalCount, ') AS "__total"']),
+      totalCount === undefined ? undefined : sqlConcat([', (', totalCount, ') AS "__total"']),
       ') AS ', quote(lateralAlias), ' ON TRUE',
-    ], { startIndex: this.#valueStart + this.values.length })
-    this.joins.push(lateral.sql)
-    this.values.push(...lateral.values)
-    this.columns.push(
-      `${quote(lateralAlias)}.${quote('__items')} AS ${quote(alias)}`,
-      `${quote(lateralAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
-      ...(totalCount === undefined
-        ? []
-        : [`${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`]),
-    )
+    ])
+    this.joins.push(lateral)
+    const lateralRef = sqlText(quote(lateralAlias))
+    this.columns.push(sqlFragment`${lateralRef}.${sqlText(quote('__items'))} AS ${sqlText(quote(alias))}`)
+    this.columns.push(sqlFragment`${lateralRef}.${sqlText(quote('__matched'))} AS ${sqlText(quote(matchedAlias))}`)
+    if (totalCount !== undefined) {
+      this.columns.push(sqlFragment`${lateralRef}.${sqlText(quote('__total'))} AS ${sqlText(quote(totalAlias))}`)
+    }
     node.projectedCollections.push({
       alias,
       hydrate: row => {
@@ -2195,14 +2206,14 @@ class QueryProjection {
         rootAlias: childAlias,
         ...(filter === undefined || filtered ? {} : { where: filter }),
       })
-      let query: SqlFragment = { sql: child.sql, values: child.values }
+      let query: SqlFragment = child as unknown as SqlFragment
       if (projectedEdgeFields.length > 0) {
-        query = SQL.compose([
+        query = sqlConcat([
           'SELECT "__child".*, ', this.#edgeProjection(plan, projectedEdgeFields),
           ' AS "__edge" FROM (', query, ') AS "__child"',
         ])
       }
-      return {
+      const result = {
         ...query,
         hydrate: row => {
           const hydrated = child.hydrate(row)
@@ -2215,6 +2226,8 @@ class QueryProjection {
           )
         },
       }
+      Object.defineProperty(result, 'pieces', { enumerable: false, value: query.pieces })
+      return result
     }
     return {
       compile,
@@ -2254,24 +2267,26 @@ class QueryProjection {
       const where = filter === undefined ? undefined : this.#recordPredicate(plan, filter)
       const predicate = plan.predicate === undefined
         ? undefined
-        : SQL.compose([' AND (', plan.predicate, ')'])
+        : sqlConcat([' AND (', plan.predicate, ')'])
       const filterFragment = where === undefined || where.sql === ''
         ? undefined
-        : { predicate: where.predicate, sql: where.predicate ?? '', values: where.values }
+        : where as SqlFragment
       const filterSql = filterFragment === undefined
         ? undefined
-        : SQL.compose([' AND (', filterFragment, ')'])
-      const query = SQL.compose([
+        : sqlConcat([' AND (', filterFragment, ')'])
+      const query = sqlConcat([
         `SELECT ${selected} FROM ${plan.relation} WHERE ${plan.condition}`,
         predicate,
         filterSql,
       ])
-      return {
+      const result = {
         ...query,
         hydrate: row => Object.fromEntries(
           Object.entries(row).filter(([name]) => !orderOnly.has(name)),
         ),
       }
+      Object.defineProperty(result, 'pieces', { enumerable: false, value: query.pieces })
+      return result
     }
     return {
       compile,
@@ -2327,8 +2342,8 @@ class QueryProjection {
     ))
     const predicate = plan.predicate === undefined
       ? undefined
-      : SQL.compose([' AND (', plan.predicate, ')'])
-    return SQL.compose([
+      : sqlConcat([' AND (', plan.predicate, ')'])
+    return sqlConcat([
       '(SELECT json_build_object(', values.join(', '), ') FROM ',
       `${quote(relationship.name)} ${quote(relationshipAlias)}`,
       ' WHERE ', plan.condition, predicate, ' AND ',
@@ -2345,10 +2360,22 @@ class QueryProjection {
    */
   #addComputedFragment(node: ProjectionNode, name: string, fragment: SqlFragment): void {
     if (node.fieldNames.has(name)) return
-    const start = this.#valueStart + this.values.length
-    const composed = SQL.compose([fragment], { startIndex: start })
-    this.values.push(...composed.values)
-    this.#addComputedScalar(node, name, `(${composed.sql})`)
+    const composed = sqlConcat([fragment])
+    this.#addComputedFragmentColumn(node, name, composed)
+  }
+
+  /**
+   * Select one computed fragment field.
+   * @param node - Projection occurrence.
+   * @param name - Logical computed field name.
+   * @param fragment - Parameterized SQL fragment.
+   */
+  #addComputedFragmentColumn(node: ProjectionNode, name: string, fragment: SqlFragment): void {
+    if (node.fieldNames.has(name)) return
+    const alias = columnAlias(node.path, name)
+    this.columns.push(sqlFragment`(${fragment}) AS ${sqlText(quote(alias))}`)
+    node.fields.push({ alias, name })
+    node.fieldNames.add(name)
   }
 
   /**
@@ -2360,7 +2387,7 @@ class QueryProjection {
   #addComputedScalar(node: ProjectionNode, name: string, expression: string): void {
     if (node.fieldNames.has(name)) return
     const alias = columnAlias(node.path, name)
-    this.columns.push(`${expression} AS ${quote(alias)}`)
+    this.columns.push(sqlText(`${expression} AS ${quote(alias)}`))
     node.fields.push({ alias, name })
     node.fieldNames.add(name)
   }
@@ -2380,7 +2407,7 @@ class QueryProjection {
     this.#consume()
     const alias = columnAlias(node.path, name)
     const expression = this.#expression(node.context, field, false)
-    this.columns.push(`${expression} AS ${quote(alias)}`)
+    this.columns.push(sqlText(`${expression} AS ${quote(alias)}`))
     node.fields.push({ alias, name })
     node.fieldNames.add(name)
   }
@@ -2402,7 +2429,7 @@ class QueryProjection {
         `THEN ${owner}.${quote(fieldAlias(variant.field))}`
     })
     const alias = columnAlias(node.path, field.name)
-    this.columns.push(`CASE ${branches.join(' ')} ELSE NULL END AS ${quote(alias)}`)
+    this.columns.push(sqlText(`CASE ${branches.join(' ')} ELSE NULL END AS ${quote(alias)}`))
     node.fields.push({ alias, name: field.name })
     node.fieldNames.add(field.name)
   }
@@ -2431,9 +2458,9 @@ class QueryProjection {
       : `${node.context.baseAlias}.${quote('entity')}`
     this.#ensureRoot(node.context)
     this.columns.push(
-      `${entityExpression} AS ${quote(entity)}`,
-      `${node.context.baseAlias}.${quote('id')} AS ${quote(id)}`,
-      `${node.context.baseAlias}.${quote('name')} AS ${quote(name)}`,
+      sqlText(`${entityExpression} AS ${quote(entity)}`),
+      sqlText(`${node.context.baseAlias}.${quote('id')} AS ${quote(id)}`),
+      sqlText(`${node.context.baseAlias}.${quote('name')} AS ${quote(name)}`),
     )
     node.identity = { entity, id, name }
   }
@@ -2666,10 +2693,6 @@ export function compilePolymorphicQuery(
     ordering = `ORDER BY ${projection.root.baseAlias}."name" ASC, ` +
       `${projection.root.baseAlias}."id" ASC`
   }
-  const rawStart = predicate.values.length + 1
-  const rawSql = options.rawWhere === undefined
-    ? undefined
-    : SQL.compose([options.rawWhere], { startIndex: rawStart }).sql
   const rawValues = options.rawWhere?.values ?? []
   const hydrate = projection.build(options.fields, predicate.values.length + rawValues.length + 1)
   const rootRelation = projection.relation(definition.name)
@@ -2679,39 +2702,33 @@ export function compilePolymorphicQuery(
     ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
     : []
   const leafFilter = leaves.length === 0
-    ? 'FALSE'
-    : `${projection.root.baseAlias}."entity" IN (${leaves.join(', ')})`
-  const conditions = [
-    ...(definition.abstract ? [leafFilter] : []),
-    ...(predicate.sql === '' ? [] : [predicate.predicate ?? '']),
-    ...(rawSql === undefined ? [] : [rawSql]),
-  ]
+    ? sqlText('FALSE')
+    : sqlText(`${projection.root.baseAlias}."entity" IN (${leaves.join(', ')})`)
+  const conditions: SqlFragment[] = []
+  if (definition.abstract) conditions.push(leafFilter)
+  if (predicate.sql !== '') conditions.push(predicate as SqlFragment)
+  if (options.rawWhere !== undefined) conditions.push(options.rawWhere)
   const whereSql = conditions.length === 0
-    ? ''
+    ? sqlText('')
     : conditions.length === 1
-      ? `WHERE ${conditions[0]}`
-      : `WHERE ${conditions.map(condition => `(${condition})`).join(' AND ')}`
+      ? sqlFragment`WHERE ${conditions[0] as SqlFragment}`
+      : sqlFragment`WHERE ${sqlConcat(conditions.map(condition => sqlFragment`(${condition})`), ' AND ')}`
   const limit = options.limit === undefined ? 25 : options.limit
-  const pagination = SQL.paginate(
-    limit,
-    options.offset ?? 0,
-    predicate.values.length + rawValues.length + projection.values.length,
-  )
-  return {
-    hydrate,
-    sql: [
-      relationDefinitions.length === 0
-        ? ''
-        : `WITH ${relationDefinitions.join(', ')}`,
-      `SELECT ${projection.columns.join(', ')}`,
-      `FROM ${rootRelation} "${projection.root.baseAlias}"`,
-      ...projection.joins,
-      whereSql,
-      ordering,
-      pagination.sql,
-    ].filter(part => part !== '').join(' '),
-    values: [...predicate.values, ...rawValues, ...projection.values, ...pagination.values],
-  }
+  const pagination = SQL.paginate(limit, options.offset ?? 0)
+  const query = sqlConcat([
+    relationDefinitions.length === 0
+      ? sqlText('')
+      : sqlText(`WITH ${relationDefinitions.join(', ')}`),
+    sqlFragment`SELECT ${sqlConcat(projection.columns, ', ')}`,
+    sqlFragment`FROM ${sqlText(rootRelation)} ${sqlText(`"${projection.root.baseAlias}"`)}`,
+    ...projection.joins,
+    whereSql,
+    sqlText(ordering),
+    pagination,
+  ])
+  const compiled = { hydrate, sql: query.sql, values: query.values }
+  Object.defineProperty(compiled, 'pieces', { enumerable: false, value: query.pieces })
+  return compiled
 }
 
 /**
@@ -2920,9 +2937,9 @@ function collectionIdentityCount(
   unique: boolean,
 ): SqlFragment {
   if (unique) {
-    return SQL.compose(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
+    return sqlConcat(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
   }
-  return SQL.compose([
+  return sqlConcat([
     'SELECT count(*)::int FROM (SELECT DISTINCT ON (',
     identityColumns('__member', identity),
     ') * FROM (',
@@ -2953,13 +2970,13 @@ function collectionIdentityPage(
     .map(entry => `${quote('__member')}.${quote(entry.name)} ${entry.direction}`)
     .join(', ')
   if (unique) {
-    const paged = SQL.compose([
+    const paged = sqlConcat([
       'SELECT * FROM (', member, ') AS "__member"',
       order === '' ? undefined : ` ORDER BY ${order}`,
     ])
-    return SQL.compose([paged, SQL.paginate(limit, offset, 0)])
+    return sqlConcat([paged, SQL.paginate(limit, offset, 0)])
   }
-  const distinct = SQL.compose([
+  const distinct = sqlConcat([
     'SELECT DISTINCT ON (', identityColumns('__member', identity), ') * FROM (',
     member,
     ') AS "__member" ORDER BY ', identityColumns('__member', identity),
@@ -2967,11 +2984,11 @@ function collectionIdentityPage(
   const distinctOrder = orderings
     .map(entry => `${quote('__distinct')}.${quote(entry.name)} ${entry.direction}`)
     .join(', ')
-  const paged = SQL.compose([
+  const paged = sqlConcat([
     'SELECT * FROM (', distinct, ') AS "__distinct"',
     distinctOrder === '' ? undefined : ` ORDER BY ${distinctOrder}`,
   ])
-  return SQL.compose([paged, SQL.paginate(limit, offset, 0)])
+  return sqlConcat([paged, SQL.paginate(limit, offset, 0)])
 }
 
 /**
@@ -2987,9 +3004,9 @@ function collectionItems(
   const order = orderings
     .map(entry => `${quote('__item')}.${quote(entry.name)} ${entry.direction}`)
     .join(', ')
-  return SQL.compose([
+  return sqlConcat([
     'SELECT COALESCE(json_agg(row_to_json("__item")',
-    order === '' ? undefined : SQL.compose([' ORDER BY ', order]),
+    order === '' ? undefined : sqlConcat([' ORDER BY ', order]),
     '), \'[]\'::json) FROM (',
     page,
     ') AS "__item"',

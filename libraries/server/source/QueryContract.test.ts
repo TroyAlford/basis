@@ -589,7 +589,7 @@ describe('Query contract', () => {
     expect(setEqual.sql).toContain('"tags" @>')
     expect(setEqual.sql).toContain('"tags" <@')
     expect(setEqual.sql).not.toContain('unnest')
-    expect(setEqual.values).toEqual(['b', 'a', 25, 0])
+    expect(setEqual.values).toEqual(['b', 'a', 'b', 'a', 25, 0])
 
     const json = compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
