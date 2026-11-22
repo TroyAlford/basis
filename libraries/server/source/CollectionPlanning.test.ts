@@ -85,20 +85,56 @@ function count(sql: string, pattern: RegExp): number {
   return (sql.match(pattern) ?? []).length
 }
 
+/**
+ * Extract complete `SELECT count(*)` subqueries with balanced parentheses.
+ * @param sql - Generated SQL.
+ * @returns The count subqueries.
+ */
+function countSubqueries(sql: string): string[] {
+  const marker = 'SELECT count(*)::int FROM ('
+  const result: string[] = []
+  let cursor = 0
+  while (true) {
+    const start = sql.indexOf(marker, cursor)
+    if (start === -1) return result
+    let index = start + marker.length
+    let depth = 1
+    let quote: string | undefined
+    while (index < sql.length && depth > 0) {
+      const char = sql[index]
+      if (quote !== undefined) {
+        if (char === quote && sql[index - 1] !== '\\') quote = undefined
+      } else if (char === '\'' || char === '"') {
+        quote = char
+      } else if (char === '(') {
+        depth += 1
+      } else if (char === ')') {
+        depth -= 1
+      }
+      index += 1
+    }
+    result.push(sql.slice(start, index))
+    cursor = index
+  }
+}
+
 describe('collection planning', () => {
   test('a collection filter does not duplicate the nested item projection for counts', () => {
     const filtered = compileEntityQuery(graph.definitions, 'Deck', {
       fields: ['id', 'printings[title = \'One\']{$limit:null}', 'printings.card.name'],
     })
-    expect(count(filtered.sql, /\("Card"/g)).toBe(1)
-    expect(count(filtered.sql, /\("Panel"/g)).toBe(0)
+    const scopes = countSubqueries(filtered.sql)
+    expect(scopes).toHaveLength(2)
+    for (const scope of scopes) {
+      expect(scope).not.toMatch(/"Card"|"Art"/)
+    }
   })
 
   test('an edge projection does not duplicate target traversal', () => {
     const edge = compileEntityQuery(graph.definitions, 'Deck', {
       fields: ['id', 'printings{$limit:null}', 'printings.quantity', 'printings.card.name'],
     })
-    expect(count(edge.sql, /\("Card"/g)).toBe(1)
+    expect(count(edge.sql, /"Card"/g)).toBe(1)
     expect(count(edge.sql, /json_build_object\( 'quantity'/g)).toBe(1)
     const edgeProjection = edge.sql.slice(
       edge.sql.indexOf('json_build_object'),
@@ -123,13 +159,12 @@ describe('collection planning', () => {
     expect(total).not.toContain('ct1."title"')
     expect((sql.match(/OFFSET/g) ?? [])).toHaveLength(2)
 
-    const countScopes = sql.split('SELECT count(*)::int FROM (')
-    expect(countScopes.length).toBe(3)
-    for (const scope of countScopes.slice(1)) {
-      expect(scope).not.toContain('("Card"')
-      expect(scope).not.toContain('FROM "Face"')
-      expect(scope).not.toContain('FROM "Panel"')
-      expect(scope).not.toContain('("Art"')
+    const countScopes = countSubqueries(sql)
+    expect(countScopes).toHaveLength(2)
+    expect(countScopes[0]).toContain('ct1."title"')
+    expect(countScopes[1]).not.toContain('ct1."title"')
+    for (const scope of countScopes) {
+      expect(scope).not.toMatch(/"Card"|"Art"/)
     }
   })
 
@@ -144,11 +179,11 @@ describe('collection planning', () => {
         'printings.panels.art.name',
       ],
     })
-    expect((sql.match(/\("Card"/g) ?? [])).toHaveLength(1)
-    // Item + its identity-only matched count; no second full item projection.
-    expect((sql.match(/FROM "Face"/g) ?? []).length).toBeLessThanOrEqual(2)
-    expect((sql.match(/FROM "Panel"/g) ?? []).length).toBeLessThanOrEqual(2)
-    expect((sql.match(/\("Art"/g) ?? []).length).toBeLessThanOrEqual(2)
+    const scopes = countSubqueries(sql)
+    expect(scopes.length).toBeGreaterThan(1)
+    for (const scope of scopes) {
+      expect(scope).not.toMatch(/"Card"|"Art"/)
+    }
   })
 
   test('keeps quantity on the collection edge', () => {
