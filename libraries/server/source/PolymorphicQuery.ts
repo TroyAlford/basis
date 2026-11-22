@@ -1225,12 +1225,12 @@ class QueryProjection {
       )
     }
     const predicate = lowered === undefined
-      ? { sql: '', values: [] }
+      ? { predicate: '', sql: '', values: [] }
       : SQL.whereFilter(this.#entities, plan.target.name, lowered, scope)
     const identity = scope.expression(scope.field('id'))
     const filterFragment = predicate.sql === ''
       ? undefined
-      : { sql: predicate.sql.replace(/^WHERE\s+/u, ''), values: predicate.values }
+      : { predicate: predicate.predicate ?? '', sql: predicate.predicate ?? '', values: predicate.values }
     return SQL.compose([
       'EXISTS (SELECT 1 FROM ', scope.relation, ' WHERE ', scope.condition,
       scope.predicate === undefined ? undefined : SQL.compose([' AND (', scope.predicate, ')']),
@@ -1304,7 +1304,7 @@ class QueryProjection {
    * @returns The normalized SQL predicate.
    */
   #recordPredicate(plan: CollectionRelationPlan, filter?: string): ReturnType<typeof SQL.where> {
-    if (filter === undefined) return { sql: '', values: [] }
+    if (filter === undefined) return { predicate: '', sql: '', values: [] }
     const scope = this.#recordScope(plan)
     const normalized = QueryNormalizer.normalize(
       plan.target,
@@ -1314,7 +1314,7 @@ class QueryProjection {
       scope.array,
     ) ?? undefined
     return normalized === undefined
-      ? { sql: '', values: [] }
+      ? { predicate: '', sql: '', values: [] }
       : SQL.whereFilter(this.#entities, plan.target.name, normalized, scope)
   }
 
@@ -2257,7 +2257,7 @@ class QueryProjection {
         : SQL.compose([' AND (', plan.predicate, ')'])
       const filterFragment = where === undefined || where.sql === ''
         ? undefined
-        : { sql: where.sql.replace(/^WHERE\s+/u, ''), values: where.values }
+        : { predicate: where.predicate, sql: where.predicate ?? '', values: where.values }
       const filterSql = filterFragment === undefined
         ? undefined
         : SQL.compose([' AND (', filterFragment, ')'])
@@ -2655,7 +2655,7 @@ export function compilePolymorphicQuery(
     ? undefined
     : PredicateEligibility.lower(entities, synthetic, normalized)
   const predicate = where === undefined
-    ? { sql: '', values: [] }
+    ? { predicate: '', sql: '', values: [] }
     : SQL.whereFilter(entities, definition.name, where, scope)
   let ordering = ''
   if (options.orderBy !== undefined) {
@@ -2683,7 +2683,7 @@ export function compilePolymorphicQuery(
     : `${projection.root.baseAlias}."entity" IN (${leaves.join(', ')})`
   const conditions = [
     ...(definition.abstract ? [leafFilter] : []),
-    ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')]),
+    ...(predicate.sql === '' ? [] : [predicate.predicate ?? '']),
     ...(rawSql === undefined ? [] : [rawSql]),
   ]
   const whereSql = conditions.length === 0

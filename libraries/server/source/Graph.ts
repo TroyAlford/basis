@@ -456,8 +456,14 @@ export class Graph {
       expression: field => literal(valueFor(field.name)),
       field: name => this.#policyPathField(entity, name),
     }
-    const where = SQL.whereFilter(this.definitions, entity.name, grant.predicate as Filter, scope)
-    return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
+    const where = SQL.whereFilter(
+      this.definitions,
+      entity.name,
+      grant.predicate as Filter,
+      scope,
+      value => literal(value),
+    )
+    return `(${where.predicate})`
   }
 
   /**
@@ -1673,8 +1679,14 @@ export class Graph {
       field,
       filterField: field,
     }
-    const where = SQL.whereFilter(this.definitions, entity.name, grant.predicate as Filter, scope)
-    return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
+    const where = SQL.whereFilter(
+      this.definitions,
+      entity.name,
+      grant.predicate as Filter,
+      scope,
+      value => literal(value),
+    )
+    return `(${where.predicate})`
   }
 
   #searchPath(): string {
@@ -2310,16 +2322,6 @@ function literal(value: unknown): string {
     return `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`
   }
   return `'${String(value).replaceAll("'", "''")}'`
-}
-
-/**
- * Inline bound parameters into a policy expression.
- * @param sql - SQL with positional placeholders.
- * @param values - Bound values.
- * @returns SQL with literals.
- */
-function inline(sql: string, values: readonly unknown[]): string {
-  return sql.replace(/\$(\d+)/gu, (_match, index: string) => literal(values[Number(index) - 1]))
 }
 
 /**

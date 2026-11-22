@@ -45,6 +45,8 @@ export interface SQLSelection {
 
 /** A validated parameterized predicate clause. */
 export interface SQLPredicate {
+  /** Predicate expression without the `WHERE` keyword. */
+  readonly predicate?: string,
   /** Quoted PostgreSQL `WHERE` clause, or an empty string. */
   readonly sql: string,
   /** Values for the `$1`, `$2`, … placeholders. */
@@ -311,8 +313,25 @@ function whereClause(
     }
   })
   const filter = Predicate.normalize(entity, where, resolve, scope?.collection, array)
-  if (!filter) return { sql: '', values: [] }
+  if (!filter) return predicateResult('', [], '')
   return whereFilter(entities, entityName, filter, scope)
+}
+
+/**
+ * Build one predicate result with a non-enumerable bare expression.
+ * @param sql - Complete `WHERE` clause.
+ * @param values - Bound values.
+ * @param predicate - Expression without `WHERE`.
+ * @returns Predicate result.
+ */
+function predicateResult(
+  sql: string,
+  values: readonly BoundScalar[],
+  predicate: string,
+): SQLPredicate {
+  const result = { sql, values }
+  Object.defineProperty(result, 'predicate', { enumerable: false, value: predicate })
+  return result as SQLPredicate
 }
 
 /**
@@ -321,6 +340,7 @@ function whereClause(
  * @param entityName - Exact entity name.
  * @param filter - Canonical normalized filter.
  * @param scope - Optional effective-field expressions for polymorphic queries.
+ * @param literal - Optional renderer for literal policy SQL.
  * @returns The quoted `WHERE` clause and its parameter values.
  * @throws {Error} When a field, operator, or value is invalid.
  */
@@ -329,6 +349,7 @@ function whereFilter(
   entityName: string,
   filter: Filter,
   scope?: QueryScope,
+  literal?: (value: BoundScalar) => string,
 ): SQLPredicate {
   const entity = scope?.definition ?? definition(entities, entityName)
   const array = scope?.array ?? (name => {
@@ -345,6 +366,7 @@ function whereFilter(
   const values: BoundScalar[] = []
   const bind = (value: BoundScalar): string => {
     if (value === ACTOR_FIELD_NAME) return ACTOR_SQL
+    if (literal !== undefined) return literal(value)
     values.push(value)
     return `$${values.length}`
   }
@@ -528,7 +550,8 @@ function whereFilter(
     return requirements.join(' AND ')
   }
 
-  return { sql: `WHERE ${compile(filter, base)}`, values }
+  const predicate = compile(filter, base)
+  return predicateResult(`WHERE ${predicate}`, values, predicate)
 }
 
 /**

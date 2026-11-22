@@ -198,7 +198,9 @@ function sourcePredicate(
     ? filters[0] as Filter
     : { filters, operator: Operator.Logical.And }
   const where = SQL.where(definitions, relationship.name, filter, scope)
-  return { sql: where.sql.replace(/^WHERE\s+/u, ''), values: where.values }
+  const result = { sql: where.predicate ?? '', values: where.values }
+  Object.defineProperty(result, 'predicate', { enumerable: false, value: where.predicate })
+  return result as typeof where
 }
 
 /**
