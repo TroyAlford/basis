@@ -1,5 +1,6 @@
 /* eslint-disable @stylistic/max-len -- Embedded fixture source strings intentionally stay single-line. */
 import { afterAll, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { useApplication } from './application'
@@ -44,6 +45,7 @@ async function fixture(): Promise<string> {
     'export let value = 1',
     'export function bump() { value += 1; return value }',
     'export const named = "named-live"',
+    'export const vendorMarker = "vendor-stable-marker"',
     'export default "default-live"',
     '',
   ].join('\n'))
@@ -82,7 +84,7 @@ async function fixture(): Promise<string> {
   await writeSource(root, 'src/app.tsx', [
     'import * as React from "react"',
     'import { createRoot } from "react-dom/client"',
-    'import defaultLive, { named, value, bump } from "live-vendor"',
+    'import defaultLive, { named, value, bump, vendorMarker } from "live-vendor"',
     'import * as liveNamespace from "live-vendor"',
     'import "side-effects"',
     'import { sideEffectValue } from "side-effects"',
@@ -99,6 +101,7 @@ async function fixture(): Promise<string> {
     '    React.createElement("p", { "data-testid": "imports" }, `${defaultLive} ${named} ${liveNamespace.named}`),',
     '    React.createElement("p", { "data-testid": "side" }, `${sideEffectValue} ${globalThis.__sideEffectCount}`),',
     '    React.createElement("p", { "data-testid": "reexport" }, `${reexportLabel} ${reexportedValue}`),',
+    '    React.createElement("p", { "data-testid": "vendor-marker" }, vendorMarker),',
     '    React.createElement(Shared),',
     '    React.createElement(Second),',
     '    React.createElement("button", { "data-testid": "bump", onClick: () => { bump(); reexportedBump(); setTick(tick + 1) } }, "bump"),',
@@ -168,16 +171,45 @@ Bun.serve({
   return root
 }
 
+interface ChunkInfo {
+  bytes: number,
+  hash: string,
+  markers: string[],
+}
+
 interface AssetSnapshot {
-  assets: Record<string, number>,
+  chunks: Record<string, ChunkInfo>,
   firstInteractionMs: number,
-  markers: Record<string, string>,
   requests: number,
   startupMs: number,
 }
 
 /**
- * Load the app in a real browser and collect JS responses and interaction.
+ * Classify a completed JavaScript response by stable content markers.
+ * @param text - Response body decoded as text.
+ * @returns The recognized markers.
+ */
+function classifyChunk(text: string): string[] {
+  return [
+    text.includes('react.element') ? 'react' : '',
+    text.includes('vendor-stable-marker') ? 'vendor' : '',
+    text.includes('side-effect-ok') ? 'side-effects' : '',
+    text.includes('data-testid') ? 'app' : '',
+  ].filter(Boolean)
+}
+
+/**
+ * Hash the completed bytes of one response.
+ * @param body - Response body bytes.
+ * @returns SHA-256 hex digest.
+ */
+function digest(body: Uint8Array): string {
+  return createHash('sha256').update(body).digest('hex')
+}
+
+/**
+ * Load the client-rendered app in a real browser. This fixture uses
+ * `createRoot`, not SSR hydration, and does not claim SSR compatibility.
  * @param root - Fixture root.
  * @param entry - Server entry.
  * @param phase - Application identity phase for restart isolation.
@@ -185,7 +217,7 @@ interface AssetSnapshot {
  * @param expectedLabel - Expected heading prefix.
  * @param expectedDefault - Expected default import value.
  * @param expectedNamed - Expected named/namespace import value.
- * @returns Browser and asset observations.
+ * @returns Completed browser-response observations.
  */
 async function observe(root: string, entry: string, phase: string, expectedValue = 1, expectedLabel = 'Native vendor', expectedDefault = 'default-live', expectedNamed = 'named-live'): Promise<AssetSnapshot> {
   const started = performance.now()
@@ -197,8 +229,8 @@ async function observe(root: string, entry: string, phase: string, expectedValue
   })
   const startupMs = performance.now() - started
   try {
-    const assets: Record<string, number> = {}
-    const markers: Record<string, string> = {}
+    const chunks: Record<string, ChunkInfo> = {}
+    const completed: Promise<void>[] = []
     const errors: string[] = []
     let firstInteractionMs = 0
     let requests = 0
@@ -206,22 +238,23 @@ async function observe(root: string, entry: string, phase: string, expectedValue
       init: page => {
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
         page.on('pageerror', error => { errors.push(error.message) })
-        page.on('request', request => {
-          if (!request.url().endsWith('.js') && !request.url().includes('/chunk-')) return
-          requests += 1
-          void request.response().then(async response => {
-            if (!response) return
+        page.on('response', response => {
+          const url = response.url()
+          if (!url.endsWith('.js') && !url.includes('/chunk-')) return
+          completed.push((async () => {
+            await response.finished()
+            if (!response.ok()) return
             const body = await response.body().catch(() => null)
             if (!body) return
             const bytes = new Uint8Array(body)
-            assets[request.url()] = bytes.byteLength
             const text = new TextDecoder().decode(bytes)
-            markers[request.url()] = [
-              text.includes('react.element') ? 'react' : '',
-              text.includes('named-live') ? 'live-vendor' : '',
-              text.includes('side-effect-ok') ? 'side-effects' : '',
-            ].filter(Boolean).join(',')
-          })
+            chunks[new URL(url).pathname] = {
+              bytes: bytes.byteLength,
+              hash: digest(bytes),
+              markers: classifyChunk(text),
+            }
+            requests += 1
+          })())
         })
       },
     }, async page => {
@@ -230,6 +263,7 @@ async function observe(root: string, entry: string, phase: string, expectedValue
       expect(await page.textContent('[data-testid="imports"]')).toBe(`${expectedDefault} ${expectedNamed} ${expectedNamed}`)
       expect(await page.textContent('[data-testid="side"]')).toBe('side-effect-ok 1')
       expect(await page.textContent('[data-testid="reexport"]')).toBe(`re-export-ok ${expectedValue}`)
+      expect(await page.textContent('[data-testid="vendor-marker"]')).toBe('vendor-stable-marker')
       firstInteractionMs = performance.now() - started
       await page.click('[data-testid="bump"]')
       await Bun.sleep(500)
@@ -247,10 +281,24 @@ async function observe(root: string, entry: string, phase: string, expectedValue
       await page.click('[data-testid="lazy"]')
       await page.waitForFunction(() => document.querySelector('[data-testid="lazy-result"]')?.textContent === 'lazy-ok')
     })
-    return { assets, firstInteractionMs, markers, requests, startupMs }
+    await Promise.all(completed)
+    return { chunks, firstInteractionMs, requests, startupMs }
   } finally {
     await app.stop()
   }
+}
+
+/**
+ * Get hashes of chunks carrying one marker.
+ * @param snapshot - Completed response snapshot.
+ * @param marker - Marker to select.
+ * @returns Sorted hashes.
+ */
+function hashes(snapshot: AssetSnapshot, marker: string): string[] {
+  return Object.values(snapshot.chunks)
+    .filter(chunk => chunk.markers.includes(marker))
+    .map(chunk => chunk.hash)
+    .sort()
 }
 
 test('Experiment A: native Bun HTML production identity', async () => {
@@ -265,13 +313,17 @@ test('Experiment A: native Bun HTML production identity', async () => {
     'export let value = 10',
     'export function bump() { value += 1; return value }',
     'export const named = "named-updated"',
+    'export const vendorMarker = "vendor-stable-marker"',
     'export default "default-updated"',
     '',
   ].join('\n'))
   const dependencyChanged = await observe(root, './serve-a.ts', 'dependency-changed', 10, 'Native vendor', 'default-updated', 'named-updated')
-  expect(first.requests).toBeGreaterThan(0)
-  expect(dependencyChanged.assets).not.toEqual(appChanged.assets)
-  process.stdout.write(`[native-vendor] A first=${JSON.stringify(first)} app=${JSON.stringify(appChanged)} dependency=${JSON.stringify(dependencyChanged)}\\n`)
+  expect(first.requests).toBe(1)
+  expect(Object.keys(first.chunks)).toHaveLength(1)
+  expect(hashes(appChanged, 'vendor')).not.toEqual(hashes(first, 'vendor'))
+  expect(hashes(appChanged, 'app')).not.toEqual(hashes(first, 'app'))
+  expect(hashes(dependencyChanged, 'app')).not.toEqual(hashes(appChanged, 'app'))
+  process.stdout.write(`[native-vendor] A first=${JSON.stringify(first.chunks)} app=${JSON.stringify(appChanged.chunks)} dependency=${JSON.stringify(dependencyChanged.chunks)}\n`)
 }, 120_000)
 
 test('Experiment B: native Bun startup splitting identity', async () => {
@@ -286,13 +338,20 @@ test('Experiment B: native Bun startup splitting identity', async () => {
     'export let value = 10',
     'export function bump() { value += 1; return value }',
     'export const named = "named-updated"',
+    'export const vendorMarker = "vendor-stable-marker"',
     'export default "default-updated"',
     '',
   ].join('\n'))
   const dependencyChanged = await observe(root, './serve-b.ts', 'dependency-changed', 10, 'Native vendor', 'default-updated', 'named-updated')
-  expect(first.requests).toBeGreaterThan(0)
-  expect(dependencyChanged.assets).not.toEqual(appChanged.assets)
-  process.stdout.write(`[native-vendor] B first=${JSON.stringify(first)} app=${JSON.stringify(appChanged)} dependency=${JSON.stringify(dependencyChanged)}\\n`)
+  expect(first.requests).toBeGreaterThan(1)
+  const vendorFirst = hashes(first, 'vendor')
+  const vendorAfterApp = hashes(appChanged, 'vendor')
+  const vendorAfterDependency = hashes(dependencyChanged, 'vendor')
+  expect(vendorFirst.length).toBeGreaterThan(0)
+  expect(vendorAfterApp).toEqual(vendorFirst)
+  expect(vendorAfterDependency).not.toEqual(vendorAfterApp)
+  expect(hashes(appChanged, 'app')).not.toEqual(hashes(first, 'app'))
+  process.stdout.write(`[native-vendor] B first=${JSON.stringify(first.chunks)} app=${JSON.stringify(appChanged.chunks)} dependency=${JSON.stringify(dependencyChanged.chunks)}\n`)
 }, 120_000)
 
 test('Current Basis vendor baseline (existing managed fixture)', async () => {
