@@ -274,4 +274,4 @@ The leaf-authorized CTE design cannot yet be implemented against the current res
 
 PostgreSQL privileges are not join-context sensitive. A security-definer function is excluded by the architectural contract; a view with invoker rights still needs the base grant, while an owner-rights view needs a second authorization predicate/registry. No RLS or Graph authorization change has been made.
 
-Operator approval is required for the smallest viable ancestor-read boundary: a controlled ancestor projection view, denormalized inherited fields on concrete leaves, or a separate privileged execution role.
+Operator approval is required for the smallest viable ancestor-read boundary. The preferred model is a privilege-separated trusted Basis execution role plus a separate untrusted SQL role with no domain-table access. A controlled ancestor projection view is a fallback only if the role split cannot be made operationally safe.

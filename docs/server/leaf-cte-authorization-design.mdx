@@ -1,0 +1,194 @@
+---
+title: Leaf-Authorized CTE Authorization Design
+---
+
+# Leaf-Authorized CTE Authorization Design
+
+Status: design gate only. No query compiler, Graph authorization, RLS, MTG, or migration change is included in this document.
+
+## Current role and SQL evidence
+
+The managed database currently has a restricted application login role `basis_app`, a database owner role, and no separate trusted query executor. The test fixture reports:
+
+```text
+current_user = basis_app
+session_user = basis
+current_schema = fixture schema
+Entity SELECT privilege = true
+Entity RLS = enabled
+Entity force RLS = true
+Entity owner = basis
+basis_app superuser = false
+basis_app BYPASSRLS = false
+```
+
+`ManagedPostgresService.provisionApplicationRole` creates `basis_app` with `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`. `Database.sql` exposes the same connection's raw Bun SQL client. `Database.tx` exposes raw SQL inside a transaction. `Database.query` also uses that connection and sets `actor.id` through `set_config`. An arbitrary caller with raw SQL can change `actor.id` itself.
+
+The current leaf-only policy proposal therefore cannot be made safe by changing RLS alone. The execution role and SQL entry surface must change.
+
+## Proposed privilege model
+
+The recommended model is:
+
+- `basis_owner` or the existing database owner: NOLOGIN schema owner, migrations and trusted operational DDL only.
+- `basis_executor`: LOGIN role used only by trusted Basis query/mutation machinery. It has ancestor read privileges, no `SUPERUSER`, no `BYPASSRLS`, and is not the table owner. Leaf RLS still applies to it.
+- `basis_app`: LOGIN role used by untrusted application SQL. It has no domain-table access and cannot establish a trusted actor context. It is never granted membership in `basis_executor`.
+
+The important boundary is not whether a statement is written by Basis. It is whether the role submitting the statement can submit arbitrary SQL and whether it can establish actor identity.
+
+### Illustrative DDL
+
+```sql
+CREATE ROLE basis_executor LOGIN PASSWORD :'executor_password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+
+CREATE ROLE basis_app LOGIN PASSWORD :'app_password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+
+GRANT CONNECT ON DATABASE basis TO basis_executor, basis_app;
+GRANT USAGE ON SCHEMA public, basis TO basis_executor;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON ALL TABLES IN SCHEMA public
+  TO basis_executor;
+
+-- Untrusted raw SQL has no domain access.
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM basis_app;
+REVOKE ALL ON ALL TABLES IN SCHEMA basis FROM basis_app;
+GRANT USAGE ON SCHEMA basis TO basis_app;
+
+-- Ancestor storage is not an authorization boundary for the trusted executor.
+ALTER TABLE "Entity" DISABLE ROW LEVEL SECURITY;
+-- Concrete leaf RLS remains enabled and forced.
+```
+
+The final grants must be generated from the canonical Graph and reviewed as a release artifact. They are not proposed as hand-maintained production SQL.
+
+## Execution flow
+
+1. The HTTP request resolves one actor identity through the trusted Basis request context.
+2. `Database.query` compiles the query against the canonical Graph and uses the `basis_executor` pool.
+3. It starts a transaction and sets the actor context; the actor value comes only from the trusted request context, never from request SQL.
+4. The compiler emits leaf-rooted authorized CTEs over `basis_executor`; concrete leaf RLS applies inside the CTE.
+5. Untrusted route code has no `basis_executor` credential and no raw domain SQL client.
+6. If an application must execute raw SQL, it uses `basis_app`; that role can read no domain table and therefore cannot read ancestor storage or spoof an actor into a readable leaf.
+
+`Database.sql` and raw `Database.tx` cannot remain on the untrusted route context under the recommended model. Trusted Graph mutations and compiled queries remain on the `basis_executor` boundary.
+
+## CTE shape
+
+```sql
+WITH authorized_printings AS NOT MATERIALIZED (
+  SELECT
+    leaf.id,
+    printing."card.id",
+    root.name
+  FROM "CustomPrinting" leaf
+  INNER JOIN "Printing" printing ON printing.id = leaf.id
+  INNER JOIN "Entity" root ON root.id = leaf.id
+)
+SELECT ...
+FROM authorized_printings p;
+```
+
+The leaf table is the authorization boundary. `Printing` and `Entity` are inherited storage only. Abstract targets compose one authorized CTE per concrete leaf with `UNION ALL` and expose the runtime discriminator.
+
+## Function audit
+
+`graph.physicalSchema('basis_app', true)` for the MTG Graph produces 47 Graph-generated functions:
+
+### Read/policy predicate helpers (23)
+
+```text
+policy_1e175393fd06f1a3  policy_97c4a4599d8c2d4e  policy_ca6043cfc6a9d015
+policy_2cc482dbeb97c598  policy_32439144dd2d0138  policy_0b50ad0e2b50ed6e
+policy_b99f0e40151a2aa9  policy_87b7aab52491799c  policy_13e4cd233703c7aa
+policy_0f7a0bc06ef57676  policy_b3ce5a724ee13b9d  policy_53675481dd948c2a
+policy_52bb4c52f70ee762  policy_ba3de7da5c7a8d1f  policy_d666dc49ee2650f7
+policy_027bcea502112afa  policy_1d738c470e4b4b56  policy_52f4c43cd2bfbc24
+policy_c8edd36e15976df3  policy_107463184268b309  policy_75a8be1c22b3f201
+policy_a8bbbc7597627481  policy_ba5bc4346a9b4d44
+```
+
+Callers are the generated SELECT, UPDATE, and DELETE policies on concrete and relationship tables. They currently evaluate complex policy predicates and are granted to `basis_app`. Replacement must inline the applicable predicate into the concrete leaf policy; no helper may survive merely to avoid recompilation.
+
+### Create-authorization helpers (20)
+
+```text
+policy_create_14736a2eb9f4159f  policy_create_c6274d5ca34d4c61
+policy_create_b512d97e7cbf97c2  policy_create_c2574ca44f76a0b0
+policy_create_87bb59ba2f92f2a5  policy_create_889eacd6e13fa54a
+policy_create_2776badeaed166bd  policy_create_6156e71a862c44d6
+policy_create_92ab15447ebd2cd4  policy_create_29c64e822fb4d956
+policy_create_95f0adb5665105d5  policy_create_75d449b14aa525ee
+policy_create_1b91331ae7f29fa6  policy_create_75df3579c73089e3
+policy_create_8e738ea5bdd76b1c  policy_create_1503916a2ab2b0fd
+policy_create_9610e2d99c7c1e9a  policy_create_8bb348dc3b97272e
+policy_create_10616fc5a9945399  policy_create_d82d5ba65f99c5dd
+```
+
+Callers are the generated INSERT policies. They evaluate proposed-row values and inherited-field rules. Replacement must use a direct `WITH CHECK` expression or a correct transaction-final check, with proof that create authorization is unchanged.
+
+### Validation helper (1)
+
+```text
+validate_f60ddd47d53678ec
+```
+
+This function enforces one Graph validation constraint. Replacement must be a declarative constraint or correctly scoped transaction SQL. Deleting it without an equivalent failing test is not permitted.
+
+### Entity lifecycle triggers (3)
+
+```text
+Entity_validate_leaf
+Entity_validate_leaf_row
+Entity_leaf_immutable
+```
+
+These enforce MTI root/leaf integrity, not entity read authorization. They remain in the audit because the final architecture forbids Graph-specific functions unless explicitly approved. Replacement requires an equivalent constraint/trigger decision.
+
+### Primitive functions outside the Graph function list
+
+- `basis.has_role(text, text)` remains provisional pending a separate audit.
+- `basis.resolve_identity(text, text)` is installed by Basis bootstrap, not authored by this Graph.
+
+## Executable privilege tests required before implementation
+
+```sql
+-- 1. Untrusted role cannot read ancestors.
+SET ROLE basis_app;
+SELECT id, name FROM "Entity"; -- must fail: permission denied
+
+-- 2. Untrusted role cannot establish a trusted actor and read a leaf.
+SET ROLE basis_app;
+SELECT set_config('actor.id', '<another-user>', false);
+SELECT * FROM "CustomPrinting"; -- must fail: no table privilege
+
+-- 3. Trusted executor can run a leaf CTE under leaf RLS.
+SET ROLE basis_executor;
+WITH authorized AS (
+  SELECT leaf.id, root.name
+  FROM "CustomPrinting" leaf
+  INNER JOIN "Entity" root ON root.id = leaf.id
+)
+SELECT * FROM authorized; -- authorized leaves only
+
+-- 4. Leaf RLS is still active for the trusted executor.
+SELECT has_table_privilege('basis_executor', '"CustomPrinting"', 'SELECT');
+SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = '"CustomPrinting"'::regclass;
+
+-- 5. Trusted executor is not owner, superuser, or BYPASSRLS.
+SELECT r.rolsuper, r.rolbypassrls, pg_get_userbyid(c.relowner)
+FROM pg_roles r
+JOIN pg_class c ON c.oid = '"CustomPrinting"'::regclass
+WHERE r.rolname = 'basis_executor';
+```
+
+## Decision required before implementation
+
+The operator must settle whether arbitrary raw application SQL remains available.
+
+- **Recommended: no raw domain SQL from untrusted application code.** `Database.query` and Graph-native mutations use `basis_executor`; `basis_app` has no domain-table access. This is the smallest safe boundary.
+- **If arbitrary raw SQL must remain**, it needs a separate privilege boundary with no readable domain tables. A raw role that can read leaves AND set `actor.id` can spoof the actor. A security-definer function is excluded by the architecture; ancestor RLS and denormalization are rejected alternatives.
+
+No implementation may start until this decision and the generated grant review are approved.
