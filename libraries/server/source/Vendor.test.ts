@@ -1,7 +1,7 @@
 import { tempDirectory, useApplication } from 'basis/testing'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RawSourceMap } from 'source-map-js'
 import { SourceMapConsumer } from 'source-map-js'
@@ -241,4 +241,77 @@ describe('vendor assets', () => {
       await rm(root, { force: true, recursive: true })
     }
   })
+
+  test('keeps the vendor artifact fixed until the server restarts', async () => {
+    const root = tempDirectory('basis-vendor-restart-')
+    const modules = join(root, 'node_modules')
+    const probe = join(modules, 'vendor-probe')
+
+    await mkdir(probe, { recursive: true })
+    for (const name of await readdir(join(repoRoot, 'node_modules'))) {
+      if (name === '.bin' || name === 'vendor-probe') continue
+      await symlink(join(repoRoot, 'node_modules', name), join(modules, name), 'dir')
+    }
+    await writeFile(join(probe, 'package.json'), JSON.stringify({
+      main: 'index.js',
+      name: 'vendor-probe',
+      type: 'module',
+    }))
+    await writeFile(join(probe, 'index.js'), 'export const probe = "one"\n')
+    await writeFile(join(root, 'bunfig.toml'), '[serve.static]\nplugins = ["basis/serve"]\n')
+    await writeFile(join(root, 'serve.ts'), `
+import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
+
+new Server().root(import.meta.dir).main('./Application.tsx').start()
+    `.trim())
+    await writeFile(join(root, 'Application.tsx'), `
+import { Component } from ${JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))}
+import { probe } from 'vendor-probe'
+
+export class Application extends Component {
+  content() {
+    return <div id="probe">{probe}</div>
+  }
+}
+    `.trim())
+
+    const readVendor = async (url: string): Promise<string> => {
+      const html = await Bun.fetch(url).then(response => response.text())
+      const source = /<script[^>]+src="([^"]*vendor[^"]*)"/.exec(html)?.[1]
+      if (!source) throw new Error(`missing vendor script: ${html.slice(0, 2000)}`)
+      return Bun.fetch(new URL(source, url)).then(response => response.text())
+    }
+
+    try {
+      const first = await useApplication({
+        cwd: root,
+        entry: './serve.ts',
+        env: { VENDOR_PHASE: 'first' },
+        readyPath: '/',
+      })
+      try {
+        expect(await Bun.fetch(first.url).then(response => response.text())).toContain('one')
+        expect(await readVendor(first.url)).toContain('one')
+        await writeFile(join(probe, 'index.js'), 'export const probe = "two"\n')
+        expect(await readVendor(first.url)).toContain('one')
+      } finally {
+        await first.stop()
+      }
+
+      const second = await useApplication({
+        cwd: root,
+        entry: './serve.ts',
+        env: { VENDOR_PHASE: 'second' },
+        readyPath: '/',
+      })
+      try {
+        expect(await Bun.fetch(second.url).then(response => response.text())).toContain('two')
+        expect(await readVendor(second.url)).toContain('two')
+      } finally {
+        await second.stop()
+      }
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  }, 120_000)
 })
