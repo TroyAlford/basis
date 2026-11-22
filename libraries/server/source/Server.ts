@@ -13,7 +13,7 @@ import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
-import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
+import { assertBasisServerCompatible, HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
@@ -838,6 +838,7 @@ export class Server<
     port = Number(Bun.env.PORT ?? 80),
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): this => {
+    assertBasisServerCompatible()
     if (logger) this.#logger = logger
     this.#version = version
     if (!this.#assets) {

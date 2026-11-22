@@ -26,7 +26,35 @@ The root `package.json` is the public facade. Supported import surfaces are `bas
 
 ## Bun version
 
-Basis installs on Bun 1.4.x. The type-check commands require Bun **1.4.3 or newer**; the package engine records that minimum, but `bun add` does not enforce it. An older runtime installs successfully, then `basis typecheck`, `basis lint`, and `basis compliance` stop with an upgrade instruction. Run `bun upgrade` to move to a supported release.
+Basis Server and its production HMR pipeline require **Bun 1.4.6 or newer**, or the exact approved canary runtime:
+
+- npm distribution: `bun@1.4.5-canary.20261121.1`
+- `bun --version`: `1.4.6`
+- `bun --revision`: `1.4.6-canary.1+b15f51302`
+
+The install hook and `Server.start()` reject a known-incompatible runtime with an actionable error, and `basis doctor` reports the same requirement. Future stable Bun releases are accepted by version; unverified prereleases are rejected even when their numeric version is newer. The separate `bun --check` type-check capability still requires Bun 1.4.3 or newer.
+
+Install the approved canary through mise’s npm installer rather than mise’s default aube backend. Aube omits Bun’s optional platform package and does not run its postinstall:
+
+```toml
+[settings]
+npm.package_manager = "npm"
+
+[tools]
+"npm:bun" = {
+  allow_builds = true,
+  npm_args = "--include=optional --ignore-scripts=false",
+  version = "1.4.5-canary.20261121.1",
+}
+```
+
+```bash
+mise install
+mise exec -- bun --revision
+# 1.4.6-canary.1+b15f51302
+```
+
+The equivalent direct install is `npm install -g bun@1.4.5-canary.20261121.1`; npm must run the package postinstall so Bun’s platform binary is unpacked. Once a stable Bun release at or above 1.4.6 is verified, `bun upgrade` is the normal path. The package engine records the server minimum, but Bun does not guarantee engine enforcement, so the install hook and server gate remain authoritative.
 
 ## Host capabilities
 

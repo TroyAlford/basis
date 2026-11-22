@@ -3,7 +3,7 @@ import { Logger } from 'basis/logger'
 import { run } from 'basis/utilities'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { bunCheckUnsupportedReason } from './bun-version'
+import { basisServerUnsupportedReason, bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
 import { emit } from './emit'
 import { applyBasisPatches } from './patches/install'
@@ -314,6 +314,14 @@ const doctor = (): number => {
   } else {
     failures += 1
     logger.info(unsupportedBun)
+  }
+
+  const unsupportedServerBun = basisServerUnsupportedReason()
+  if (unsupportedServerBun === null) {
+    logger.info(`[basis] bun ${Bun.version} server ok`)
+  } else {
+    failures += 1
+    logger.info(unsupportedServerBun)
   }
 
   for (const subpath of REQUIRED_EXPORTS) {

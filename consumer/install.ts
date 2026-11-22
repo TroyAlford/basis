@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { basisServerUnsupportedReason } from './bun-version'
 import { requireHostDependencies } from './host-dependencies'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
@@ -52,6 +53,12 @@ const configureDevelopmentHMR = (rootDir: string, basisDir: string): void => {
 const main = (): void => {
   const basisDir = join(import.meta.dir, '..')
   const rootDir = resolveInstallRoot(basisDir)
+
+  const unsupportedBun = basisServerUnsupportedReason()
+  if (unsupportedBun !== null) {
+    process.stderr.write(`${unsupportedBun}\n`)
+    process.exit(1)
+  }
 
   try {
     const host = requireHostDependencies(rootDir)
