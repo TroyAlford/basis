@@ -263,3 +263,15 @@ All corrected focused tests pass: 11 compiler/e2e tests across `CollectionPlanni
 | Deterministic SQL and bindings | `CollectionPlanning.test.ts` | PASS | PASS |
 | Unrelated entity definitions do not alter SQL | `CollectionPlanning.test.ts` | PASS | PASS |
 | Authorization unresolved and unchanged | Audit limitations | N/A | PASS |
+
+## Ancestor-read privilege blocker
+
+The leaf-authorized CTE design cannot yet be implemented against the current restricted role without changing the ancestor privilege contract.
+
+- With `Entity` RLS enabled and no root read policy, `FROM "CustomPrinting" leaf INNER JOIN "Entity" root ON root.id = leaf.id` returns zero rows under the app role.
+- Revoking `SELECT` on `Entity` makes the same join fail with `permission denied for table "Entity"`.
+- Granting `SELECT` and disabling or bypassing RLS lets the app role read arbitrary ancestor rows directly.
+
+PostgreSQL privileges are not join-context sensitive. A security-definer function is excluded by the architectural contract; a view with invoker rights still needs the base grant, while an owner-rights view needs a second authorization predicate/registry. No RLS or Graph authorization change has been made.
+
+Operator approval is required for the smallest viable ancestor-read boundary: a controlled ancestor projection view, denormalized inherited fields on concrete leaves, or a separate privileged execution role.
