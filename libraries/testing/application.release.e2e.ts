@@ -28,9 +28,15 @@ function port(): number {
  * @param value - Port to bind.
  * @param version - Release version to serve.
  * @param delay - Readiness delay in milliseconds.
+ * @param publicOrigin - Trusted public origin for vendor script URLs.
  * @returns The child process.
  */
-async function start(value: number, version: string, delay = 0): Promise<ReturnType<typeof Bun.spawn>> {
+async function start(
+  value: number,
+  version: string,
+  delay = 0,
+  publicOrigin = '',
+): Promise<ReturnType<typeof Bun.spawn>> {
   const child = Bun.spawn([process.execPath, './serve.ts'], {
     cwd: fixture,
     env: {
@@ -38,6 +44,7 @@ async function start(value: number, version: string, delay = 0): Promise<ReturnT
       APP_VERSION: version,
       NODE_ENV: 'production',
       PORT: String(value),
+      PUBLIC_ORIGIN: publicOrigin,
       READY_DELAY: String(delay),
     },
     stderr: 'pipe',
@@ -159,6 +166,36 @@ test('delayed readiness waits for the new release before one reload', async () =
   }
 }, 60_000)
 
+test('hydrates through an HTTPS reverse proxy using the configured public origin', async () => {
+  const basisPort = port()
+  const proxyPort = port()
+  const certificate = await Bun.file(join(fixture, '..', '..', 'config', 'tls', 'certificate.pem')).text()
+  const key = await Bun.file(join(fixture, '..', '..', 'config', 'tls', 'key.pem')).text()
+  const proxy = Bun.serve({
+    fetch: async request => {
+      const url = new URL(request.url)
+      return Bun.fetch(`http://127.0.0.1:${basisPort}${url.pathname}${url.search}`, {
+        body: request.body,
+        headers: request.headers,
+        method: request.method,
+      })
+    },
+    hostname: '127.0.0.1',
+    port: proxyPort,
+    tls: { cert: certificate, key },
+  })
+  const child = await start(basisPort, 'A', 0, `https://localhost:${proxyPort}`)
+  try {
+    await withPage(async page => {
+      await page.goto(`https://localhost:${proxyPort}/`)
+      await waitForVersion(page, 'A')
+      await page.waitForFunction(() => (globalThis as { __releaseHydrated?: boolean }).__releaseHydrated === true)
+    }, { context: { ignoreHTTPSErrors: true } })
+  } finally {
+    await stop(child)
+    proxy.stop(true)
+  }
+}, 60_000)
 test('repeated same-version interruptions do not reload', async () => {
   const value = port()
   let current = await start(value, 'A')

@@ -119,6 +119,12 @@ export interface ServerOptions {
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
+   * Trusted public origin used for executable vendor script URLs, for example
+   * `https://app.example` behind a TLS-terminating reverse proxy. Defaults to
+   * `PUBLIC_ORIGIN`, then the incoming request origin.
+   */
+  publicOrigin?: string,
+  /**
    * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
    * authoritative release version from the strict semver release tag (for
@@ -182,6 +188,7 @@ export class Server<
   #sse = new Map<string, SseHandler>()
   #status: HealthStatus = 'starting'
   #title = 'Document'
+  #publicOrigin: string | null = null
   #version = 'development'
   #vendorBuild: VendorBuild | null = null
   #vendorScripts: readonly string[] = []
@@ -607,7 +614,7 @@ export class Server<
       }
 
       const response = await Bun.fetch(this.#devShellURL())
-      const origin = request ? new URL(request.url).origin : ''
+      const origin = this.#publicOrigin ?? (request ? new URL(request.url).origin : '')
       const html = this.#vendorScripts.length > 0
         ? this.#injectVendorScripts(await response.text(), origin)
         : await response.text()
@@ -870,6 +877,7 @@ export class Server<
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
+   * @param options.publicOrigin - Trusted public origin for vendor scripts.
    * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
@@ -879,10 +887,12 @@ export class Server<
     idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
+    publicOrigin = nonEmpty(Bun.env.PUBLIC_ORIGIN) ?? undefined,
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): this => {
     assertBasisServerCompatible()
     if (logger) this.#logger = logger
+    this.#publicOrigin = publicOrigin ?? null
     this.#version = version
     if (!this.#assets) {
       const assets = path.join(this.#root, 'assets')
@@ -940,7 +950,7 @@ export class Server<
 
     this.#readyError = null
     this.#status = 'starting'
-    const watcherReady = this.#watchMain()
+    const watcherReady = servingHmr ? this.#watchMain() : Promise.resolve()
 
     this.#server = Bun.serve({
       development: servingHmr ? { hmr: true } : false,

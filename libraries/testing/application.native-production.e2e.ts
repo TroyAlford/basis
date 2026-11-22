@@ -165,6 +165,8 @@ test('does not apply source edits until the native production server restarts', 
       await Bun.sleep(500)
 
       expect(await page.textContent('h1')).toBe('Native 0')
+      const freshHtml = await Bun.fetch(first.url).then(response => response.text())
+      expect(freshHtml).toContain('<h1>Native <!-- -->0</h1>')
       expect(await page.evaluate(() => (globalThis as { __nativeSurvived?: string }).__nativeSurvived)).toBe('yes')
     })
     expect(hydrated).toBe(true)

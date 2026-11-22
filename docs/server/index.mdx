@@ -77,6 +77,8 @@ A request without the current `v` query redirects to the content hash; a matchin
 
 Vendor proxies self-accept HMR updates because the vendor artifact and global map are fixed for the server lifetime. Application modules still receive their preview HMR updates through those proxies. Changing the installed vendor graph requires the restart described above; self-accepting a proxy never hot-reloads vendor code or silently serves a newer vendor artifact under an older global map.
 
+When a TLS-terminating reverse proxy fronts Basis, configure the public scheme and host used for executable vendor URLs with `start({ publicOrigin: 'https://app.example' })` or `PUBLIC_ORIGIN`. This prevents request-derived proxy metadata from producing mixed-content script URLs.
+
 `buildVendor({ entries })` remains available for explicit chunks. `discoverVendorSpecifiers` and `buildVendorBundle` expose the automatic discovery and bundle steps:
 
 ```ts

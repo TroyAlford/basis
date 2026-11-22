@@ -193,6 +193,22 @@ describe('vendor assets', () => {
     expect(vendor.headers.get('location')).toContain('?v=')
   })
 
+  test('uses a configured trusted public origin for vendor scripts', async () => {
+    const application = await useApplication({
+      cwd: repoRoot,
+      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
+      env: { PUBLIC_ORIGIN: 'https://app.example' },
+    })
+
+    try {
+      const html = await Bun.fetch(application.url).then(response => response.text())
+      expect(html).toContain('src="https://app.example/assets/vendor/vendor.js"')
+      expect(html).not.toContain('src="http://127.0.0.1')
+    } finally {
+      await application.stop()
+    }
+  })
+
   test('preserves vendor HTTP cache headers and standalone chunk identity', async () => {
     const root = tempDirectory('basis-vendor-http-')
 
