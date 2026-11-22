@@ -132,6 +132,24 @@ jobs:
           test "$(bun --version)" = "1.4.6"
           test "$(bun --revision)" = "1.4.6-canary.1+b15f51302"
 
+  production-hmr:
+    name: Production HMR browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v5
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Warm the Playwright container image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
+      - name: Run production HMR browser tests
+        run: >-
+          bun test --timeout 90000
+          ./libraries/testing/application.production-hmr.e2e.ts
+          ./libraries/testing/application.production-hmr.isolated.e2e.ts
+
   unit:
     name: Unit and screenshots
     if: ${{ !github.event.pull_request.draft && (fromJSON(needs.impact.outputs.lanes).unit == true || fromJSON(needs.impact.outputs.lanes).docs == true) }}
@@ -311,6 +329,7 @@ jobs:
       - compliance
       - impact
       - toolchain
+      - production-hmr
       - unit
       - database
       - e2e
@@ -331,7 +350,7 @@ jobs:
           fail() { echo "::error::$*" >&2; failed=1; }
           result() { jq -r --arg job "$1" '.[$job].result // "missing"' <<<"$NEEDS"; }
 
-          for job in compliance impact knip consumer-install toolchain; do
+          for job in compliance impact knip consumer-install toolchain production-hmr; do
             value=$(result "$job")
             if [[ "$value" != "success" ]]; then fail "$job ($value)"; fi
           done
