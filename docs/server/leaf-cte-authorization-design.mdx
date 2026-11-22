@@ -126,8 +126,8 @@ Steps 1–4 are implemented:
 
 - Concrete leaves own read policies. Abstract MTI tables and `Entity` no longer install read policies or a universal dispatcher.
 - `Database.prepareEntityQuery` routes compiled entity reads through `authorizeEntityQuery`, which emits one reusable CTE per referenced entity table.
-- A concrete CTE projects all effective fields and joins the ancestor tables that own them. Leaf RLS authorizes the row before ancestor fields are exposed.
-- An abstract CTE starts from each concrete leaf, unions the leaves with `UNION ALL`, and exposes the actual `entity` discriminator from root storage.
+- A concrete CTE starts from the leaf and joins only ancestor storage referenced by the compiled statement. The outer query reads inherited fields from those joins; the CTE does not assume optional ancestor columns exist.
+- An abstract CTE starts from each concrete leaf, projects identity, the actual `entity` discriminator, and abstract-local fields, then unions the leaves with `UNION ALL`.
 - Filters, references, collection items, `$matched`/`$total` counts, and existence checks all reference the authorized CTEs. Repeated references reuse one CTE definition with independent aliases.
 - Raw SQL remains outside the Graph guarantee, as documented in `authorization.mdx`.
 
