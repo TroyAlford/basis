@@ -93,3 +93,30 @@ test('stops scheduling after disposal', async () => {
   await tick(testHarness.scheduled)
   expect(testHarness.scheduled).toHaveLength(0)
 })
+
+test('times out a stalled health request and recovers on the next attempt', async () => {
+  const scheduled: Scheduled[] = []
+  let calls = 0
+  let reloads = 0
+  const monitor = startReleaseMonitor({
+    health: async () => {
+      calls += 1
+      if (calls === 1) return await new Promise<ReleaseHealth>(() => undefined)
+      return { status: 'ok', version: 'B' }
+    },
+    loadedVersion: 'A',
+    reload: () => { reloads += 1 },
+    requestTimeoutMs: 5,
+    schedule: (callback, delay) => {
+      scheduled.push({ callback, delay })
+      return scheduled.length
+    },
+  })
+
+  await tick(scheduled)
+  await Bun.sleep(20)
+  expect(scheduled[0]?.delay).toBe(250)
+  await tick(scheduled)
+  expect(reloads).toBe(1)
+  monitor()
+})

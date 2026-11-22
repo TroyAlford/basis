@@ -11,7 +11,7 @@ export interface ReleaseMonitorOptions {
   /** Timer canceller, injected by tests. */
   clear?: (timer: unknown) => void,
   /** Health request implementation. Defaults to same-origin `/api/health`. */
-  health?: () => Promise<ReleaseHealth>,
+  health?: (signal: AbortSignal) => Promise<ReleaseHealth>,
   /** Version embedded in the document that is currently running. */
   loadedVersion: string,
   /** Maximum retry delay. Defaults to 5000 ms. */
@@ -20,6 +20,8 @@ export interface ReleaseMonitorOptions {
   pollMs?: number,
   /** Reload implementation. Defaults to `window.location.reload()`. */
   reload?: () => void,
+  /** Maximum time for one health request. Defaults to 5000 ms. */
+  requestTimeoutMs?: number,
   /** First retry delay. Defaults to 250 ms. */
   retryBaseMs?: number,
   /** Timer scheduler, injected by tests. */
@@ -44,6 +46,7 @@ export function startReleaseMonitor(options: ReleaseMonitorOptions): () => void 
     maxRetryMs = 5_000,
     pollMs = 5_000,
     reload = defaultReload,
+    requestTimeoutMs = 5_000,
     retryBaseMs = 250,
     schedule = (callback, delay) => setTimeout(callback, delay),
   } = options
@@ -66,8 +69,16 @@ export function startReleaseMonitor(options: ReleaseMonitorOptions): () => void 
 
   const check = async (): Promise<void> => {
     if (stopped || reloading) return
+    const controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const response = await health()
+      const timedOut = new Promise<ReleaseHealth>((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort()
+          reject(new Error('health request timed out'))
+        }, requestTimeoutMs)
+      })
+      const response = await Promise.race([health(controller.signal), timedOut])
       if (stopped || reloading) return
       if (response.status !== 'ok') {
         next(retryDelay())
@@ -82,6 +93,8 @@ export function startReleaseMonitor(options: ReleaseMonitorOptions): () => void 
       next(pollMs)
     } catch {
       if (!stopped && !reloading) next(retryDelay())
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout)
     }
   }
 
@@ -95,12 +108,14 @@ export function startReleaseMonitor(options: ReleaseMonitorOptions): () => void 
 
 /**
  * Fetch the same-origin readiness payload.
+ * @param signal - Abort signal for the bounded request timeout.
  * @returns The parsed health payload.
  */
-async function defaultHealth(): Promise<ReleaseHealth> {
+async function defaultHealth(signal: AbortSignal): Promise<ReleaseHealth> {
   const response = await fetch('/api/health', {
     cache: 'no-store',
     credentials: 'same-origin',
+    signal,
   })
   if (!response.ok) return { status: response.status === 503 ? 'starting' : 'error' }
   return await response.json() as ReleaseHealth
