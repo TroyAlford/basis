@@ -75,6 +75,8 @@ Basis Server discovers the application's client vendor dependencies automaticall
 
 A request without the current `v` query redirects to the content hash; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. Vendor chunks are minified with linked source maps, and the maps are served under the same content-versioned `/assets/vendor` contract.
 
+Vendor proxies self-accept HMR updates because the vendor artifact and global map are fixed for the server lifetime. Application modules still receive their normal production HMR updates through those proxies. Changing the installed vendor graph requires the restart described above; self-accepting a proxy never hot-reloads vendor code or silently serves a newer vendor artifact under an older global map.
+
 `buildVendor({ entries })` remains available for explicit chunks. `discoverVendorSpecifiers` and `buildVendorBundle` expose the automatic discovery and bundle steps:
 
 ```ts

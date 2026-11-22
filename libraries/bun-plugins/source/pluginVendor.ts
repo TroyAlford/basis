@@ -22,7 +22,10 @@ export function pluginVendor(): BunPlugin {
         return { namespace: VENDOR_NAMESPACE, path: args.path }
       })
       build.onLoad({ filter: /.*/, namespace: VENDOR_NAMESPACE }, args => ({
-        contents: `module.exports = globalThis.__basisVendor[${JSON.stringify(args.path)}]`,
+        contents: [
+          `module.exports = globalThis.__basisVendor[${JSON.stringify(args.path)}];`,
+          'if (import.meta.hot) import.meta.hot.accept()',
+        ].join('\n'),
         loader: 'js',
       }))
     },
