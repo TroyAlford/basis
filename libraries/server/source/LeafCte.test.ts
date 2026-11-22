@@ -103,3 +103,19 @@ test('uses authorized relations for nested collection correlations', () => {
   expect(sql).toContain('"shelf.id"')
   expect(sql).not.toContain('JOIN ("Book"')
 })
+
+test('quotes CTE output aliases and resolves quoted field identifiers', () => {
+  const quotedGraph = new Graph({
+    entities: [{
+      fields: [{ field: 'select', type: 'String' }],
+      name: 'Thing',
+      security: publicRead,
+    }],
+  })
+  const { sql } = compileEntityQuery(quotedGraph.definitions, 'Thing', {
+    fields: ['id', 'select'],
+  })
+  expect(sql).toContain('"leaf"."select" AS "select"')
+  expect(sql).toContain('t."select" AS "select"')
+  expect(sql).toContain('FROM "authorized_Thing" "t"')
+})
