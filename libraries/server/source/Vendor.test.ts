@@ -179,7 +179,7 @@ describe('vendor assets', () => {
     expect(shell).toContain('<!-- VENDORS -->')
 
     const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
-    expect(html).toContain('<script src="/assets/vendor/vendor.js"></script>')
+    expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
     expect(html).not.toContain('document.write')
 
     const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]

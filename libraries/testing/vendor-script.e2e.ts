@@ -13,10 +13,10 @@ describe('testing/vendor-script', () => {
     const directApplication = await useApplication({ cwd: root, entry: fixture })
 
     /*
-     * Bun's HTML bundler resolves a direct `/assets/vendor/vendor.js` tag as a
-     * source entry. The standard vendor file lives outside that URL on disk, so
-     * the direct page fails to build instead of loading a separately cached
-     * artifact. This is the failure the server marker exists to avoid.
+     * Bun's HTML bundler resolves a direct local `/assets/vendor/vendor.js`
+     * tag as a source entry. The standard vendor file lives outside that URL on
+     * disk, so the direct page fails to build instead of loading a separately
+     * cached artifact. The server injects an absolute-origin script instead.
      */
     const direct = await Bun.fetch(`${directApplication.url}/direct`)
     expect(direct.status).toBe(500)
@@ -29,7 +29,7 @@ describe('testing/vendor-script', () => {
 
     const application = await useApplication({ cwd: root, entry: './testing/server/serve.ts' })
     const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
-    expect(html).toContain('<script src="/assets/vendor/vendor.js"></script>')
+    expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
     expect(html).not.toContain('document.write')
     expect(html.indexOf('/assets/vendor/vendor.js')).toBeLessThan(html.indexOf('type="module"'))
 

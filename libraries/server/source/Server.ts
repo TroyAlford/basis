@@ -602,8 +602,9 @@ export class Server<
       }
 
       const response = await Bun.fetch(this.#devShellURL())
+      const origin = request ? new URL(request.url).origin : ''
       const html = this.#vendorScripts.length > 0
-        ? this.#injectVendorScripts(await response.text())
+        ? this.#injectVendorScripts(await response.text(), origin)
         : await response.text()
       const headers = new Headers(response.headers)
       headers.delete('content-encoding')
@@ -630,12 +631,20 @@ export class Server<
 
   /**
    * Inject the standard vendor scripts at the generated shell marker.
+   *
+   * Bun's HTML bundler treats absolute local paths as files to resolve. Use an
+   * absolute HTTP origin so production HTML routes preserve the vendor script
+   * as an external request. Development behaves the same way.
    * @param html - The Bun-generated shell HTML.
+   * @param origin - The request origin, or an empty string when unavailable.
    * @returns The shell HTML with the vendor script tags in place of the marker.
    */
-  #injectVendorScripts(html: string): string {
+  #injectVendorScripts(html: string, origin: string): string {
     const scripts = this.#vendorScripts
-      .map(src => `<script src="${src.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`)
+      .map(src => {
+        const url = origin === '' ? src : `${origin}${src}`
+        return `<script src="${url.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`
+      })
       .join('')
     return html.replace(VENDOR_MARKER, scripts)
   }
@@ -1319,7 +1328,7 @@ export class Server<
     watcherReady: Promise<void>,
     vendorReady: Promise<ReadonlySet<string>>,
   ): void {
-    const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
+    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
     const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()

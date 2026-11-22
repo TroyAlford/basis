@@ -59,11 +59,10 @@ export class Application extends Component {
 }
 
 /*
- * Diagnostic experiment: this test is expected to FAIL on the current Bun
- * canary. With the fixture forcing Bun.serve({ development: false }), the
- * generated shell route never completes compilation: /api/health stays
- * `starting` and /__basis_shell does not respond. Preserve this failure as
- * evidence; do not change Server.start to work around it.
+ * Regression coverage for native production serving through the existing
+ * vendor resolver. The fixture still forces Bun.serve({ development: false });
+ * Server.start must sequence vendor readiness and serve the vendor script as
+ * an external absolute URL so Bun does not try to resolve it as a file.
  */
 test('serves an application directly from source with development disabled', async () => {
   const directory = fixture('baseline')
@@ -87,6 +86,7 @@ test('serves an application directly from source with development disabled', asy
     expect(html).toContain('<h1>Native <!-- -->0</h1>')
     const source = [...html.matchAll(/<script type="module"[^>]*src="([^"]+)"/g)].map(match => match[1])[0]
     expect(source).toBeDefined()
+    expect(html).toMatch(/src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"/)
     expect(html.indexOf('/assets/vendor/vendor.js')).toBeGreaterThan(-1)
     expect(html.indexOf(source ?? '')).toBeGreaterThan(html.indexOf('/assets/vendor/vendor.js'))
 
