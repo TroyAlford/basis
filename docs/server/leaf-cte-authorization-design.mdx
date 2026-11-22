@@ -120,6 +120,17 @@ These enforce MTI root/leaf integrity, not entity read authorization. They remai
 5. Replace Graph-specific helpers one invariant at a time with failing tests first.
 6. Verify compiler, collection, authorization, validation, and PostgreSQL integration suites plus the MTG-shaped workload.
 
-## Current Step 1 status
+## Current implementation status
 
-The leaf-policy schema tests are written and passing. Removing abstract/ancestor RLS before the CTE compiler exists exposes two expected query-compiler regressions: abstract-root queries still read the abstract table directly, and the write/read authorization path relies on root policies. Step 1 therefore requires Steps 2–4 CTE routing before it can be committed as an independently passing increment.
+Steps 1–4 are implemented:
+
+- Concrete leaves own read policies. Abstract MTI tables and `Entity` no longer install read policies or a universal dispatcher.
+- `Database.prepareEntityQuery` routes compiled entity reads through `authorizeEntityQuery`, which emits one reusable CTE per referenced entity table.
+- A concrete CTE projects all effective fields and joins the ancestor tables that own them. Leaf RLS authorizes the row before ancestor fields are exposed.
+- An abstract CTE starts from each concrete leaf, unions the leaves with `UNION ALL`, and exposes the actual `entity` discriminator from root storage.
+- Filters, references, collection items, `$matched`/`$total` counts, and existence checks all reference the authorized CTEs. Repeated references reuse one CTE definition with independent aliases.
+- Raw SQL remains outside the Graph guarantee, as documented in `authorization.mdx`.
+
+Evidence is covered by `LeafPolicy.test.ts`, `LeafCte.test.ts`, `SQL.test.ts`, `QueryContract.test.ts`, and the PostgreSQL authorization suites. The polymorphic navigation regression verifies that an unauthorized concrete descendant is absent from both collection items and `$matched` counts.
+
+The PostgreSQL authorization suite, including raw-SQL write checks, passes with the leaf CTE read compiler. Replacing the remaining write policies and Graph-generated helpers remains the next independent phase; it is not part of the read compiler increments.
