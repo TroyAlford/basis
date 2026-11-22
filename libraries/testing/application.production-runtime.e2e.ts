@@ -105,7 +105,7 @@ test('production application boots from TypeScript source', async () => {
   }
 }, 30_000)
 
-test('characterizes production HMR behavior', async () => {
+test('does not enable HMR in production', async () => {
   const directory = fixture('hmr')
   const app = await useApplication({
     cwd: directory,
@@ -115,44 +115,30 @@ test('characterizes production HMR behavior', async () => {
 
   try {
     const sockets: string[] = []
-    const requests: string[] = []
-    const developmentResponses: number[] = []
-    let hydrated = false
-
+    const developmentRequests: string[] = []
     await app.visit('/', {
       init: page => {
         page.on('websocket', socket => { sockets.push(socket.url()) })
-        page.on('request', request => { requests.push(request.url()) })
-        page.on('response', response => {
-          if (response.url().includes('/_bun/')) developmentResponses.push(response.status())
+        page.on('request', request => {
+          if (request.url().includes('/_bun/')) developmentRequests.push(request.url())
         })
       },
     }, async page => {
       await page.waitForSelector('h1')
       await page.waitForFunction(() => (globalThis as { __basisHydrated?: boolean }).__basisHydrated === true)
-      hydrated = true
-      await page.evaluate(() => {
-        (globalThis as { __basisHMRSurvived?: string }).__basisHMRSurvived = 'yes'
-      })
+      expect(await page.textContent('h1')).toBe('Production 0')
 
       const source = readFileSync(join(directory, 'Application.tsx'), 'utf8')
       writeFileSync(
         join(directory, 'Application.tsx'),
         source.replace('Production {this.state.count}', 'Production Updated {this.state.count}'),
       )
-      await page.waitForFunction(
-        () => document.querySelector('h1')?.textContent === 'Production Updated 0',
-        undefined,
-        { timeout: 30_000 },
-      )
-
-      expect(await page.evaluate(() => (globalThis as { __basisHMRSurvived?: string }).__basisHMRSurvived)).toBe('yes')
+      await Bun.sleep(500)
+      expect(await page.textContent('h1')).toBe('Production 0')
     })
 
-    expect(hydrated).toBe(true)
-    expect(sockets.some(url => url.includes('/_bun/hmr'))).toBe(true)
-    expect(requests.some(url => url.includes('/_bun/client/'))).toBe(true)
-    expect(developmentResponses.some(status => status === 200)).toBe(true)
+    expect(sockets).toEqual([])
+    expect(developmentRequests).toEqual([])
   } finally {
     await app.stop()
   }

@@ -14,9 +14,8 @@ afterAll(() => {
 })
 
 /**
- * Write a minimal native-production application. The fixture patches
- * Bun.serve only for this child process so Server.start keeps its normal
- * architecture while Bun is asked for development:false.
+ * Write a minimal native-production application. Server.start derives
+ * `development: false` from NODE_ENV=production.
  * @param label - Fixture label used in the temporary directory name.
  * @returns The fixture directory.
  */
@@ -27,9 +26,6 @@ function fixture(label: string): string {
   writeFileSync(join(directory, 'bunfig.toml'), '[serve.static]\nplugins = ["basis/serve"]\n')
   writeFileSync(join(directory, 'serve.ts'), `
 import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
-
-const nativeServe = Bun.serve
-Bun.serve = ((options) => nativeServe({ ...options, development: false })) as typeof Bun.serve
 
 new Server().root(import.meta.dir).main('./Application.tsx').title('Native Production').start()
   `.trim())
@@ -94,6 +90,8 @@ test('serves an application directly from source with development disabled', asy
     expect(bundle).not.toContain('react-refresh')
     expect(bundle).not.toContain('jsxDEV')
     expect(bundle).toContain('__basisVendor')
+    expect(await Bun.fetch(app.url).then(response => response.text())).toBe(html)
+    expect(await Bun.fetch(new URL(source ?? '/', app.url)).then(response => response.text())).toBe(bundle)
 
     let hydrated = false
     const sockets: string[] = []

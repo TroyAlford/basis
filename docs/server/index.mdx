@@ -4,7 +4,7 @@ title: Server
 
 # Server
 
-`basis/server` provides the Bun application server used by Basis apps. One `Server` always runs live from source through Bun HMR and renders the application on the server before hydrating it in the browser.
+`basis/server` provides the Bun application server used by Basis apps. One `Server` always runs live from source through Bun and renders the application on the server before hydrating it in the browser. Development and explicit previews use Bun HMR; normal production uses Bun's production serving mode without HMR.
 
 ```ts
 import { Server } from 'basis/server'
@@ -24,7 +24,7 @@ const server = new Server()
 
 ## Lifecycle
 
-Bun's dev server owns the module graph, file watching, and HMR. Development uses React Fast Refresh with the development React runtime. Production uses Basis's class-component HMR: `basis/serve` compiles JSX against the production React runtime, registers top-level class components under stable ids, and keeps mounted instances across a module replacement. Components with runtime-private (`#`) members cannot transfer their private brand, so React remounts that subtree instead. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. Versioned SSR artifacts are coalesced and cleaned after supersession; shutdown removes the server-owned artifact scope. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
+Bun's server owns the module graph and file watching. Development uses React Fast Refresh with the development React runtime. Preview can opt into HMR explicitly with `start({ hmr: true })` while using production React; `basis/serve` then compiles JSX against the production React runtime, registers top-level class components under stable ids, and keeps mounted instances across supported replacements. Normal production starts with `hmr: false` and serves cached browser modules without an HMR connection. Components with runtime-private (`#`) members cannot transfer their private brand, so React remounts that subtree instead. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. Versioned SSR artifacts are coalesced and cleaned after supersession; shutdown removes the server-owned artifact scope. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
 `/api/health` is the readiness API. It stays `503 starting` until the browser shell, the configured SSR application module, and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 
@@ -75,7 +75,7 @@ Basis Server discovers the application's client vendor dependencies automaticall
 
 A request without the current `v` query redirects to the content hash; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. Vendor chunks are minified with linked source maps, and the maps are served under the same content-versioned `/assets/vendor` contract.
 
-Vendor proxies self-accept HMR updates because the vendor artifact and global map are fixed for the server lifetime. Application modules still receive their normal production HMR updates through those proxies. Changing the installed vendor graph requires the restart described above; self-accepting a proxy never hot-reloads vendor code or silently serves a newer vendor artifact under an older global map.
+Vendor proxies self-accept HMR updates because the vendor artifact and global map are fixed for the server lifetime. Application modules still receive their preview HMR updates through those proxies. Changing the installed vendor graph requires the restart described above; self-accepting a proxy never hot-reloads vendor code or silently serves a newer vendor artifact under an older global map.
 
 `buildVendor({ entries })` remains available for explicit chunks. `discoverVendorSpecifiers` and `buildVendorBundle` expose the automatic discovery and bundle steps:
 
@@ -92,7 +92,7 @@ The server builds the vendor bundle during startup. If a consumer needs a custom
 
 ## Development, preview, and production updates
 
-Development and preview use Bun's live compilation and HMR. Supported class-component edits preserve mounted state; instance-owned functions and runtime-private members follow the documented remount fallback, and unsupported module updates fall back to Bun's normal reload. Installed vendor dependency changes require a server restart so the vendor artifact and global map stay aligned.
+Development and explicit previews use Bun's live compilation and HMR. Supported class-component edits preserve mounted state; instance-owned functions and runtime-private members follow the documented remount fallback, and unsupported module updates fall back to Bun's normal reload. Normal production runs with HMR disabled and uses Bun's cached production output. Installed vendor dependency changes require a server restart so the vendor artifact and global map stay aligned.
 
 Production deployment is a separate lifecycle from class HMR. Command Center publishes a new release and restarts the application; production replacement does not preserve mounted React instances across releases. Automatic browser reconnection, release-version comparison, and a single reload onto the new release are a planned contract in [#357](https://github.com/TroyAlford/basis/issues/357), not yet implemented behavior. Until that feature and its two-lifetime browser tests pass, production clients must not be assumed to update themselves after a release replacement.
 

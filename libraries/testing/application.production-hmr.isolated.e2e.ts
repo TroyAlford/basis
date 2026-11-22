@@ -45,7 +45,7 @@ export default plugin
   writeFileSync(join(directory, 'serve.ts'), `
 import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
 
-new Server().root(import.meta.dir).main('./Application.tsx').title('Production HMR').start()
+new Server().root(import.meta.dir).main('./Application.tsx').title('Production HMR').start({ hmr: true })
   `.trim())
 
   const componentModule = JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))

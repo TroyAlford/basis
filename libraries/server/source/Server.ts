@@ -96,6 +96,12 @@ function matchesETag(header: string | null, etag: string): boolean {
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
+  /**
+   * Enable Bun's live HMR server. Defaults to true outside production and
+   * false when `NODE_ENV=production`. Preview can set this explicitly while
+   * still using production React.
+   */
+  hmr?: boolean,
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
   /**
@@ -126,14 +132,13 @@ export interface ServerOptions {
  * A server for building, serving, and (in development) hot reloading React
  * applications.
  *
- * The server always delegates to Bun's dev server: the SPA shell is generated
- * and served through an HTML route, so Bun owns live compilation, file
- * watching, and hot module replacement. Development uses React Fast Refresh
- * with the development React runtime. Production uses Basis's production
- * class-component HMR, which compiles JSX against the production React runtime
- * and preserves mounted class instances across module replacement. A changed
- * module is replaced in place — no document reload — and only falls back to a
- * reload when nothing accepts the update.
+ * The server always delegates to Bun's server and serves the SPA shell through
+ * an HTML route. Development and explicit previews enable Bun's live HMR; a
+ * normal production start uses Bun's production serving mode without HMR.
+ * Development uses React Fast Refresh with the development React runtime.
+ * Preview and production-React HMR use Basis's production class-component
+ * transform, which preserves mounted instances for supported updates and falls
+ * back to remount or reload when an update cannot be applied safely.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities.
@@ -860,6 +865,7 @@ export class Server<
    * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
    * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
+   * @param options.hmr - Enable live HMR; defaults to true outside production.
    * @param options.hostname - The interface to bind.
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
@@ -868,6 +874,7 @@ export class Server<
    * @returns The server.
    */
   start = ({
+    hmr,
     hostname = Bun.env.HOST ?? '127.0.0.1',
     idleTimeout,
     logger,
@@ -929,8 +936,9 @@ export class Server<
     this.#status = 'starting'
     const watcherReady = this.#watchMain()
 
+    const servingHmr = hmr ?? process.env.NODE_ENV !== 'production'
     this.#server = Bun.serve({
-      development: { hmr: true },
+      development: servingHmr ? { hmr: true } : false,
       fetch: this.handle,
       hostname,
       ...(idleTimeout === undefined ? {} : { idleTimeout }),
