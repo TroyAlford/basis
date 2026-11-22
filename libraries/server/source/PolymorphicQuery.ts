@@ -1651,11 +1651,9 @@ class QueryProjection {
     const baseAlias = this.#nextAlias('b')
     const rootAlias = this.#nextAlias('r')
     this.joins.push(
-      `LEFT JOIN "${target.name}" "${baseAlias}" ON ` +
+      `LEFT JOIN ("${target.name}" "${baseAlias}" INNER JOIN "Entity" "${rootAlias}" ` +
+      `ON "${rootAlias}"."id" = "${baseAlias}"."id") ON ` +
       `"${baseAlias}".${quote(navigation.reference.column)} = "${source.context.baseAlias}"."id"`,
-    )
-    this.joins.push(
-      `LEFT JOIN "Entity" "${rootAlias}" ON "${rootAlias}"."id" = "${baseAlias}"."id"`,
     )
     const child = this.#node(targetContext(this.#entities, target, baseAlias, rootAlias), path)
     this.#identity(child)
@@ -1715,11 +1713,9 @@ class QueryProjection {
     const baseAlias = scope.alias('b')
     const rootAlias = scope.alias('r')
     scope.join(
-      `LEFT JOIN "${target.name}" "${baseAlias}" ON ` +
+      `LEFT JOIN ("${target.name}" "${baseAlias}" INNER JOIN "Entity" "${rootAlias}" ` +
+      `ON "${rootAlias}"."id" = "${baseAlias}"."id") ON ` +
       `"${baseAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
-    )
-    scope.join(
-      `LEFT JOIN "Entity" "${rootAlias}" ON "${rootAlias}"."id" = "${baseAlias}"."id"`,
     )
     return targetContext(this.#entities, target, baseAlias, rootAlias)
   }
@@ -2128,10 +2124,16 @@ class QueryProjection {
     const entity = `${prefix}__entity`
     const id = `${prefix}__id`
     const name = `${prefix}__name`
+    const definition = node.context.definition
+    const concrete = !node.context.rootOnly && !definition.abstract
+    const entityExpression = concrete
+      ? quoteLiteral(definition.name)
+      : `${node.context.rootAlias}.${quote('entity')}`
+    const rootAlias = this.#ensureRoot(node.context)
     this.columns.push(
-      `${node.context.rootAlias}.${quote('entity')} AS ${quote(entity)}`,
-      `${node.context.rootAlias}.${quote('id')} AS ${quote(id)}`,
-      `${node.context.rootAlias}.${quote('name')} AS ${quote(name)}`,
+      `${entityExpression} AS ${quote(entity)}`,
+      `${node.context.baseAlias}.${quote('id')} AS ${quote(id)}`,
+      `${rootAlias}.${quote('name')} AS ${quote(name)}`,
     )
     node.identity = { entity, id, name }
   }

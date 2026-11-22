@@ -644,7 +644,7 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(graphDefinitions, 'Article', {
       fields: ['id', 'title', 'owner', 'owner.permissions', 'owner.manager.name'],
     })
-    expect(compiled.sql).toContain('LEFT JOIN "User"')
+    expect(compiled.sql).toContain('LEFT JOIN ("User"')
     expect(compiled.sql).toContain('"owner__id"')
     expect(compiled.sql).toContain('"owner__permissions"')
     expect(compiled.sql).toContain('"owner__manager__v0__name"')
