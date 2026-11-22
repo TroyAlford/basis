@@ -1,6 +1,7 @@
-import { tempDirectory, useApplication } from 'basis/testing'
+import { tempDirectory, useApplication, waitFor } from 'basis/testing'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RawSourceMap } from 'source-map-js'
@@ -314,4 +315,78 @@ export class Application extends Component {
       await rm(root, { force: true, recursive: true })
     }
   }, 120_000)
+  test('fails production readiness but preserves development fallback when vendor discovery fails', async () => {
+    const root = tempDirectory('basis-vendor-failure-')
+    await writeFile(join(root, 'bunfig.toml'), '[serve.static]\nplugins = ["basis/serve"]\n')
+    await symlink(join(repoRoot, 'node_modules'), join(root, 'node_modules'), 'dir')
+    await writeFile(join(root, 'serve.ts'), `
+const realBuild = Bun.build
+let builds = 0
+Bun.build = ((options) => {
+  builds += 1
+  if (builds === 1) return Promise.reject(new Error('injected vendor failure'))
+  return realBuild(options)
+}) as typeof Bun.build
+
+import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
+import { Logger } from ${JSON.stringify(join(repoRoot, 'libraries', 'utilities', 'index.ts'))}
+
+const logger = new Logger({ logFilePath: ${JSON.stringify(join(root, 'server.log'))} })
+new Server().root(import.meta.dir).main('./Application.tsx').start({ logger })
+    `.trim())
+    await writeFile(join(root, 'Application.tsx'), `
+import { Component } from ${JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))}
+
+export class Application extends Component {
+  componentDidMount() {
+    super.componentDidMount()
+    globalThis.__basisFallbackHydrated = true
+  }
+  content() {
+    return <h1>Vendor fallback</h1>
+  }
+}
+    `.trim())
+
+    try {
+      const production = await useApplication({
+        cwd: root,
+        development: false,
+        entry: './serve.ts',
+        readyStatus: status => status === 503,
+        timeoutMs: 10_000,
+      })
+      try {
+        const health = await waitFor(async () => {
+          const response = await Bun.fetch(`${production.url}/api/health`)
+          const body = await response.json() as { error?: string, status?: string }
+          return body.status === 'error' ? body : null
+        }, { timeout: 10_000 })
+        expect(health.error).toContain('injected vendor failure')
+      } finally {
+        await production.stop()
+      }
+
+      const development = await useApplication({
+        cwd: root,
+        development: true,
+        entry: './serve.ts',
+      })
+      try {
+        await development.visit('/', async page => {
+          await page.waitForSelector('h1')
+          await page.waitForFunction(
+            () => (globalThis as { __basisFallbackHydrated?: boolean }).__basisFallbackHydrated === true,
+          )
+          expect(await page.textContent('h1')).toBe('Vendor fallback')
+        })
+        expect(readFileSync(join(root, 'server.log'), 'utf8'))
+          .toContain('client vendor discovery failed: injected vendor failure')
+      } finally {
+        await development.stop()
+      }
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
 })

@@ -640,6 +640,9 @@ export class Server<
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error))
       this.#logger.error(`client vendor discovery failed: ${failure.message}`)
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: error })
+      }
       await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => undefined)
       return new Set()
     }
