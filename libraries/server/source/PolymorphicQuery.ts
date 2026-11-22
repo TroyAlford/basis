@@ -1126,6 +1126,7 @@ class QueryProjection {
       resolved,
       `"${parentAlias}".${quote('id')}`,
       {
+        authorized: true,
         relationship: relationshipAlias ?? '',
         root: rootAlias ?? '',
         target: targetAlias ?? '',

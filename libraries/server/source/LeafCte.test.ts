@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { resolveCollectionRelation } from './CollectionRelation'
+import { collectionSqlRelation } from './CollectionSql'
 import { compileEntityQuery } from './Database'
 import { Action, Graph, Security } from './Graph'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
@@ -20,6 +22,11 @@ const graph = new Graph({
       security: publicRead,
     },
     { fields: [], name: 'Unrelated', security: publicRead },
+    {
+      fields: [{ field: 'target', target: 'Entity', type: 'Entity' }],
+      name: 'Link',
+      security: publicRead,
+    },
   ],
 })
 
@@ -118,4 +125,71 @@ test('quotes CTE output aliases and resolves quoted field identifiers', () => {
   expect(sql).toContain('"leaf"."select" AS "select"')
   expect(sql).toContain('t."select" AS "select"')
   expect(sql).toContain('FROM "authorized_Thing" "t"')
+})
+
+test('fails closed when a compiler collection relation is not authorized', () => {
+  const collectionGraph = new Graph({
+    entities: [
+      {
+        fields: [{
+          cardinality: 'Many',
+          field: 'books',
+          inverse: 'shelf',
+          target: 'Book',
+          type: 'Inverse',
+        }],
+        name: 'Shelf',
+        security: publicRead,
+      },
+      {
+        fields: [{ field: 'shelf', inverse: 'books', target: 'Shelf', type: 'Entity' }],
+        name: 'Book',
+        security: publicRead,
+      },
+    ],
+  })
+  const collection = collectionGraph.definitions.collections('Shelf')[0]
+  if (!collection) throw new Error('Shelf collection missing')
+  const resolved = resolveCollectionRelation(collection, name => collectionGraph.definitions.entity(name))
+  expect(() => collectionSqlRelation(collectionGraph.definitions, resolved, '"shelf"."id"', {
+    authorized: true,
+    relationship: '',
+    root: 'root',
+    target: 'book',
+  })).toThrow('requires a target relation')
+})
+
+test('routes universal Entity references and filtered existence through authorized relations', () => {
+  const link = compileEntityQuery(graph.definitions, 'Link', {
+    fields: ['id', 'target'],
+  })
+  expect(link.sql).toContain('LEFT JOIN "authorized_Entity"')
+  expect(link.sql).toContain('"authorized_Entity" AS NOT MATERIALIZED')
+
+  const relationshipGraph = new Graph({
+    entities: [
+      { fields: [], name: 'User', security: publicRead },
+      { fields: [], name: 'Campaign', security: publicRead },
+    ],
+    relationships: [{
+      between: [
+        { field: 'user', inverse: 'campaigns', target: 'User' },
+        { field: 'campaign', inverse: 'members', target: 'Campaign' },
+      ],
+      fields: [{ field: 'role', type: 'String' }],
+      name: 'Membership',
+    }],
+  })
+  const count = compileEntityQuery(relationshipGraph.definitions, 'Campaign', {
+    fields: ['id'],
+    where: 'members.$matched > 0',
+  })
+  expect(count.sql).toContain('"authorized_User"')
+  expect(count.sql).not.toContain('JOIN "User" "ct')
+  const empty = compileEntityQuery(relationshipGraph.definitions, 'Campaign', {
+    fields: ['id'],
+    where: 'members $empty',
+  })
+  expect(empty.sql).toContain('"authorized_User"')
+  expect(empty.sql).not.toContain('JOIN "User" "ct')
 })

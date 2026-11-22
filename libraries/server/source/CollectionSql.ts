@@ -8,6 +8,8 @@ import { SQL } from './SQL'
 
 /** Aliases used to compile one collection relation. */
 export interface CollectionSqlAliases {
+  /** Require authorized relations instead of the compatibility fallback. */
+  readonly authorized?: true,
   /** Alias for the named-relationship table, when the collection is relationship-backed. */
   readonly relationship: string,
   /** Alias for the universal `Entity` root joined to the related row. */
@@ -84,6 +86,14 @@ export function collectionSqlRelation(
     throw new Error('Entity Collections require an entity target view')
   }
   const targetName = resolved.target.definition.name
+  if (aliases.authorized === true) {
+    if (targetName === 'Entity' && aliases.rootRelation === undefined) {
+      throw new Error('Authorized Entity collections require a root relation')
+    }
+    if (targetName !== 'Entity' && aliases.targetRelation === undefined) {
+      throw new Error(`Authorized collection target "${targetName}" requires a target relation`)
+    }
+  }
   const source = resolved.source
   if (source.kind === 'inverse') {
     if (targetName === 'Entity') {
