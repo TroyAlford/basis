@@ -95,7 +95,9 @@ impact:
         git fetch --no-tags origin "$BASE_REF"
         test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
         git checkout --detach refs/remotes/origin/pr-head
-    - uses: jdx/mise-action@v5
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: .tool-versions
     - id: impact
       uses: TroyAlford/basis/.github/actions/change-impact@<released-tag>
       with:

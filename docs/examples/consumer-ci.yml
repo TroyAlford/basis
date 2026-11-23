@@ -70,7 +70,9 @@ jobs:
           git fetch --no-tags origin "$BASE_REF"
           test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
           git checkout --detach refs/remotes/origin/pr-head
-      - uses: jdx/mise-action@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
       - name: Analyze change impact
         id: impact
         uses: TroyAlford/basis/.github/actions/change-impact@main
@@ -108,7 +110,9 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
       - name: Install dependencies
         run: bun install --frozen-lockfile
       # The authoritative gate: style, architecture, infrastructure, and
@@ -136,7 +140,9 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Check documentation
@@ -154,7 +160,9 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Unit tests
@@ -175,7 +183,9 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Warm the pinned Playwright image

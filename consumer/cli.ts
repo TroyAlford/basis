@@ -8,7 +8,6 @@ import { runDocs, runDocsBuild } from './docs'
 import { emit } from './emit'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
-import { consumerToolchainUnsupportedReason } from './toolchain'
 
 /**
  * The subset of the Basis manifest the CLI inspects.
@@ -308,14 +307,6 @@ const doctor = (): number => {
 
   logger.info(`[basis] version ${manifest.version ?? 'unknown'}`)
   logger.info(`[basis] consumer root ${installRoot}`)
-
-  const unsupportedToolchain = consumerToolchainUnsupportedReason(installRoot)
-  if (unsupportedToolchain === null) {
-    logger.info('[basis] consumer toolchain mise.toml ok')
-  } else {
-    failures += 1
-    logger.info(unsupportedToolchain)
-  }
 
   const unsupportedBun = bunCheckUnsupportedReason()
   if (unsupportedBun === null) {

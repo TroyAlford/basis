@@ -45,7 +45,7 @@ bunx basis typecheck
 
 `basis lint` uses the Basis style policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. `basis compliance` runs the same style and typecheck surface plus the authoritative architecture and infrastructure rules. Choose `lint` or `compliance` for a repository gate, not both. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), [Compliance](../docs/compliance.mdx), and [TypeScript](../docs/typescript.mdx).
 
-`basis typecheck`, `basis lint`, and `basis compliance` run Bun's built-in TypeScript checker; the checker requires Bun 1.4.3 or newer. The full Basis Server install requires Bun 1.4.6 or the approved canary described in [Installation](../docs/installation.mdx). The install hook and `Server.start()` enforce the server requirement. Consumers must use `mise.toml` (npm backend) rather than `.tool-versions`; the install hook and doctor reject legacy toolchain files.
+`basis typecheck`, `basis lint`, and `basis compliance` run Bun's built-in TypeScript checker; the checker requires Bun 1.4.3 or newer. The full Basis Server install requires Bun 1.4.6 or the approved canary described in [Installation](../docs/installation.mdx). The install hook and `Server.start()` enforce the server requirement.
 
 ## Server and database
 

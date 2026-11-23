@@ -9,7 +9,6 @@ export {
   APPROVED_BUN_SERVER_COMMIT,
   APPROVED_BUN_SERVER_PACKAGE,
   APPROVED_BUN_SERVER_REVISION,
-  APPROVED_BUN_SERVER_TOOL_VERSION,
   assertBasisServerCompatible,
   basisServerUnsupportedReason,
   bunCheckUnsupportedReason,
@@ -18,7 +17,6 @@ export {
   MINIMUM_BUN_FOR_SERVER,
   parseBunVersion,
   supportsBasisServer,
-  supportsBasisServerToolchain,
   supportsBunCheck,
 } from '../libraries/utilities/functions/BunRuntime'
 export type { BunRuntimeInfo, ParsedVersion } from '../libraries/utilities/functions/BunRuntime'

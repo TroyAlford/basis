@@ -6,7 +6,6 @@ import { requireHostDependencies } from './host-dependencies'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 import { ensureServeStaticConfig } from './serve-static'
-import { consumerToolchainUnsupportedReason } from './toolchain'
 
 /**
  * Register Basis's development-server plugin in the consuming app's
@@ -58,12 +57,6 @@ const main = (): void => {
   const unsupportedBun = basisServerUnsupportedReason()
   if (unsupportedBun !== null) {
     process.stderr.write(`${unsupportedBun}\n`)
-    process.exit(1)
-  }
-
-  const unsupportedToolchain = consumerToolchainUnsupportedReason(rootDir)
-  if (unsupportedToolchain !== null) {
-    process.stderr.write(`${unsupportedToolchain}\n`)
     process.exit(1)
   }
 
