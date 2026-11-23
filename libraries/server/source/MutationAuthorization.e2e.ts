@@ -610,6 +610,24 @@ describe('Graph mutation authorization', () => {
         fields: ['name'],
       }))).toEqual([{ name: 'Editable' }])
 
+      const caught = await asActor(worker, () => database.tx(async sql => {
+        const error = await sql.edit(
+          'Article',
+          compare('id', Operator.Comparison.Equal, id),
+          { name: 'Caught failure' },
+        ).catch((failure: unknown) => failure)
+        const rows = await sql<{ name: string }[]>`
+          SELECT "root"."name"
+          FROM "Entity" "root"
+          JOIN "Article" "article" ON "article"."id" = "root"."id"
+          WHERE "root"."id" = ${id}
+        `
+        expect(rows).toEqual([{ name: 'Editable' }])
+        return error
+      }))
+      expect(caught).toBeInstanceOf(MutationError)
+      expect((caught as MutationError).code).toBe('authorization')
+
       const deniedUpsert = await asActor(worker, () => database.upsert(
         'Article',
         compare('id', Operator.Comparison.Equal, id),

@@ -423,8 +423,10 @@ async function upsert(
     )
   }
   const changes = prepareChanges(entities, definition, values, '/values')
-  await applyChanges({ entities, sql }, definition, mutable, changes)
-  await verifyFinalState({ entities, sql }, definition, mutable)
+  await withMutationSavepoint(sql, async () => {
+    await applyChanges({ entities, sql }, definition, mutable, changes)
+    await verifyFinalState({ entities, sql }, definition, mutable)
+  })
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   const [identity] = mutable
   if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
@@ -496,8 +498,10 @@ async function applyEdit(
 ): Promise<readonly SelectedIdentity[]> {
   if (matches.length === 0) return []
   const mutable = await authorizeEdit(options, definition, matches)
-  await applyChanges(options, definition, mutable, changes)
-  await verifyFinalState(options, definition, mutable)
+  await withMutationSavepoint(options.sql, async () => {
+    await applyChanges(options, definition, mutable, changes)
+    await verifyFinalState(options, definition, mutable)
+  })
   return mutable
 }
 
@@ -526,6 +530,29 @@ async function authorizeEdit(
     for (const id of rows) allowed.add(id)
   }
   return matches.filter(match => allowed.has(match.id))
+}
+
+/**
+ * Run work inside a mutation-local savepoint so a caught failure cannot leak changes.
+ * @param sql - Transaction-scoped SQL client.
+ * @param work - Work to apply and verify atomically.
+ * @returns The work result.
+ */
+async function withMutationSavepoint<T>(
+  sql: BunSQL,
+  work: () => T | Promise<T>,
+): Promise<T> {
+  const name = `basis_mutation_${randomUUID().replaceAll('-', '')}`
+  await execute(sql, { sql: `SAVEPOINT ${quote(name)}`, values: [] })
+  try {
+    const result = await work()
+    await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
+    return result
+  } catch (error) {
+    await sql.unsafe(`ROLLBACK TO SAVEPOINT ${quote(name)}`).catch(() => undefined)
+    await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
+    throw error
+  }
 }
 
 /**
