@@ -422,6 +422,7 @@ async function upsert(
     const changes = prepareChanges(entities, definition, values, '/values')
     await applyChanges({ entities, sql }, definition, mutable, changes)
     await verifyFinalState({ entities, sql }, definition, mutable)
+    await writeIds(definition, sql, 'Entity', mutable.map(identity => identity.id), new Map())
     const [identity] = mutable
     if (identity === undefined) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
     return {
@@ -492,6 +493,7 @@ async function applyEdit(
     const mutable = await authorizeEdit(options, definition, matches)
     await applyChanges(options, definition, mutable, changes)
     await verifyFinalState(options, definition, mutable)
+    await writeIds(definition, options.sql, 'Entity', mutable.map(identity => identity.id), new Map())
     const [identity] = mutable
     if (mutable.length !== 1 || identity === undefined) return { mutable }
     const leaf = requireConcrete(options.entities, identity.entity)
