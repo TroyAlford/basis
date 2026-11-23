@@ -319,7 +319,7 @@ describe('Graph mutation authorization', () => {
       expect(upsertCreated).toMatchObject({
         created: 1,
         edited: 0,
-        record: { rank: 200, title: 'Upserted' },
+        record: { name: 'Upserted', rank: 200, title: 'Upserted' },
       })
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
@@ -595,6 +595,7 @@ describe('Graph mutation authorization', () => {
       }))
       const id = created.record?.id
       if (!id) throw new Error('Article was not created')
+      expect(created.record).toMatchObject({ name: 'Editable', title: 'Original' })
       expect(await asActor(worker, () => database.query('Article', {
         fields: ['id', 'name', 'title'],
       }))).toEqual([{ id, name: 'Editable', title: 'Original' }])
@@ -653,7 +654,7 @@ describe('Graph mutation authorization', () => {
         'Article',
         compare('id', Operator.Comparison.Equal, id),
         { title: 'Allowed' },
-      ))).toMatchObject({ edited: 1, record: { title: 'Allowed' } })
+      ))).toMatchObject({ edited: 1, record: { name: 'Editable', title: 'Allowed' } })
     }, {
       graph: transitionGraph,
       setup: async owner => {

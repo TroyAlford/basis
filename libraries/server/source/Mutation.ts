@@ -350,16 +350,12 @@ async function edit(
   const definition = requireEntity(entities, entity)
   const normalized = prepareChanges(entities, definition, changes, '/changes')
   const matches = await selectMatches({ entities, sql }, definition, filter)
-  const mutable = await applyEdit({ entities, sql }, definition, matches, normalized)
+  const edited = await applyEdit({ entities, sql }, definition, matches, normalized)
+  const mutable = edited.mutable
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   if (mutable.length !== 1) return { edited: mutable.length }
-  const [identity] = mutable
-  if (!identity) return { edited: 0 }
-  const leaf = requireConcrete(entities, identity.entity)
-  return {
-    edited: 1,
-    record: await readRecord({ entities, sql }, leaf, identity.id),
-  }
+  if (!edited.record) throw new MutationError('infrastructure', 'Edit record was not materialized')
+  return { edited: 1, record: edited.record }
 }
 
 /**
@@ -413,7 +409,7 @@ async function upsert(
   }
 
   const outcome = await withMutationSavepoint(sql, async (): Promise<
-    { readonly mutable: readonly SelectedIdentity[] } | { readonly create: true }
+    { readonly mutable: readonly SelectedIdentity[], readonly record: MutationRecord } | { readonly create: true }
   > => {
     const mutable = await authorizeEdit({ entities, sql }, definition, matches)
     if (mutable.length === 0) return { create: true }
@@ -426,18 +422,17 @@ async function upsert(
     const changes = prepareChanges(entities, definition, values, '/values')
     await applyChanges({ entities, sql }, definition, mutable, changes)
     await verifyFinalState({ entities, sql }, definition, mutable)
-    return { mutable }
+    const [identity] = mutable
+    if (identity === undefined) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
+    return {
+      mutable,
+      record: await readRecord({ entities, sql }, definition, identity.id),
+    }
   })
   if ('create' in outcome) return createUpsert({ entities, sql }, definition, filter, values)
   const mutable = outcome.mutable
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
-  const [identity] = mutable
-  if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
-  return {
-    created: 0,
-    edited: 1,
-    record: await readRecord({ entities, sql }, definition, identity.id),
-  }
+  return { created: 0, edited: 1, record: outcome.record }
 }
 
 /**
@@ -459,7 +454,7 @@ async function createUpsert(
   filter: MutationFilter,
   values: MutationValues,
 ): Promise<UpsertResult> {
-  const item = await withMutationSavepoint(sql, async () => {
+  const result = await withMutationSavepoint(sql, async () => {
     const prepared = prepareCreate(definition, values, '/values')
     await insert(entities, sql, definition, prepared)
     const matches = await selectMatches({ entities, sql }, definition, filter)
@@ -469,14 +464,13 @@ async function createUpsert(
         'Upsert create values do not satisfy the selection filter',
       )
     }
-    return prepared
+    return {
+      item: prepared,
+      record: await readRecord({ entities, sql }, definition, prepared.id),
+    }
   })
-  recordSubject(sql, definition.name, item.id)
-  return {
-    created: 1,
-    edited: 0,
-    record: await readRecord({ entities, sql }, definition, item.id),
-  }
+  recordSubject(sql, definition.name, result.item.id)
+  return { created: 1, edited: 0, record: result.record }
 }
 
 /**
@@ -492,13 +486,16 @@ async function applyEdit(
   definition: EntityDefinition,
   matches: readonly SelectedIdentity[],
   changes: ReadonlyMap<string, unknown>,
-): Promise<readonly SelectedIdentity[]> {
-  if (matches.length === 0) return []
+): Promise<{ readonly mutable: readonly SelectedIdentity[], readonly record?: MutationRecord }> {
+  if (matches.length === 0) return { mutable: [] }
   return withMutationSavepoint(options.sql, async () => {
     const mutable = await authorizeEdit(options, definition, matches)
     await applyChanges(options, definition, mutable, changes)
     await verifyFinalState(options, definition, mutable)
-    return mutable
+    const [identity] = mutable
+    if (mutable.length !== 1 || identity === undefined) return { mutable }
+    const leaf = requireConcrete(options.entities, identity.entity)
+    return { mutable, record: await readRecord(options, leaf, identity.id) }
   })
 }
 
