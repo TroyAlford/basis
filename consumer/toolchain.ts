@@ -1,9 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { APPROVED_BUN_SERVER_PACKAGE } from './bun-version'
-
-/** The exact npm version used by the canonical mise toolchain. */
-const TOOL_VERSION = APPROVED_BUN_SERVER_PACKAGE.replace('bun@', '')
+import { supportsBasisServerToolchain } from './bun-version'
 
 /**
  * Explain an unsupported consumer toolchain configuration.
@@ -53,9 +50,24 @@ export function consumerToolchainUnsupportedReason(root: string): string | null 
     return '[basis] mise.toml must define [tools] "npm:bun" with the approved canary version.'
   }
   const version = (bun as { version?: unknown }).version
-  if (version !== TOOL_VERSION) {
-    return `[basis] mise.toml must pin "npm:bun" version = ${JSON.stringify(TOOL_VERSION)}; ` +
+  if (typeof version !== 'string' || !supportsBasisServerToolchain(version)) {
+    return '[basis] mise.toml must pin "npm:bun" to the approved canary or a stable Bun >= 1.4.6; ' +
       `found ${JSON.stringify(version)}.`
+  }
+
+  const allowBuilds = (bun as { allow_builds?: unknown }).allow_builds
+  if (allowBuilds !== true) {
+    return '[basis] mise.toml "npm:bun" must set allow_builds = true so Bun postinstall can run.'
+  }
+
+  const npmArgs = (bun as { npm_args?: unknown }).npm_args
+  if (
+    typeof npmArgs !== 'string'
+    || !npmArgs.includes('--include=optional')
+    || !npmArgs.includes('--ignore-scripts=false')
+  ) {
+    return '[basis] mise.toml "npm:bun" must set npm_args to include ' +
+      '"--include=optional --ignore-scripts=false".'
   }
 
   return null

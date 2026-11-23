@@ -32,6 +32,8 @@ describe('consumer toolchain validation', () => {
     try {
       writeFileSync(join(root, 'mise.toml'), config)
       expect(consumerToolchainUnsupportedReason(root)).toBeNull()
+      writeFileSync(join(root, 'mise.toml'), config.replace('1.4.5-canary.20261121.1', '1.4.6'))
+      expect(consumerToolchainUnsupportedReason(root)).toBeNull()
     } finally {
       cleanup()
     }
@@ -71,6 +73,25 @@ describe('consumer toolchain validation', () => {
       expect(consumerToolchainUnsupportedReason(old.root)).toContain('must pin')
     } finally {
       old.cleanup()
+    }
+
+    const missingBuilds = fixture()
+    try {
+      writeFileSync(join(missingBuilds.root, 'mise.toml'), config.replace('allow_builds = true\n', ''))
+      expect(consumerToolchainUnsupportedReason(missingBuilds.root)).toContain('allow_builds')
+    } finally {
+      missingBuilds.cleanup()
+    }
+
+    const missingArgs = fixture()
+    try {
+      writeFileSync(
+        join(missingArgs.root, 'mise.toml'),
+        config.replace('npm_args = "--include=optional --ignore-scripts=false"\n', ''),
+      )
+      expect(consumerToolchainUnsupportedReason(missingArgs.root)).toContain('npm_args')
+    } finally {
+      missingArgs.cleanup()
     }
   })
 

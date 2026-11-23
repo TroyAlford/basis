@@ -19,6 +19,9 @@ export const APPROVED_BUN_SERVER_COMMIT = 'b15f51302'
 /** The npm distribution of the approved canary runtime. */
 export const APPROVED_BUN_SERVER_PACKAGE = 'bun@1.4.5-canary.20261121.1'
 
+/** The npm version of the approved canary runtime. */
+export const APPROVED_BUN_SERVER_TOOL_VERSION = APPROVED_BUN_SERVER_PACKAGE.replace(/^bun@/, '')
+
 /** A numeric semantic version. */
 export type ParsedVersion = readonly [major: number, minor: number, patch: number]
 
@@ -150,6 +153,24 @@ export const supportsBasisServer = (
   const revisionParsed = parseBunVersion(revision)
   if (revisionParsed === null || compareVersions(revisionParsed, parsed) !== 0) return false
   if (hasPrerelease(version) || hasPrerelease(revision)) return false
+  return compareVersions(parsed, minimum) >= 0
+}
+
+/**
+ * Whether a `mise.toml` `npm:bun` version is supported by Basis.
+ *
+ * The exact approved canary package is accepted. Future stable releases at or
+ * above the server minimum are accepted; other prereleases are not.
+ * @param version - The npm package version pinned in mise.toml.
+ * @returns Whether the toolchain version is supported.
+ */
+export const supportsBasisServerToolchain = (version: string): boolean => {
+  const value = version.trim()
+  if (value === APPROVED_BUN_SERVER_TOOL_VERSION) return true
+  if (!/^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/.test(value)) return false
+  const parsed = parseBunVersion(value)
+  const minimum = parseBunVersion(MINIMUM_BUN_FOR_SERVER)
+  if (parsed === null || minimum === null) return false
   return compareVersions(parsed, minimum) >= 0
 }
 

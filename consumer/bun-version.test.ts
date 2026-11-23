@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { APPROVED_BUN_SERVER_COMMIT, APPROVED_BUN_SERVER_PACKAGE, APPROVED_BUN_SERVER_REVISION, assertBasisServerCompatible, basisServerUnsupportedReason, bunCheckUnsupportedReason, currentBunRuntime, parseBunVersion, supportsBasisServer, supportsBunCheck } from './bun-version'
+import { APPROVED_BUN_SERVER_COMMIT, APPROVED_BUN_SERVER_PACKAGE, APPROVED_BUN_SERVER_REVISION, assertBasisServerCompatible, basisServerUnsupportedReason, bunCheckUnsupportedReason, currentBunRuntime, parseBunVersion, supportsBasisServer, supportsBasisServerToolchain, supportsBunCheck } from './bun-version'
 
 describe('Bun type-check support', () => {
   test('parses numeric versions and ignores pre-release metadata', () => {
@@ -67,6 +67,15 @@ describe('Basis Server Bun support', () => {
     expect(supportsBasisServer({ revision: 'unknown', version: 'unknown' })).toBe(false)
     expect(supportsBasisServer({ version: '' })).toBe(false)
     expect(supportsBasisServer({ revision: '1.4.6+stable', version: '1.4.6.7' })).toBe(false)
+  })
+
+  test('accepts the approved toolchain package or a future stable package', () => {
+    expect(supportsBasisServerToolchain('1.4.5-canary.20261121.1')).toBe(true)
+    expect(supportsBasisServerToolchain('1.4.6')).toBe(true)
+    expect(supportsBasisServerToolchain('1.5.0+build')).toBe(true)
+    expect(supportsBasisServerToolchain('1.4.5')).toBe(false)
+    expect(supportsBasisServerToolchain('1.4.6-canary.2')).toBe(false)
+    expect(supportsBasisServerToolchain('not-a-version')).toBe(false)
   })
 
   test('explains the required runtime and installation method', () => {
