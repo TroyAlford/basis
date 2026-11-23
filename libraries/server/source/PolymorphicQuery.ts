@@ -1172,7 +1172,7 @@ class QueryProjection {
   #collectionCorrelation(plan: CollectionRelationPlan, alias: string): SqlFragment {
     const predicate = plan.predicate === undefined
       ? undefined
-      : sqlConcat([' AND (', plan.predicate, ')'])
+      : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
     const rootAlias = plan.rootAlias
     if (rootAlias === undefined) {
       throw new Error(`Entity collection "${plan.collection.name}" has no identity root`)
@@ -1409,7 +1409,7 @@ class QueryProjection {
         expression: field => recordScope.expression(field),
         field: fieldName => recordScope.field(fieldName),
         filterKind: path => (endpoints.has(path) ? 'identity' : undefined),
-        predicate: plan.predicate,
+        predicate: plan.predicate as SqlFragment,
         relation: plan.relation,
         work: plan.work,
       }
@@ -1519,7 +1519,7 @@ class QueryProjection {
       field: resolve,
       filterCount: path => counts.get(path),
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
-      predicate: plan.predicate,
+      predicate: plan.predicate as SqlFragment,
       get relation() { return sqlConcat([plan.relation, ...joins]).sql },
       get work() { return plan.work + joins.length },
     }
@@ -2267,7 +2267,7 @@ class QueryProjection {
       const where = filter === undefined ? undefined : this.#recordPredicate(plan, filter)
       const predicate = plan.predicate === undefined
         ? undefined
-        : sqlConcat([' AND (', plan.predicate, ')'])
+        : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
       const filterFragment = where === undefined || where.sql === ''
         ? undefined
         : where as SqlFragment
@@ -2342,7 +2342,7 @@ class QueryProjection {
     ))
     const predicate = plan.predicate === undefined
       ? undefined
-      : sqlConcat([' AND (', plan.predicate, ')'])
+      : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
     return sqlConcat([
       '(SELECT json_build_object(', values.join(', '), ') FROM ',
       `${quote(relationship.name)} ${quote(relationshipAlias)}`,
@@ -2974,7 +2974,7 @@ function collectionIdentityPage(
       'SELECT * FROM (', member, ') AS "__member"',
       order === '' ? undefined : ` ORDER BY ${order}`,
     ])
-    return sqlConcat([paged, SQL.paginate(limit, offset, 0)])
+    return sqlConcat([paged, SQL.paginate(limit, offset)])
   }
   const distinct = sqlConcat([
     'SELECT DISTINCT ON (', identityColumns('__member', identity), ') * FROM (',
@@ -2988,7 +2988,7 @@ function collectionIdentityPage(
     'SELECT * FROM (', distinct, ') AS "__distinct"',
     distinctOrder === '' ? undefined : ` ORDER BY ${distinctOrder}`,
   ])
-  return sqlConcat([paged, SQL.paginate(limit, offset, 0)])
+  return sqlConcat([paged, SQL.paginate(limit, offset)])
 }
 
 /**

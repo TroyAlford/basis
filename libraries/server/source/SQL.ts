@@ -40,6 +40,8 @@ export interface SQLSelection {
 
 /** A validated parameterized predicate clause. */
 export interface SQLPredicate {
+  /** Ordered structural pieces, when built by the compiler. */
+  readonly pieces?: readonly SqlPiece[],
   /** Predicate expression without the `WHERE` keyword. */
   readonly predicate?: string,
   /** Quoted PostgreSQL `WHERE` clause, or an empty string. */
@@ -95,7 +97,7 @@ type SqlPiece = string | { readonly value: unknown }
 /** One parameterized SQL fragment. */
 export interface SqlFragment {
   /** Ordered literal text and parameter slots. */
-  readonly pieces?: readonly SqlPiece[],
+  readonly pieces: readonly SqlPiece[],
   /** SQL text with positional `$1`, `$2`, … placeholders. */
   readonly sql: string,
   /** Values bound to the placeholders, in order. */
@@ -748,16 +750,13 @@ function orderByClause(
  * Build a validated parameterized pagination clause.
  * @param limit - Maximum rows to return, or null for unlimited.
  * @param offset - Rows to skip.
- * @param _startIndex - Ignored prior-index compatibility argument.
  * @returns The pagination fragment and its ordered values.
  * @throws {Error} When limit or offset is not a non-negative integer.
  */
 function paginate(
   limit: number | null = 25,
   offset = 0,
-  _startIndex = 0,
 ): SQLPagination {
-  void _startIndex
   if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error('Query limit must be a non-negative integer or null')
   }

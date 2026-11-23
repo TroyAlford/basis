@@ -14,6 +14,7 @@ import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 import type { CollectionScope, QueryScope } from './SQL'
+import type { SqlFragment } from './SQL'
 import { SQL } from './SQL'
 
 /** The closed authorization action vocabulary. */
@@ -1306,7 +1307,7 @@ export class Graph {
       },
       field: resolve,
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
-      predicate: sql.predicate,
+      predicate: sql.predicate as unknown as SqlFragment,
       relation: sql.relation,
     }
   }
