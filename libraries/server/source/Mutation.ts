@@ -424,6 +424,7 @@ async function upsert(
   }
   const changes = prepareChanges(entities, definition, values, '/values')
   await applyChanges({ entities, sql }, definition, mutable, changes)
+  await verifyFinalState({ entities, sql }, definition, mutable)
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   const [identity] = mutable
   if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
@@ -496,6 +497,7 @@ async function applyEdit(
   if (matches.length === 0) return []
   const mutable = await authorizeEdit(options, definition, matches)
   await applyChanges(options, definition, mutable, changes)
+  await verifyFinalState(options, definition, mutable)
   return mutable
 }
 
@@ -524,6 +526,38 @@ async function authorizeEdit(
     for (const id of rows) allowed.add(id)
   }
   return matches.filter(match => allowed.has(match.id))
+}
+
+/**
+ * Verify the resulting row state against each concrete leaf policy.
+ * @param options - Canonical definitions and transaction client.
+ * @param options.sql - Transaction-scoped SQL client.
+ * @param definition - Entity or abstract ancestor.
+ * @param matches - Identities whose changes were applied.
+ * @throws {MutationError} When the resulting state is no longer writable.
+ */
+async function verifyFinalState(
+  { sql }: MutationOptions,
+  definition: EntityDefinition,
+  matches: readonly SelectedIdentity[],
+): Promise<void> {
+  const allowed = new Set<string>()
+  for (const [leaf, identities] of groupByIdentity(matches)) {
+    const rows = await writeIds(
+      definition,
+      sql,
+      leaf,
+      identities.map(identity => identity.id),
+      new Map(),
+    )
+    for (const id of rows) allowed.add(id)
+  }
+  if (matches.some(match => !allowed.has(match.id))) {
+    throw new MutationError(
+      'authorization',
+      'The resulting entity state is not authorized for update',
+    )
+  }
 }
 
 /**

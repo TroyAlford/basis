@@ -565,4 +565,74 @@ describe('Graph mutation authorization', () => {
       },
     })
   })
+  test('checks the final inherited state before committing an edit', async () => {
+    const administrator = randomUUID()
+    const worker = randomUUID()
+    const transitionGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Article',
+          security: {
+            [Action.Read]: Security.Public,
+            [Action.Create]: { role: 'admin' },
+            [Action.Update]: { where: "name = 'Editable'" },
+          },
+        },
+      ],
+    })
+    await withDatabase('mutation-final-state', administrator, async database => {
+      const asActor = async <T>(actor: string | null, work: () => T | Promise<T>): Promise<T> => {
+        await database.sql`
+          SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+        `
+        return await work()
+      }
+      const created = await asActor(administrator, () => database.create('Article', {
+        name: 'Editable',
+        title: 'Original',
+      }))
+      const id = created.record?.id
+      if (!id) throw new Error('Article was not created')
+      expect(await asActor(worker, () => database.query('Article', {
+        fields: ['id', 'name', 'title'],
+      }))).toEqual([{ id, name: 'Editable', title: 'Original' }])
+
+      const denied = await asActor(worker, () => database.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, id),
+        { name: 'Locked' },
+      )).catch((error: unknown) => error)
+      expect(denied).toBeInstanceOf(MutationError)
+      expect((denied as MutationError).code).toBe('authorization')
+      expect(await asActor(administrator, () => database.query('Article', {
+        fields: ['name'],
+      }))).toEqual([{ name: 'Editable' }])
+
+      const deniedUpsert = await asActor(worker, () => database.upsert(
+        'Article',
+        compare('id', Operator.Comparison.Equal, id),
+        { name: 'Locked', title: 'Original' },
+      )).catch((error: unknown) => error)
+      expect(deniedUpsert).toBeInstanceOf(MutationError)
+      expect((deniedUpsert as MutationError).code).toBe('authorization')
+      expect(await asActor(administrator, () => database.query('Article', {
+        fields: ['name'],
+      }))).toEqual([{ name: 'Editable' }])
+
+      expect(await asActor(worker, () => database.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, id),
+        { title: 'Allowed' },
+      ))).toMatchObject({ edited: 1, record: { title: 'Allowed' } })
+    }, {
+      graph: transitionGraph,
+      setup: async owner => {
+        await enroll(owner.sql, administrator, 'test', 'admin', 'admin@example.com', [ADMIN_ROLE_ID])
+        await enroll(owner.sql, worker, 'test', 'worker', 'worker@example.com', [])
+      },
+    })
+  })
+
 })
