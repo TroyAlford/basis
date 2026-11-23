@@ -52,13 +52,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      # Release bookkeeping does not exercise the production HMR pipeline.
-      # Install a stable Bun directly so the reusable workflow stays portable
-      # to consumers without requiring this repository's mise configuration.
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.5
+      # Honor the repository or consumer's pinned Bun toolchain. Release
+      # bookkeeping needs Bun, but must not install a second, divergent runtime.
+      - uses: jdx/mise-action@v5
 
       - name: Determine Version
         id: version
@@ -86,9 +82,7 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
   #       with: { fetch-depth: 0 }
-  #     - uses: oven-sh/setup-bun@v2
-  #       with:
-  #         bun-version: 1.4.5
+  #     - uses: jdx/mise-action@v5
 
   #     - name: Identify Changed Workspaces
   #       id: changes

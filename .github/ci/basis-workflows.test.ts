@@ -355,6 +355,15 @@ describe('Basis Code CI', () => {
   }, 120_000)
 })
 
+describe('Basis release workflow', () => {
+  test('uses the repository mise toolchain instead of a second Bun pin', () => {
+    const release = loadWorkflow('.github/workflows/release.yml')
+    const steps = release.jobs?.['determine-version']?.steps ?? []
+    expect(steps.find(step => step.uses === 'jdx/mise-action@v5')).toBeDefined()
+    expect(steps.some(step => step.uses === 'oven-sh/setup-bun@v2')).toBe(false)
+  })
+})
+
 describe('Basis PR Metadata', () => {
   test('runs on title and description edits as well as code events', () => {
     expect(metadata.name).toBe('PR Metadata')
