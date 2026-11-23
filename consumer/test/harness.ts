@@ -29,6 +29,16 @@ export const APP_TSCONFIG = JSON.stringify({ extends: 'basis/tsconfig/bun.json',
 
 export const APP_ESLINT_CONFIG = "export { default } from 'basis/eslint'\n"
 
+/** The canonical consumer mise/Bun toolchain configuration. */
+export const APP_MISE_CONFIG = `[settings]
+npm.package_manager = "npm"
+
+[tools."npm:bun"]
+version = "1.4.5-canary.20261121.1"
+allow_builds = true
+npm_args = "--include=optional --ignore-scripts=false"
+`
+
 export const APP_SOURCE = `import { Logger } from 'basis/logger'
 
 const logger = new Logger({ prefix: '[fixture]' })
@@ -252,6 +262,7 @@ export const initApp = (
   write(join(app, 'package.json'), JSON.stringify(manifest, null, 2))
   write(join(app, 'tsconfig.json'), APP_TSCONFIG)
   write(join(app, 'eslint.config.mjs'), APP_ESLINT_CONFIG)
+  write(join(app, 'mise.toml'), APP_MISE_CONFIG)
   write(join(app, 'src', 'greeter.ts'), APP_SOURCE)
 
   /*
@@ -315,6 +326,7 @@ export const initReactApp = (app: string, basisSpec: string): void => {
     ),
   )
   write(join(app, 'tsconfig.json'), REACT_TSCONFIG)
+  write(join(app, 'mise.toml'), APP_MISE_CONFIG)
   write(join(app, 'src', 'app.tsx'), REACT_APP_SOURCE)
   write(join(app, 'src', 'runtime.tsx'), REACT_APP_RUNTIME)
   write(join(app, 'src', 'server.ts'), REACT_APP_SERVER)

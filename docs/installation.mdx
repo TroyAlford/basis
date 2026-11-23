@@ -52,7 +52,7 @@ mise exec -- bun --revision
 # 1.4.6-canary.1+b15f51302
 ```
 
-The equivalent direct install is `npm install -g bun@1.4.5-canary.20261121.1`; npm must run the package postinstall so Bun’s platform binary is unpacked. Once a stable Bun release at or above 1.4.6 is verified, `bun upgrade` is the normal path. The package engine records the server minimum, but Bun does not guarantee engine enforcement, so the install hook and server gate remain authoritative.
+The equivalent direct install is `npm install -g bun@1.4.5-canary.20261121.1`; npm must run the package postinstall so Bun’s platform binary is unpacked. Once a stable Bun release at or above 1.4.6 is verified, `bun upgrade` is the normal path. The package engine records the server minimum, but Bun does not guarantee engine enforcement, so the install hook and server gate remain authoritative. The install hook requires a root `mise.toml` with the npm Bun backend and rejects a legacy `.tool-versions`; `basis doctor` reports the same requirement.
 
 ## Host capabilities
 
