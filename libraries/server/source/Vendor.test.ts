@@ -50,6 +50,19 @@ interface ActiveVendorSnapshot {
 }
 
 /**
+ * Resolve the server-owned vendor directory for a fixture root.
+ * @param root - The temporary project root.
+ * @returns The active vendor directory.
+ */
+async function activeVendorDirectory(root: string): Promise<string> {
+  const vendorRoot = join(root, 'dist', 'vendor')
+  const scopes = await readdir(vendorRoot)
+  const scope = scopes[0]
+  if (!scope) throw new Error('missing server-owned vendor directory')
+  return join(vendorRoot, scope)
+}
+
+/**
  * Resolve the running server's active vendor script and source map through their
  * unversioned redirects, then read their immutable bytes.
  * @param base - The application origin.
@@ -351,9 +364,10 @@ export class Application extends Component {
          * active URL must continue to identify the bytes activated at startup,
          * not the replacement now sitting on disk.
          */
-        await writeFile(join(root, 'dist', 'vendor', 'vendor.js'), 'globalThis.__replacement = true\n')
+        const vendorDirectory = await activeVendorDirectory(root)
+        await writeFile(join(vendorDirectory, 'vendor.js'), 'globalThis.__replacement = true\n')
         await writeFile(
-          join(root, 'dist', 'vendor', 'vendor.js.map'),
+          join(vendorDirectory, 'vendor.js.map'),
           JSON.stringify({ mappings: '', names: [], sources: ['replacement.ts'], version: 3 }),
         )
 
@@ -372,8 +386,8 @@ export class Application extends Component {
          * The active snapshot owns the bytes even after its backing files are
          * deleted. Resolve the snapshot before requiring the file to exist.
          */
-        await rm(join(root, 'dist', 'vendor', 'vendor.js'), { force: true })
-        await rm(join(root, 'dist', 'vendor', 'vendor.js.map'), { force: true })
+        await rm(join(vendorDirectory, 'vendor.js'), { force: true })
+        await rm(join(vendorDirectory, 'vendor.js.map'), { force: true })
 
         const deletedVendor = await Bun.fetch(snapshot.url, { redirect: 'manual' })
         expect(deletedVendor.status).toBe(200)

@@ -26,6 +26,7 @@ describe('testing/vendor-script', () => {
       await page.waitForLoadState('domcontentloaded')
       expect(await page.locator('#result').count()).toBe(0)
     })
+    await directApplication.stop()
 
     const application = await useApplication({ cwd: root, entry: './testing/server/serve.ts' })
     const html = await Bun.fetch(`${application.url}/`).then(response => response.text())

@@ -47,8 +47,8 @@ describe('directories', () => {
       expect(() => directories('../database')).toThrow('Invalid directory segment')
       expect(() => directories('/database')).toThrow('Invalid directory segment')
       const database = directories('database')
-      expect(database.json('../escape.json')).rejects.toThrow('Invalid file segment')
-      expect(database.json('/escape.json')).rejects.toThrow('Invalid file segment')
+      await expect(database.json('../escape.json')).rejects.toThrow('Invalid file segment')
+      await expect(database.json('/escape.json')).rejects.toThrow('Invalid file segment')
     })
   })
 

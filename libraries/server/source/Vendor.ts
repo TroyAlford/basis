@@ -197,7 +197,14 @@ export async function discoverVendorSpecifiers(options: DiscoverVendorOptions): 
  */
 export async function buildVendorBundle(options: VendorBundleOptions): Promise<VendorBuild> {
   const root = path.resolve(options.root ?? process.cwd())
-  const directory = path.join(root, '.basis')
+  const outdirOption = options.outdir ?? 'dist/vendor'
+  const outdir = path.isAbsolute(outdirOption) ? outdirOption : path.resolve(root, outdirOption)
+  /*
+   * Keep the generated entrypoint beside the artifacts it produces. Server
+   * instances build independently into their own scope, so two applications
+   * that share a root cannot overwrite or read each other's in-flight entry.
+   */
+  const directory = path.join(outdir, '.basis')
   await mkdir(directory, { recursive: true })
 
   const specifiers = [...new Set(options.specifiers)].sort()
@@ -217,7 +224,7 @@ export async function buildVendorBundle(options: VendorBundleOptions): Promise<V
 
   return buildVendor({
     entries: [{ entrypoint, name: 'vendor' }],
-    outdir: options.outdir,
+    outdir,
     root,
   })
 }

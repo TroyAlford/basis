@@ -289,6 +289,24 @@ describe('useApplication lifecycle', () => {
     expect(activity.stops).toBe(1)
   })
 
+  test('boots a fresh application after a caller stops the shared handle', async () => {
+    const target = fixture({
+      'a.test.ts': suite(
+        "test('reuse', async () => {\n" +
+        "  const first = await useApplication({ entry: './app.ts' })\n" +
+        '  await first.stop()\n' +
+        "  const second = await useApplication({ entry: './app.ts' })\n" +
+        '  expect(second).not.toBe(first)\n' +
+        '  await second.stop()\n' +
+        '})',
+      ),
+    })
+    const { activity, code } = await run(target)
+    expect(code).toBe(0)
+    expect(activity.boot).toBe(2)
+    expect(activity.stops).toBe(2)
+  })
+
   test('tears down exactly once after a failing assertion', async () => {
     const target = fixture({
       'a.test.ts': suite(

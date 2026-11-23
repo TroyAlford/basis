@@ -136,6 +136,28 @@ async function waitForReady(
 export async function startApplication(
   options: StartApplicationOptions,
 ): Promise<ApplicationHandle> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await startApplicationOnce(options)
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      if (!message.includes('exited before ready')) throw error
+      await Bun.sleep(50)
+    }
+  }
+  throw lastError
+}
+
+/**
+ * Boot one application attempt.
+ * @param options - Startup options.
+ * @returns A handle with the base URL, an idempotent stop, and `visit`.
+ */
+async function startApplicationOnce(
+  options: StartApplicationOptions,
+): Promise<ApplicationHandle> {
   const {
     cwd = process.cwd(),
     development = false,
@@ -168,16 +190,43 @@ export async function startApplication(
   void drain(proc.stderr)
 
   const url = `http://127.0.0.1:${port}`
+  let exitCode: number | null = null
   let exit: Promise<number> | null = null
+  const exited = proc.exited.then(code => {
+    exitCode = code
+    return code
+  })
   const stop = async (): Promise<number> => {
     if (exit) return exit
     proc.kill()
-    exit = proc.exited
+    exit = exited
     return exit
   }
 
   try {
-    await waitForReady(`${url}${readyPath}`, timeoutMs, () => output, readyStatus)
+    const ready = waitForReady(`${url}${readyPath}`, timeoutMs, () => output, readyStatus)
+    void ready.catch(() => undefined)
+    await Promise.race([
+      ready,
+      exited.then(code => {
+        throw new Error(
+          `startApplication: ${url} exited before ready (code ${code})` +
+            (output.trim() ? `\n--- server output ---\n${output.trim()}` : ''),
+        )
+      }),
+    ])
+    /*
+     * A different process can win the free port after the probe releases it.
+     * If this child lost that race it exits immediately; retry with a new port
+     * instead of handing the caller a dead URL.
+     */
+    await Bun.sleep(20)
+    if (exitCode !== null) {
+      throw new Error(
+        `startApplication: ${url} exited before ready (code ${exitCode})` +
+          (output.trim() ? `\n--- server output ---\n${output.trim()}` : ''),
+      )
+    }
   } catch (error) {
     await stop()
     throw error
@@ -320,6 +369,19 @@ export async function useApplication(
     cwd,
     development: identity.development,
     entry,
+  }).then(handle => {
+    const stop = handle.stop
+    handle.stop = async () => {
+      const code = await stop()
+      /*
+       * A stopped handle must not satisfy a later useApplication call. Test
+       * files commonly share one application identity and can stop it before
+       * another file asks for it in the same process.
+       */
+      if (handles.get(key) === booting) handles.delete(key)
+      return code
+    }
+    return handle
   })
   handles.set(key, booting)
 

@@ -191,6 +191,7 @@ export class Server<
   #publicOrigin: string | null = null
   #version = 'development'
   #vendorBuild: VendorBuild | null = null
+  #vendorRoot: string | null = null
   #vendorScripts: readonly string[] = []
 
   constructor() {
@@ -454,7 +455,7 @@ export class Server<
    */
   async handleAsset(uri: URI, request?: Request): Promise<Response> {
     const vendorRoute = uri.route === 'vendor' || uri.route.startsWith('vendor/')
-    const vendorRoot = path.join(this.#root, 'dist', 'vendor')
+    const vendorRoot = this.#vendorRoot ?? path.join(this.#root, 'dist', 'vendor')
     const vendor = vendorRoute && fs.existsSync(vendorRoot)
     const root = vendor ? vendorRoot : this.#assets
     if (!root || isInternalStatePath(uri.route)) return Server.NotFound
@@ -674,13 +675,21 @@ export class Server<
   async #prepareVendor(entrypoints: readonly string[]): Promise<ReadonlySet<string>> {
     if (entrypoints.length === 0) return new Set()
 
+    /*
+     * Every server gets its own vendor workspace. Applications and test
+     * processes can share a root, and a shared entrypoint or output directory
+     * would let one startup read or overwrite another's in-flight build.
+     */
+    const outdir = path.join(this.#root, 'dist', 'vendor', this.#ssrScope)
+    this.#vendorRoot = outdir
+
     try {
       const specifiers = await discoverVendorSpecifiers({
         entrypoint: entrypoints[0],
         plugins: [pluginSASS(), pluginMarkdown()],
         root: this.#root,
       })
-      this.#vendorBuild = await buildVendorBundle({ root: this.#root, specifiers })
+      this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers })
       return new Set(specifiers)
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error))
@@ -688,7 +697,8 @@ export class Server<
       if (process.env.NODE_ENV === 'production') {
         throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: error })
       }
-      this.#vendorBuild = await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => null)
+      this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers: [] })
+        .catch(() => null)
       return new Set()
     }
   }
@@ -809,6 +819,12 @@ export class Server<
     fs.rmSync(this.#ssrScopeDir(), { force: true, recursive: true })
   }
 
+  /** Remove the server-owned hydration and vendor artifacts for this instance. */
+  #cleanupScopedArtifacts(): void {
+    fs.rmSync(path.join(this.#root, '.basis', 'hydrate', this.#ssrScope), { force: true, recursive: true })
+    fs.rmSync(path.join(this.#root, 'dist', 'vendor', this.#ssrScope), { force: true, recursive: true })
+  }
+
   /**
    * The server-owned SSR artifact directory for this server instance.
    * @returns The absolute scope directory.
@@ -901,11 +917,24 @@ export class Server<
 
     const servingHmr = hmr ?? process.env.NODE_ENV !== 'production'
     this.#vendorBuild = null
+    this.#vendorRoot = null
     this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
+    /*
+     * The server owns a unique shell directory and hydration entry. Test
+     * processes and multiple applications commonly share one root; writing a
+     * shared hydrate entry would race its reads during Bun's HTML build.
+     */
+    const directory = devShellDirectory(JSON.stringify([
+      this.#root,
+      this.#title,
+      this.#mainPath,
+      this.#vendorScripts,
+      this.#ssrScope,
+    ]))
     const entrypoints: string[] = []
     if (this.#mainPath) {
       entrypoints.push(writeHydrationEntry({
-        directory: path.join(this.#root, '.basis'),
+        directory: path.join(this.#root, '.basis', 'hydrate', this.#ssrScope),
         mainPath: this.#mainPath,
         monitorRelease: !servingHmr,
       }))
@@ -942,7 +971,6 @@ export class Server<
     }
     const databaseReady = this.#databaseReady()
 
-    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, this.#vendorScripts]))
     const shell = writeDevShell({ directory, entrypoints, title: this.#title })
     const routes = {
       [DEV_SHELL_ROUTE]: import.meta.require(shell),
@@ -1005,6 +1033,7 @@ export class Server<
     this.#server = null
     setVendorSpecifiers(null)
     this.#vendorBuild = null
+    this.#vendorRoot = null
 
     if (!this.#closing) {
       const closing = this.#database.close()
@@ -1028,6 +1057,7 @@ export class Server<
     await this.#closing
     await Promise.allSettled([...this.#mainBuilds.values()])
     this.#cleanupSSRArtifactsAll()
+    this.#cleanupScopedArtifacts()
   }
 
   /**
