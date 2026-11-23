@@ -512,9 +512,17 @@ async function authorizeEdit(
   definition: EntityDefinition,
   matches: readonly SelectedIdentity[],
 ): Promise<readonly SelectedIdentity[]> {
-  const ids = matches.map(match => match.id)
-  const rows = await writeIds(definition, sql, 'Entity', ids, new Map())
-  const allowed = new Set(rows)
+  const allowed = new Set<string>()
+  for (const [leaf, identities] of groupByIdentity(matches)) {
+    const rows = await writeIds(
+      definition,
+      sql,
+      leaf,
+      identities.map(identity => identity.id),
+      new Map(),
+    )
+    for (const id of rows) allowed.add(id)
+  }
   return matches.filter(match => allowed.has(match.id))
 }
 
@@ -1017,9 +1025,9 @@ async function writeIds(
 /**
  * Delete one complete MTI chain in a single statement.
  *
- * Data-modifying CTEs share the command snapshot, so the root and parent
- * policies still see the concrete leaf while PostgreSQL checks the deferred
- * foreign keys against the statement's final state.
+ * The concrete leaf delete runs first so its RLS policy is the authorization
+ * boundary. The root and ancestor deletes are restricted to the leaf rows the
+ * policy returned; deferred foreign keys are checked against the final state.
  * @param sql - Transaction-scoped SQL client.
  * @param leaf - Concrete leaf table.
  * @param ancestry - Intermediate parent tables from leaf toward the root.
@@ -1041,14 +1049,14 @@ async function deleteChain(
   const condition = `${quote('id')} IN (${placeholders.join(', ')})`
   const parents = ancestry.map((table, index) => (
     `"parent_${index}_deleted" AS (` +
-    `DELETE FROM ${quote(table)} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "root_deleted") ` +
+    `DELETE FROM ${quote(table)} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "leaf_deleted") ` +
     `RETURNING ${quote('id')})`
   ))
   const rows = await execute(sql, {
-    sql: 'WITH "root_deleted" AS (' +
-      `DELETE FROM ${quote('Entity')} WHERE ${condition} RETURNING ${quote('id')}), ` +
-      '"leaf_deleted" AS (' +
-      `DELETE FROM ${quote(leaf)} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "root_deleted") ` +
+    sql: 'WITH "leaf_deleted" AS (' +
+      `DELETE FROM ${quote(leaf)} WHERE ${condition} RETURNING ${quote('id')}), ` +
+      '"root_deleted" AS (' +
+      `DELETE FROM ${quote('Entity')} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "leaf_deleted") ` +
       `RETURNING ${quote('id')})` +
       (parents.length === 0 ? '' : `, ${parents.join(', ')}`) +
       ` SELECT ${quote('id')} FROM "leaf_deleted"`,

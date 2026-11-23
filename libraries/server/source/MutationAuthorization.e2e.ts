@@ -454,11 +454,54 @@ describe('Graph mutation authorization', () => {
       )).catch((error: unknown) => error)
       expect(changedRead).toBeInstanceOf(MutationError)
       expect((changedRead as MutationError).code).toBe('authorization')
-      expect(await asActor(administrator, () => server.db.query('Draft', {
-        fields: ['rank'],
+
+      const createdArticle = await asActor(administrator, () => server.db.create('Article', {
+        name: 'Readable inherited',
+        owner: worker,
+        rank: 80,
+        score: 5,
+        title: 'Readable inherited',
+      }))
+      const articleId = createdArticle.record?.id
+      if (!articleId) throw new Error('Article was not created')
+      const changedInherited = await asActor(worker, () => server.db.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, articleId),
+        { name: 'Forbidden inherited edit' },
+      )).catch((error: unknown) => error)
+      expect(changedInherited).toEqual({ edited: 0 })
+      expect(await asActor(administrator, () => server.db.query('Article', {
+        fields: ['name', 'rank'],
         limit: null,
-        where: compare('id', Operator.Comparison.Equal, first.id),
-      }))).toEqual([{ rank: 10 }])
+        where: compare('id', Operator.Comparison.Equal, articleId),
+      }))).toEqual([{ name: 'Readable inherited', rank: 80 }])
+
+      const upsertInherited = await asActor(worker, () => server.db.upsert(
+        'Article',
+        compare('title', Operator.Comparison.Equal, 'Readable inherited'),
+        { name: 'Forbidden upsert', rank: 80, score: 5, title: 'Readable inherited' },
+      ))
+      expect(upsertInherited.edited).toBe(0)
+      expect(await asActor(administrator, () => server.db.query('Article', {
+        fields: ['name', 'rank'],
+        limit: null,
+        where: compare('id', Operator.Comparison.Equal, articleId),
+      }))).toEqual([{ name: 'Readable inherited', rank: 80 }])
+
+      const allowedArticle = await asActor(administrator, () => server.db.create('Article', {
+        name: 'Allowed inherited',
+        owner: worker,
+        rank: 10,
+        score: 5,
+        title: 'Allowed inherited',
+      }))
+      const allowedId = allowedArticle.record?.id
+      if (!allowedId) throw new Error('Allowed Article was not created')
+      expect(await asActor(worker, () => server.db.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, allowedId),
+        { name: 'Allowed inherited edit' },
+      ))).toMatchObject({ edited: 1, record: { name: 'Allowed inherited edit' } })
 
       await asActor(administrator, () => server.db.create('Project', [
         { code: 'A', name: 'Member project', title: 'Member project' },
