@@ -610,23 +610,33 @@ describe('Graph mutation authorization', () => {
         fields: ['name'],
       }))).toEqual([{ name: 'Editable' }])
 
+      const [before] = await asActor(worker, () => database.sql<{ ctid: string }[]>`
+        SELECT ctid::TEXT AS ctid
+        FROM "Article"
+        WHERE "id" = ${id}
+      `)
       const caught = await asActor(worker, () => database.tx(async sql => {
         const error = await sql.edit(
           'Article',
           compare('id', Operator.Comparison.Equal, id),
           { name: 'Caught failure' },
         ).catch((failure: unknown) => failure)
-        const rows = await sql<{ name: string }[]>`
-          SELECT "root"."name"
+        const rows = await sql<{ ctid: string, name: string }[]>`
+          SELECT "article".ctid::TEXT AS ctid, "root"."name"
           FROM "Entity" "root"
           JOIN "Article" "article" ON "article"."id" = "root"."id"
           WHERE "root"."id" = ${id}
         `
-        expect(rows).toEqual([{ name: 'Editable' }])
+        expect(rows).toEqual([{ ctid: before?.ctid, name: 'Editable' }])
         return error
       }))
       expect(caught).toBeInstanceOf(MutationError)
       expect((caught as MutationError).code).toBe('authorization')
+      expect(await asActor(administrator, () => database.sql<{ ctid: string }[]>`
+        SELECT ctid::TEXT AS ctid
+        FROM "Article"
+        WHERE "id" = ${id}
+      `)).toEqual([{ ctid: before?.ctid }])
 
       const deniedUpsert = await asActor(worker, () => database.upsert(
         'Article',

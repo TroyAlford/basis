@@ -412,21 +412,24 @@ async function upsert(
     return createUpsert({ entities, sql }, definition, filter, values)
   }
 
-  const mutable = await authorizeEdit({ entities, sql }, definition, matches)
-  if (mutable.length === 0) {
-    return createUpsert({ entities, sql }, definition, filter, values)
-  }
-  if (mutable.length > 1) {
-    throw new MutationError(
-      'cardinality',
-      `Upsert selected ${mutable.length} mutable entities; exactly one is required`,
-    )
-  }
-  const changes = prepareChanges(entities, definition, values, '/values')
-  await withMutationSavepoint(sql, async () => {
+  const outcome = await withMutationSavepoint(sql, async (): Promise<
+    { readonly mutable: readonly SelectedIdentity[] } | { readonly create: true }
+  > => {
+    const mutable = await authorizeEdit({ entities, sql }, definition, matches)
+    if (mutable.length === 0) return { create: true }
+    if (mutable.length > 1) {
+      throw new MutationError(
+        'cardinality',
+        `Upsert selected ${mutable.length} mutable entities; exactly one is required`,
+      )
+    }
+    const changes = prepareChanges(entities, definition, values, '/values')
     await applyChanges({ entities, sql }, definition, mutable, changes)
     await verifyFinalState({ entities, sql }, definition, mutable)
+    return { mutable }
   })
+  if ('create' in outcome) return createUpsert({ entities, sql }, definition, filter, values)
+  const mutable = outcome.mutable
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   const [identity] = mutable
   if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
@@ -456,29 +459,23 @@ async function createUpsert(
   filter: MutationFilter,
   values: MutationValues,
 ): Promise<UpsertResult> {
-  const name = `basis_upsert_${randomUUID().replaceAll('-', '')}`
-  await execute(sql, { sql: `SAVEPOINT ${quote(name)}`, values: [] })
-  try {
-    const item = prepareCreate(definition, values, '/values')
-    await insert(entities, sql, definition, item)
+  const item = await withMutationSavepoint(sql, async () => {
+    const prepared = prepareCreate(definition, values, '/values')
+    await insert(entities, sql, definition, prepared)
     const matches = await selectMatches({ entities, sql }, definition, filter)
-    if (!matches.some(match => match.id === item.id)) {
+    if (!matches.some(match => match.id === prepared.id)) {
       throw new MutationError(
         'operation',
         'Upsert create values do not satisfy the selection filter',
       )
     }
-    await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
-    recordSubject(sql, definition.name, item.id)
-    return {
-      created: 1,
-      edited: 0,
-      record: await readRecord({ entities, sql }, definition, item.id),
-    }
-  } catch (error) {
-    await sql.unsafe(`ROLLBACK TO SAVEPOINT ${quote(name)}`).catch(() => undefined)
-    await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
-    throw error
+    return prepared
+  })
+  recordSubject(sql, definition.name, item.id)
+  return {
+    created: 1,
+    edited: 0,
+    record: await readRecord({ entities, sql }, definition, item.id),
   }
 }
 
@@ -497,12 +494,12 @@ async function applyEdit(
   changes: ReadonlyMap<string, unknown>,
 ): Promise<readonly SelectedIdentity[]> {
   if (matches.length === 0) return []
-  const mutable = await authorizeEdit(options, definition, matches)
-  await withMutationSavepoint(options.sql, async () => {
+  return withMutationSavepoint(options.sql, async () => {
+    const mutable = await authorizeEdit(options, definition, matches)
     await applyChanges(options, definition, mutable, changes)
     await verifyFinalState(options, definition, mutable)
+    return mutable
   })
-  return mutable
 }
 
 /**
