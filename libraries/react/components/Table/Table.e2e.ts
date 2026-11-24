@@ -12,6 +12,7 @@ let app: ApplicationHandle
 beforeAll(async () => {
   app = await useApplication({
     cwd: ROOT,
+    development: true,
     entry: './testing/components/serve.ts',
     timeoutMs: 120_000,
   })
