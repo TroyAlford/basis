@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
+import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { get } from 'node:http'
-import { resolve as resolvePath } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
 import type { Page } from 'playwright'
 import type { Viewport } from './browser'
 import { withPage } from './browser'
@@ -58,19 +59,80 @@ export interface ApplicationHandle {
   },
 }
 
+/** A reserved loopback port that must be released when its server stops. */
+export interface PortReservation {
+  /** The reserved port. */
+  port: number,
+  /** Release the reservation. */
+  release: () => void,
+}
+
+/** Directory containing cross-process port reservations for this test host. */
+const portLocks = join(process.cwd(), '.basis', 'test-ports')
+
 /**
- * Reserve a free loopback port by binding to port 0 and releasing it.
- * @returns The reserved port.
+ * Whether a lock belongs to a process that has already exited.
+ * @param file - The lock file.
+ * @returns Whether the lock is stale.
  */
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({
-    fetch: () => new Response(null, { status: 204 }),
-    hostname: '127.0.0.1',
-    port: 0,
-  })
-  const { port } = probe
-  probe.stop(true)
-  return port
+function stalePortLock(file: string): boolean {
+  let pid: number
+  try {
+    pid = Number(readFileSync(file, 'utf8'))
+  } catch {
+    return true
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return true
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
+}
+
+/**
+ * Reserve a free loopback port across test processes.
+ * @returns The port and its release callback.
+ */
+export function reservePort(): PortReservation {
+  mkdirSync(portLocks, { recursive: true })
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const probe = Bun.serve({
+      fetch: () => new Response(null, { status: 204 }),
+      hostname: '127.0.0.1',
+      port: 0,
+    })
+    const { port } = probe
+    probe.stop(true)
+    const lock = join(portLocks, `${port}.lock`)
+    try {
+      const descriptor = openSync(lock, 'wx')
+      writeFileSync(descriptor, String(process.pid))
+      closeSync(descriptor)
+      return {
+        port,
+        release: () => {
+          try {
+            unlinkSync(lock)
+          } catch {
+            // Another owner may already have removed a stale lock.
+          }
+        },
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST') throw error
+      if (stalePortLock(lock)) {
+        try {
+          unlinkSync(lock)
+        } catch {
+          // A concurrent process won the stale-lock cleanup race.
+        }
+      }
+    }
+  }
+  throw new Error('unable to reserve a free loopback port')
 }
 
 /**
@@ -167,7 +229,8 @@ async function startApplicationOnce(
     readyStatus = status => status >= 200 && status < 400,
     timeoutMs = 30_000,
   } = options
-  const port = await freePort()
+  const reservation = reservePort()
+  const { port } = reservation
   const proc = Bun.spawn([process.execPath, entry], {
     cwd,
     env: {
@@ -200,7 +263,9 @@ async function startApplicationOnce(
     if (exit) return exit
     proc.kill()
     exit = exited
-    return exit
+    const code = await exit
+    reservation.release()
+    return code
   }
 
   try {

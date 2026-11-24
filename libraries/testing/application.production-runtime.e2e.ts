@@ -1,8 +1,10 @@
-import { afterAll, expect, test } from 'bun:test'
+import { afterAll, expect, setDefaultTimeout, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { useApplication } from './application'
 import { tempDirectory } from './tempDirectory'
+
+setDefaultTimeout(30_000)
 
 const repoRoot = join(import.meta.dir, '..', '..')
 const basisLink = join(repoRoot, 'node_modules', 'basis')

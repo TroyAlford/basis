@@ -174,6 +174,7 @@ describe('snapshot runtime lifecycle', () => {
     ], {
       cwd: target.dir,
       env: {
+        BASIS_SNAPSHOT_PRELOAD: '1',
         [SNAPSHOT_ACTIVITY_LOG]: target.activity,
         UPDATE_SNAPSHOTS: '1',
       },

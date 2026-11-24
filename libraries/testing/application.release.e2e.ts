@@ -3,13 +3,16 @@
 import { afterAll, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import type { Page } from 'playwright'
+import { reservePort } from './application'
 import { withPage } from './browser'
 
 const fixture = join(import.meta.dir, '..', '..', 'testing', 'release')
 const children = new Set<ReturnType<typeof Bun.spawn>>()
+const reservations = new Set<ReturnType<typeof reservePort>>()
 
 afterAll(() => {
   for (const child of children) child.kill()
+  for (const reservation of reservations) reservation.release()
 })
 
 /**
@@ -17,10 +20,9 @@ afterAll(() => {
  * @returns The port number.
  */
 function port(): number {
-  const server = Bun.serve({ fetch: () => new Response(null, { status: 204 }), hostname: '127.0.0.1', port: 0 })
-  const value = server.port
-  server.stop(true)
-  return value
+  const reservation = reservePort()
+  reservations.add(reservation)
+  return reservation.port
 }
 
 /**

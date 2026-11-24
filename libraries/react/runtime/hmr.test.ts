@@ -1,4 +1,4 @@
-import { render } from 'basis/testing'
+import { render, waitFor } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { Component } from '../components/Component/Component'
@@ -144,7 +144,7 @@ describe('production HMR runtime', () => {
     }
 
     register('nested:child', UpdatedChild)
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await waitFor(() => mounted.node.textContent === 'new')
     expect(mounted.node.textContent).toBe('new')
 
     mounted.unmount()

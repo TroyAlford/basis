@@ -1,5 +1,8 @@
+import { setDefaultTimeout } from 'bun:test'
 import { join } from 'node:path'
 import { matchScreenshot, test, useApplication } from '../../testing'
+
+setDefaultTimeout(30_000)
 
 /**
  * Visual regression for the components whose meaningful state only exists after

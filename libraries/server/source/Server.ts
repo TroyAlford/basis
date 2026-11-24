@@ -683,7 +683,7 @@ export class Server<
     const outdir = path.join(this.#root, 'dist', 'vendor', this.#ssrScope)
     this.#vendorRoot = outdir
 
-    try {
+    const prepare = async (): Promise<ReadonlySet<string>> => {
       const specifiers = await discoverVendorSpecifiers({
         entrypoint: entrypoints[0],
         plugins: [pluginSASS(), pluginMarkdown()],
@@ -691,16 +691,34 @@ export class Server<
       })
       this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers })
       return new Set(specifiers)
-    } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error))
-      this.#logger.error(`client vendor discovery failed: ${failure.message}`)
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: error })
-      }
-      this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers: [] })
-        .catch(() => null)
-      return new Set()
     }
+
+    let failure: Error | null = null
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await prepare()
+      } catch (error) {
+        failure = error instanceof Error ? error : new Error(String(error))
+        /*
+         * Bun can report a generic "Bundle failed" under a transient startup
+         * race. Retry once; a deterministic failure still fails below.
+         */
+        if (attempt === 0 && failure.message === 'Bundle failed') {
+          await Bun.sleep(100)
+          continue
+        }
+        break
+      }
+    }
+
+    if (failure === null) failure = new Error('vendor preparation failed')
+    this.#logger.error(`client vendor discovery failed: ${failure.message}`)
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: failure })
+    }
+    this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers: [] })
+      .catch(() => null)
+    return new Set()
   }
 
   /**

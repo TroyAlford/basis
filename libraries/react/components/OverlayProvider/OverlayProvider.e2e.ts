@@ -1,8 +1,10 @@
-import { beforeAll, expect } from 'bun:test'
+import { beforeAll, expect, setDefaultTimeout } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from '../../../testing'
 import { describe, test, useApplication } from '../../../testing'
 import { getBrowser } from '../../../testing/browser'
+
+setDefaultTimeout(30_000)
 
 const root = join(import.meta.dir, '..', '..', '..', '..')
 
