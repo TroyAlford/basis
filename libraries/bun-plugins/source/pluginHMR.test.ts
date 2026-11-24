@@ -95,6 +95,10 @@ describe('isInstalledDependency', () => {
     }
   })
 
+  test('classifies Basis framework source as first-party even when installed', () => {
+    expect(isInstalledDependency(join(import.meta.dir, 'pluginHMR.ts'))).toBe(false)
+  })
+
   test('classifies genuine installed dependencies as third-party', () => {
     const root = tempDirectory('basis-hmr-dependency-')
     try {

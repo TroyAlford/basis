@@ -39,6 +39,9 @@ const LOADER_BY_EXTENSION: Record<string, JavaScriptLoader> = {
 /** Path segment that owns installed dependencies rather than first-party source. */
 const INSTALLED_SEGMENT = 'node_modules'
 
+/** Basis's own source is framework code even when installed under node_modules. */
+const BASIS_ROOT = path.resolve(import.meta.dir, '..', '..', '..')
+
 /**
  * Whether a module belongs to an installed dependency rather than first-party
  * source.
@@ -56,6 +59,8 @@ export function isInstalledDependency(filePath: string): boolean {
   } catch {
     // Virtual or not-yet-written modules keep their declared path.
   }
+  const relative = path.relative(BASIS_ROOT, resolved)
+  if (relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)) return false
   return resolved.replace(/\\/g, '/').split('/').includes(INSTALLED_SEGMENT)
 }
 
