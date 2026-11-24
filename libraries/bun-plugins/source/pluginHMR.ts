@@ -1,6 +1,7 @@
 import { parse } from '@babel/parser'
 import traverse from '@babel/traverse'
 import type { BunPlugin, JavaScriptLoader } from 'bun'
+import { realpathSync } from 'node:fs'
 import * as path from 'node:path'
 
 /**
@@ -33,6 +34,29 @@ const LOADER_BY_EXTENSION: Record<string, JavaScriptLoader> = {
   jsx: 'jsx',
   ts: 'ts',
   tsx: 'tsx',
+}
+
+/** Path segment that owns installed dependencies rather than first-party source. */
+const INSTALLED_SEGMENT = 'node_modules'
+
+/**
+ * Whether a module belongs to an installed dependency rather than first-party
+ * source.
+ *
+ * Bun resolves workspace packages through `node_modules` symlinks, so the
+ * lexical path alone cannot distinguish a first-party package from a third-party
+ * dependency. Resolve the real path and classify by its owning directory.
+ * @param filePath - Absolute module path supplied by Bun.
+ * @returns Whether the module is owned by `node_modules`.
+ */
+export function isInstalledDependency(filePath: string): boolean {
+  let resolved = filePath
+  try {
+    resolved = realpathSync(filePath)
+  } catch {
+    // Virtual or not-yet-written modules keep their declared path.
+  }
+  return resolved.replace(/\\/g, '/').split('/').includes(INSTALLED_SEGMENT)
 }
 
 /** A source edit positioned by absolute offsets. */
@@ -245,7 +269,7 @@ export const pluginHMR = ({ force = false }: PluginHMROptions = {}): BunPlugin =
     if (!force && process.env.NODE_ENV !== 'production') return
 
     build.onLoad({ filter: /\.[jt]sx?$/ }, async args => {
-      if (args.path.includes('node_modules') || /\.d\.[jt]s$/.test(args.path)) return undefined
+      if (isInstalledDependency(args.path) || /\.d\.[jt]s$/.test(args.path)) return undefined
 
       const source = await Bun.file(args.path).text()
       return transformProductionModule(source, args.path, process.cwd()) ?? undefined

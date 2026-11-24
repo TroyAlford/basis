@@ -1,6 +1,9 @@
+import { tempDirectory } from 'basis/testing'
 import type { PluginBuilder } from 'bun'
 import { describe, expect, test } from 'bun:test'
-import { pluginHMR, transformProductionModule } from './pluginHMR'
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { isInstalledDependency, pluginHMR, transformProductionModule } from './pluginHMR'
 
 describe('transformProductionModule', () => {
   test('registers a named class export and accepts the module', () => {
@@ -75,6 +78,37 @@ describe('transformProductionModule', () => {
   })
 })
 
+describe('isInstalledDependency', () => {
+  test('classifies workspace source behind a node_modules symlink as first-party', () => {
+    const root = tempDirectory('basis-hmr-workspace-')
+    try {
+      const workspace = join(root, 'packages', 'widget')
+      const modules = join(root, 'node_modules')
+      mkdirSync(workspace, { recursive: true })
+      mkdirSync(modules, { recursive: true })
+      writeFileSync(join(workspace, 'index.tsx'), 'export class Widget extends Component {}')
+      symlinkSync(workspace, join(modules, 'widget'), 'dir')
+
+      expect(isInstalledDependency(join(modules, 'widget', 'index.tsx'))).toBe(false)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test('classifies genuine installed dependencies as third-party', () => {
+    const root = tempDirectory('basis-hmr-dependency-')
+    try {
+      const file = join(root, 'node_modules', 'third-party', 'index.tsx')
+      mkdirSync(join(root, 'node_modules', 'third-party'), { recursive: true })
+      writeFileSync(file, 'export const value = <span />')
+
+      expect(isInstalledDependency(file)).toBe(true)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+})
+
 describe('pluginHMR', () => {
   /**
    * Run plugin setup against a stub builder and report whether it registered a loader.
@@ -125,6 +159,37 @@ describe('pluginHMR', () => {
     } finally {
       if (previous === undefined) delete process.env.NODE_ENV
       else process.env.NODE_ENV = previous
+    }
+  })
+
+  test('transforms workspace source but skips a genuine installed dependency', async () => {
+    const root = tempDirectory('basis-hmr-classification-')
+    try {
+      const workspace = join(root, 'packages', 'widget')
+      const modules = join(root, 'node_modules')
+      mkdirSync(workspace, { recursive: true })
+      mkdirSync(join(modules, 'third-party'), { recursive: true })
+      const workspaceFile = join(workspace, 'index.tsx')
+      const thirdPartyFile = join(modules, 'third-party', 'index.tsx')
+      writeFileSync(workspaceFile, 'export class Widget extends Component { render() { return <span /> } }')
+      writeFileSync(thirdPartyFile, 'export const value = <span />')
+      symlinkSync(workspace, join(modules, 'widget'), 'dir')
+
+      let load: ((args: { path: string }) => Promise<{ contents: string } | undefined>) | undefined
+      const build = {
+        config: { target: 'browser' },
+        onLoad: (_filter: RegExp, callback: typeof load) => { load = callback },
+      } as unknown as PluginBuilder
+      pluginHMR({ force: true }).setup(build)
+      if (!load) throw new Error('plugin did not register an onLoad callback')
+
+      const firstParty = await load({ path: join(modules, 'widget', 'index.tsx') })
+      expect(firstParty?.contents).toContain('react/jsx-runtime')
+      expect(firstParty?.contents).toContain('__basisHMRRegister')
+      expect(firstParty?.contents).not.toContain('jsxDEV')
+      await expect(load({ path: thirdPartyFile })).resolves.toBeUndefined()
+    } finally {
+      rmSync(root, { force: true, recursive: true })
     }
   })
 
