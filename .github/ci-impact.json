@@ -160,8 +160,7 @@
     "lifecycle": {
       "testGlobs": [
         "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",
-        "libraries/server/source/ReleaseRecovery.e2e.ts",
-        "libraries/testing/runtime.lifecycle.e2e.ts"
+        "libraries/server/source/ReleaseRecovery.e2e.ts"
       ],
       "sourceGlobs": [
         "libraries/server/**/*.ts",
