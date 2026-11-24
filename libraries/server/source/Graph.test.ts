@@ -58,7 +58,7 @@ describe('Graph', () => {
       .toEqual(original.physicalSchema('basis_app', true))
   })
 
-  test('compiles root grants from the canonical identity fields', () => {
+  test('compiles concrete leaf grants from inherited security fields', () => {
     const rootGraph = new Graph({
       entities: [{
         fields: [],
@@ -66,11 +66,12 @@ describe('Graph', () => {
         security: { [Action.Read]: { where: 'id = $me' } },
       }],
     })
-    const read = rootGraph.physicalSchema('basis_app', true).policies.find(policy => (
-      policy.table === 'Entity' && policy.command === 'SELECT'
-    ))
+    const schema = rootGraph.physicalSchema('basis_app', true)
+    expect(schema.policies.find(policy => policy.table === 'Entity' && policy.command === 'SELECT'))
+      .toBeUndefined()
+    const read = schema.policies.find(policy => policy.table === 'Note' && policy.command === 'SELECT')
+    expect(read?.sql).toContain('CREATE POLICY')
     expect(read?.sql).toContain('public.policy_')
-    expect(read?.sql).toContain('"Entity"."entity"')
     expect(() => new Graph({
       entities: [{ fields: [{ field: 'name', type: 'String' }], name: 'Note' }],
     })).toThrow('reserved for the universal identity root')
@@ -198,15 +199,22 @@ describe('Graph', () => {
 
   test('compiles concrete SQL policies for every table and write check', () => {
     const schema = graph.physicalSchema('basis_app', true)
-    expect(schema.tables.every(table => table.rowSecurity)).toBe(true)
-    expect(schema.tables.every(table => table.forceRowSecurity)).toBe(true)
+    expect(schema.tables.find(table => table.name === 'Entity')?.rowSecurity).toBe(false)
+    const leaves = schema.tables.filter(table => {
+      const entity = graph.definitions.entity(table.name)
+      return entity !== undefined && !entity.abstract
+    })
+    expect(leaves.every(table => table.rowSecurity)).toBe(true)
+    expect(leaves.every(table => table.forceRowSecurity)).toBe(true)
+    expect(schema.tables.filter(table => graph.definitions.relationship(table.name))
+      .every(table => table.rowSecurity)).toBe(true)
     const read = schema.policies.find(policy => policy.table === 'Article' && policy.command === 'SELECT')
     const update = schema.policies.find(policy => policy.table === 'Article' && policy.command === 'UPDATE')
     expect(read?.sql).toContain('current_setting(\'actor.id\', true)')
     expect(read?.sql).toContain('CREATE POLICY')
     expect(update?.sql).toContain('USING')
     expect(update?.sql).toContain('WITH CHECK')
-    expect(schema.policies.some(policy => policy.table === 'Entity' && policy.command === 'SELECT')).toBe(true)
+    expect(schema.policies.some(policy => policy.table === 'Entity' && policy.command === 'SELECT')).toBe(false)
     expect(schema.policies.some(policy => policy.sql.includes('basis.matches'))).toBe(false)
     expect(schema.policies.some(policy => policy.sql.includes('authorized_row'))).toBe(false)
     expect(update?.sql).toContain("basis.has_role('public',")
@@ -750,8 +758,8 @@ describe('Graph', () => {
       ],
     } as never)
     const schema = inherited.physicalSchema('basis_app', true)
-    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'SELECT')?.sql)
-      .toContain('TRUE')
+    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'SELECT'))
+      .toBeUndefined()
     expect(schema.policies.find(policy => policy.table === 'Room' && policy.command === 'SELECT')?.sql)
       .toContain('TRUE')
   })

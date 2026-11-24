@@ -891,6 +891,32 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('plans removal of a policy present in the previous artifact', () => {
+    const model = new Graph({
+      entities: [noteEntity()],
+    })
+    const historical = model.physicalSchema('basis_app', false)
+    const policy = historical.policies[0]
+    if (!policy) throw new Error('compiled policy was not found')
+    const previousPhysical = {
+      ...historical,
+      policies: [
+        ...historical.policies,
+        { ...policy, name: 'basis_Note_obsolete', sql: `${policy.sql} ` },
+      ],
+    }
+    const plan = DDL.plan({
+      actual: previousPhysical,
+      appRole: 'basis_app',
+      desired: model,
+      previousPhysical,
+    })
+    expect(plan.drift).toEqual([])
+    expect(plan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id === 'drop-policy:basis_Note_obsolete'
+    ))).toBe(true)
+  })
+
   test('blocks an existing policy deployment without historical provenance', () => {
     const model = new Graph({
       entities: [noteEntity()],

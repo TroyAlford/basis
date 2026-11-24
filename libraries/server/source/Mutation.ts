@@ -350,16 +350,12 @@ async function edit(
   const definition = requireEntity(entities, entity)
   const normalized = prepareChanges(entities, definition, changes, '/changes')
   const matches = await selectMatches({ entities, sql }, definition, filter)
-  const mutable = await applyEdit({ entities, sql }, definition, matches, normalized)
+  const edited = await applyEdit({ entities, sql }, definition, matches, normalized)
+  const mutable = edited.mutable
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   if (mutable.length !== 1) return { edited: mutable.length }
-  const [identity] = mutable
-  if (!identity) return { edited: 0 }
-  const leaf = requireConcrete(entities, identity.entity)
-  return {
-    edited: 1,
-    record: await readRecord({ entities, sql }, leaf, identity.id),
-  }
+  if (!edited.record) throw new MutationError('infrastructure', 'Edit record was not materialized')
+  return { edited: 1, record: edited.record }
 }
 
 /**
@@ -412,26 +408,32 @@ async function upsert(
     return createUpsert({ entities, sql }, definition, filter, values)
   }
 
-  const mutable = await authorizeEdit({ entities, sql }, definition, matches)
-  if (mutable.length === 0) {
-    return createUpsert({ entities, sql }, definition, filter, values)
-  }
-  if (mutable.length > 1) {
-    throw new MutationError(
-      'cardinality',
-      `Upsert selected ${mutable.length} mutable entities; exactly one is required`,
-    )
-  }
-  const changes = prepareChanges(entities, definition, values, '/values')
-  await applyChanges({ entities, sql }, definition, mutable, changes)
+  const outcome = await withMutationSavepoint(sql, async (): Promise<
+    { readonly mutable: readonly SelectedIdentity[], readonly record: MutationRecord } | { readonly create: true }
+  > => {
+    const mutable = await authorizeEdit({ entities, sql }, definition, matches)
+    if (mutable.length === 0) return { create: true }
+    if (mutable.length > 1) {
+      throw new MutationError(
+        'cardinality',
+        `Upsert selected ${mutable.length} mutable entities; exactly one is required`,
+      )
+    }
+    const changes = prepareChanges(entities, definition, values, '/values')
+    await applyChanges({ entities, sql }, definition, mutable, changes)
+    await verifyFinalState({ entities, sql }, definition, mutable)
+    await writeIds(definition, sql, 'Entity', mutable.map(identity => identity.id), new Map())
+    const [identity] = mutable
+    if (identity === undefined) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
+    return {
+      mutable,
+      record: await readRecord({ entities, sql }, definition, identity.id),
+    }
+  })
+  if ('create' in outcome) return createUpsert({ entities, sql }, definition, filter, values)
+  const mutable = outcome.mutable
   for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
-  const [identity] = mutable
-  if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
-  return {
-    created: 0,
-    edited: 1,
-    record: await readRecord({ entities, sql }, definition, identity.id),
-  }
+  return { created: 0, edited: 1, record: outcome.record }
 }
 
 /**
@@ -453,30 +455,23 @@ async function createUpsert(
   filter: MutationFilter,
   values: MutationValues,
 ): Promise<UpsertResult> {
-  const name = `basis_upsert_${randomUUID().replaceAll('-', '')}`
-  await execute(sql, { sql: `SAVEPOINT ${quote(name)}`, values: [] })
-  try {
-    const item = prepareCreate(definition, values, '/values')
-    await insert(entities, sql, definition, item)
+  const result = await withMutationSavepoint(sql, async () => {
+    const prepared = prepareCreate(definition, values, '/values')
+    await insert(entities, sql, definition, prepared)
     const matches = await selectMatches({ entities, sql }, definition, filter)
-    if (!matches.some(match => match.id === item.id)) {
+    if (!matches.some(match => match.id === prepared.id)) {
       throw new MutationError(
         'operation',
         'Upsert create values do not satisfy the selection filter',
       )
     }
-    await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
-    recordSubject(sql, definition.name, item.id)
     return {
-      created: 1,
-      edited: 0,
-      record: await readRecord({ entities, sql }, definition, item.id),
+      item: prepared,
+      record: await readRecord({ entities, sql }, definition, prepared.id),
     }
-  } catch (error) {
-    await sql.unsafe(`ROLLBACK TO SAVEPOINT ${quote(name)}`).catch(() => undefined)
-    await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
-    throw error
-  }
+  })
+  recordSubject(sql, definition.name, result.item.id)
+  return { created: 1, edited: 0, record: result.record }
 }
 
 /**
@@ -492,11 +487,18 @@ async function applyEdit(
   definition: EntityDefinition,
   matches: readonly SelectedIdentity[],
   changes: ReadonlyMap<string, unknown>,
-): Promise<readonly SelectedIdentity[]> {
-  if (matches.length === 0) return []
-  const mutable = await authorizeEdit(options, definition, matches)
-  await applyChanges(options, definition, mutable, changes)
-  return mutable
+): Promise<{ readonly mutable: readonly SelectedIdentity[], readonly record?: MutationRecord }> {
+  if (matches.length === 0) return { mutable: [] }
+  return withMutationSavepoint(options.sql, async () => {
+    const mutable = await authorizeEdit(options, definition, matches)
+    await applyChanges(options, definition, mutable, changes)
+    await verifyFinalState(options, definition, mutable)
+    await writeIds(definition, options.sql, 'Entity', mutable.map(identity => identity.id), new Map())
+    const [identity] = mutable
+    if (mutable.length !== 1 || identity === undefined) return { mutable }
+    const leaf = requireConcrete(options.entities, identity.entity)
+    return { mutable, record: await readRecord(options, leaf, identity.id) }
+  })
 }
 
 /**
@@ -512,10 +514,73 @@ async function authorizeEdit(
   definition: EntityDefinition,
   matches: readonly SelectedIdentity[],
 ): Promise<readonly SelectedIdentity[]> {
-  const ids = matches.map(match => match.id)
-  const rows = await writeIds(definition, sql, 'Entity', ids, new Map())
-  const allowed = new Set(rows)
+  const allowed = new Set<string>()
+  for (const [leaf, identities] of groupByIdentity(matches)) {
+    const rows = await writeIds(
+      definition,
+      sql,
+      leaf,
+      identities.map(identity => identity.id),
+      new Map(),
+    )
+    for (const id of rows) allowed.add(id)
+  }
   return matches.filter(match => allowed.has(match.id))
+}
+
+/**
+ * Run work inside a mutation-local savepoint so a caught failure cannot leak changes.
+ * @param sql - Transaction-scoped SQL client.
+ * @param work - Work to apply and verify atomically.
+ * @returns The work result.
+ */
+async function withMutationSavepoint<T>(
+  sql: BunSQL,
+  work: () => T | Promise<T>,
+): Promise<T> {
+  const name = `basis_mutation_${randomUUID().replaceAll('-', '')}`
+  await execute(sql, { sql: `SAVEPOINT ${quote(name)}`, values: [] })
+  try {
+    const result = await work()
+    await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
+    return result
+  } catch (error) {
+    await sql.unsafe(`ROLLBACK TO SAVEPOINT ${quote(name)}`).catch(() => undefined)
+    await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
+    throw error
+  }
+}
+
+/**
+ * Verify the resulting row state against each concrete leaf policy.
+ * @param options - Canonical definitions and transaction client.
+ * @param options.sql - Transaction-scoped SQL client.
+ * @param definition - Entity or abstract ancestor.
+ * @param matches - Identities whose changes were applied.
+ * @throws {MutationError} When the resulting state is no longer writable.
+ */
+async function verifyFinalState(
+  { sql }: MutationOptions,
+  definition: EntityDefinition,
+  matches: readonly SelectedIdentity[],
+): Promise<void> {
+  const allowed = new Set<string>()
+  for (const [leaf, identities] of groupByIdentity(matches)) {
+    const rows = await writeIds(
+      definition,
+      sql,
+      leaf,
+      identities.map(identity => identity.id),
+      new Map(),
+    )
+    for (const id of rows) allowed.add(id)
+  }
+  if (matches.some(match => !allowed.has(match.id))) {
+    throw new MutationError(
+      'authorization',
+      'The resulting entity state is not authorized for update',
+    )
+  }
 }
 
 /**
@@ -1017,9 +1082,9 @@ async function writeIds(
 /**
  * Delete one complete MTI chain in a single statement.
  *
- * Data-modifying CTEs share the command snapshot, so the root and parent
- * policies still see the concrete leaf while PostgreSQL checks the deferred
- * foreign keys against the statement's final state.
+ * The concrete leaf delete runs first so its RLS policy is the authorization
+ * boundary. The root and ancestor deletes are restricted to the leaf rows the
+ * policy returned; deferred foreign keys are checked against the final state.
  * @param sql - Transaction-scoped SQL client.
  * @param leaf - Concrete leaf table.
  * @param ancestry - Intermediate parent tables from leaf toward the root.
@@ -1041,14 +1106,14 @@ async function deleteChain(
   const condition = `${quote('id')} IN (${placeholders.join(', ')})`
   const parents = ancestry.map((table, index) => (
     `"parent_${index}_deleted" AS (` +
-    `DELETE FROM ${quote(table)} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "root_deleted") ` +
+    `DELETE FROM ${quote(table)} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "leaf_deleted") ` +
     `RETURNING ${quote('id')})`
   ))
   const rows = await execute(sql, {
-    sql: 'WITH "root_deleted" AS (' +
-      `DELETE FROM ${quote('Entity')} WHERE ${condition} RETURNING ${quote('id')}), ` +
-      '"leaf_deleted" AS (' +
-      `DELETE FROM ${quote(leaf)} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "root_deleted") ` +
+    sql: 'WITH "leaf_deleted" AS (' +
+      `DELETE FROM ${quote(leaf)} WHERE ${condition} RETURNING ${quote('id')}), ` +
+      '"root_deleted" AS (' +
+      `DELETE FROM ${quote('Entity')} WHERE ${quote('id')} IN (SELECT ${quote('id')} FROM "leaf_deleted") ` +
       `RETURNING ${quote('id')})` +
       (parents.length === 0 ? '' : `, ${parents.join(', ')}`) +
       ` SELECT ${quote('id')} FROM "leaf_deleted"`,

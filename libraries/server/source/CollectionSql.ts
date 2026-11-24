@@ -3,17 +3,23 @@ import type { EntityDefinitions, QueryFieldDefinition } from './EntityDefinition
 import { FieldType, relationshipView } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
-import type { QueryScope, SQLPredicate } from './SQL'
+import type { QueryScope, SqlFragment, SQLPredicate } from './SQL'
 import { SQL } from './SQL'
 
 /** Aliases used to compile one collection relation. */
 export interface CollectionSqlAliases {
+  /** Require authorized relations instead of the compatibility fallback. */
+  readonly authorized?: true,
   /** Alias for the named-relationship table, when the collection is relationship-backed. */
   readonly relationship: string,
   /** Alias for the universal `Entity` root joined to the related row. */
   readonly root: string,
+  /** Authorized relation for the universal root, when supplied by the planner. */
+  readonly rootRelation?: string,
   /** Alias for the concrete related entity table, when it is not `Entity`. */
   readonly target: string,
+  /** Authorized relation for a concrete target, when supplied by the planner. */
+  readonly targetRelation?: string,
 }
 
 /** One compiled collection relation. */
@@ -80,28 +86,36 @@ export function collectionSqlRelation(
     throw new Error('Entity Collections require an entity target view')
   }
   const targetName = resolved.target.definition.name
+  if (aliases.authorized === true) {
+    if (targetName === 'Entity' && aliases.rootRelation === undefined) {
+      throw new Error('Authorized Entity collections require a root relation')
+    }
+    if (targetName !== 'Entity' && aliases.targetRelation === undefined) {
+      throw new Error(`Authorized collection target "${targetName}" requires a target relation`)
+    }
+  }
   const source = resolved.source
   if (source.kind === 'inverse') {
     if (targetName === 'Entity') {
       const ownerId = `${quote(aliases.root)}.${quote('id')}`
       return {
         condition: `${ownerId} = ${parentId}`,
-        relation: `${quote('Entity')} ${quote(aliases.root)}`,
+        relation: `${quote(aliases.rootRelation ?? 'Entity')} ${quote(aliases.root)}`,
         resultType: 'entity',
         rootAlias: aliases.root,
         ...predicateEntry,
       }
     }
-    const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
-    const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
-    const targetId = `${quote(aliases.target)}.${quote('id')}`
-    const rootId = `${quote(aliases.root)}.${quote('id')}`
+    const targetSource = `${quote(aliases.targetRelation ?? targetName)} ${quote(aliases.target)}`
     const ownerId = `${quote(aliases.target)}.${quote(resolved.owner.column)}`
     return {
       condition: `${ownerId} = ${parentId}`,
-      relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
+      relation: aliases.targetRelation === undefined
+        ? `${targetSource} JOIN ${quote('Entity')} ${quote(aliases.root)} ` +
+          `ON ${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`
+        : targetSource,
       resultType: 'entity',
-      rootAlias: aliases.root,
+      rootAlias: aliases.targetRelation === undefined ? aliases.root : aliases.target,
       targetAlias: aliases.target,
       ...predicateEntry,
     }
@@ -116,28 +130,30 @@ export function collectionSqlRelation(
   const ownerId = `${quote(aliases.relationship)}.${quote(resolved.owner.column)}`
   const condition = `${ownerId} = ${parentId}`
   const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
-  const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
   const rootId = `${quote(aliases.root)}.${quote('id')}`
   const remoteId = `${quote(aliases.relationship)}.${remoteColumn}`
   if (targetName === 'Entity') {
     return {
       condition,
-      relation: `${relationshipSource} JOIN ${rootSource} ON ${rootId} = ${remoteId}`,
+      relation: `${relationshipSource} JOIN ${quote(aliases.rootRelation ?? 'Entity')} ` +
+        `${quote(aliases.root)} ON ${rootId} = ${remoteId}`,
       relationshipAlias: aliases.relationship,
       resultType: 'entity',
       rootAlias: aliases.root,
       ...predicateEntry,
     }
   }
-  const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
+  const targetSource = `${quote(aliases.targetRelation ?? targetName)} ${quote(aliases.target)}`
   const targetId = `${quote(aliases.target)}.${quote('id')}`
   const targetJoin = `${relationshipSource} JOIN ${targetSource} ON ${targetId} = ${remoteId}`
   return {
     condition,
-    relation: `${targetJoin} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
+    relation: aliases.targetRelation === undefined
+      ? `${targetJoin} JOIN ${quote('Entity')} ${quote(aliases.root)} ON ${rootId} = ${targetId}`
+      : targetJoin,
     relationshipAlias: aliases.relationship,
     resultType: 'entity',
-    rootAlias: aliases.root,
+    rootAlias: aliases.targetRelation === undefined ? aliases.root : aliases.target,
     targetAlias: aliases.target,
     ...predicateEntry,
   }
@@ -182,7 +198,10 @@ function sourcePredicate(
     ? filters[0] as Filter
     : { filters, operator: Operator.Logical.And }
   const where = SQL.where(definitions, relationship.name, filter, scope)
-  return { sql: where.sql.replace(/^WHERE\s+/u, ''), values: where.values }
+  const result = { sql: where.predicate ?? '', values: where.values }
+  Object.defineProperty(result, 'predicate', { enumerable: false, value: where.predicate })
+  Object.defineProperty(result, 'pieces', { enumerable: false, value: (where as SqlFragment).pieces })
+  return result as typeof where
 }
 
 /**

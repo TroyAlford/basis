@@ -14,6 +14,7 @@ import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 import type { CollectionScope, QueryScope } from './SQL'
+import type { SqlFragment } from './SQL'
 import { SQL } from './SQL'
 
 /** The closed authorization action vocabulary. */
@@ -289,17 +290,22 @@ export class Graph {
   ): PhysicalSchema {
     const base = this.definitions.physicalSchema()
     if (!includeAuthorization) return base
-    const tables: PhysicalTable[] = base.tables.map(table => ({
-      ...table,
-      forceRowSecurity: superuser,
-      indexes: [
-        ...table.indexes,
-        ...this.#indexes().filter(index => (
-          index.table === table.name && !table.indexes.some(existing => existing.name === index.name)
-        )),
-      ],
-      rowSecurity: true,
-    }))
+    const tables: PhysicalTable[] = base.tables.map(table => {
+      const entity = this.definitions.entity(table.name)
+      const authorizationBoundary = table.name !== 'Entity'
+        && (entity === undefined || !entity.abstract)
+      return {
+        ...table,
+        forceRowSecurity: superuser && authorizationBoundary,
+        indexes: [
+          ...table.indexes,
+          ...this.#indexes().filter(index => (
+            index.table === table.name && !table.indexes.some(existing => existing.name === index.name)
+          )),
+        ],
+        rowSecurity: authorizationBoundary,
+      }
+    })
     const policies = this.#policies(appRole)
     const functions = [
       ...base.functions,
@@ -451,8 +457,14 @@ export class Graph {
       expression: field => literal(valueFor(field.name)),
       field: name => this.#policyPathField(entity, name),
     }
-    const where = SQL.whereFilter(this.definitions, entity.name, grant.predicate as Filter, scope)
-    return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
+    const where = SQL.whereFilter(
+      this.definitions,
+      entity.name,
+      grant.predicate as Filter,
+      scope,
+      value => literal(value),
+    )
+    return `(${where.predicate})`
   }
 
   /**
@@ -1295,7 +1307,7 @@ export class Graph {
       },
       field: resolve,
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
-      predicate: sql.predicate,
+      predicate: sql.predicate as unknown as SqlFragment,
       relation: sql.relation,
     }
   }
@@ -1414,12 +1426,14 @@ export class Graph {
       ...this.definitions.relationships.map(relationship => relationship.name)]
     for (const table of tables) {
       const relationship = this.definitions.relationship(table)
+      const abstractEntity = this.definitions.entity(table)?.abstract === true
       for (const [action, command] of [
         [Action.Read, 'SELECT'],
         [Action.Create, 'INSERT'],
         [Action.Update, 'UPDATE'],
         [Action.Delete, 'DELETE'],
       ] as const) {
+        if (action === Action.Read && (table === 'Entity' || abstractEntity)) continue
         const expression = table === 'Entity'
           ? this.#entityRootExpression(action)
           : relationship
@@ -1666,8 +1680,14 @@ export class Graph {
       field,
       filterField: field,
     }
-    const where = SQL.whereFilter(this.definitions, entity.name, grant.predicate as Filter, scope)
-    return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
+    const where = SQL.whereFilter(
+      this.definitions,
+      entity.name,
+      grant.predicate as Filter,
+      scope,
+      value => literal(value),
+    )
+    return `(${where.predicate})`
   }
 
   #searchPath(): string {
@@ -2303,16 +2323,6 @@ function literal(value: unknown): string {
     return `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`
   }
   return `'${String(value).replaceAll("'", "''")}'`
-}
-
-/**
- * Inline bound parameters into a policy expression.
- * @param sql - SQL with positional placeholders.
- * @param values - Bound values.
- * @returns SQL with literals.
- */
-function inline(sql: string, values: readonly unknown[]): string {
-  return sql.replace(/\$(\d+)/gu, (_match, index: string) => literal(values[Number(index) - 1]))
 }
 
 /**

@@ -53,7 +53,7 @@ class FakeSQL {
   async unsafe(sql: string, values: readonly unknown[] = []): Promise<Record<string, unknown>[]> {
     this.calls.push({ sql, values })
     if (sql.includes('pg_advisory_xact_lock')) return []
-    if (sql.trimStart().startsWith('SELECT')) return this.rows
+    if (/^(?:SELECT|WITH)\b/u.test(sql.trimStart())) return this.rows
     if (sql.includes('RETURNING "id"')) return this.rows
     return []
   }

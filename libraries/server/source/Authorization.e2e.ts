@@ -777,7 +777,7 @@ describe('Authorization RLS', () => {
     }
   }, 30_000)
 
-  test('authorizes sections through polymorphic document workspace membership', async () => {
+  test('authorizes navigation and collection counts through polymorphic document membership', async () => {
     const documentGraph = new Graph({
       entities: [
         {
@@ -996,21 +996,142 @@ describe('Authorization RLS', () => {
       const sectionsForActor = async (
         actor: string | null,
         document: string,
-      ): Promise<string[]> => {
+      ): Promise<{ readonly ids: string[], readonly matched: number }> => {
         const documents = await asActor(actor, () => server.db.query<{
           readonly id: string,
-          readonly sections: { readonly items: readonly { readonly id: string }[] },
+          readonly sections: {
+            readonly $matched: number,
+            readonly items: readonly { readonly id: string }[],
+          },
         }>('Document', { fields: ['id', 'sections{$limit:null}'], orderBy: 'id' }))
-        return documents
-          .find(candidate => candidate.id === document)?.sections.items.map(section => section.id)
-          .sort((left, right) => left.localeCompare(right)) ?? []
+        const sections = documents.find(candidate => candidate.id === document)?.sections
+        return {
+          ids: sections?.items.map(section => section.id)
+            .sort((left, right) => left.localeCompare(right)) ?? [],
+          matched: sections?.$matched ?? 0,
+        }
       }
-      expect(await sectionsForActor(null, privateDocumentA)).toEqual([])
-      expect(await sectionsForActor(charlie, privateDocumentA)).toEqual([])
-      expect(await sectionsForActor(alice, privateDocumentA)).toEqual([privateSectionA])
-      expect(await sectionsForActor(alice, privateDocumentB)).toEqual([])
-      expect(await sectionsForActor(alice, privateDocumentC)).toEqual([])
-      expect(await sectionsForActor(bob, privateDocumentB)).toEqual([privateSectionB])
+      expect(await sectionsForActor(null, privateDocumentA)).toEqual({ ids: [], matched: 0 })
+      expect(await sectionsForActor(charlie, privateDocumentA)).toEqual({ ids: [], matched: 0 })
+      expect(await sectionsForActor(alice, privateDocumentA)).toEqual({
+        ids: [privateSectionA],
+        matched: 1,
+      })
+      expect(await sectionsForActor(alice, privateDocumentB)).toEqual({ ids: [], matched: 0 })
+      expect(await sectionsForActor(alice, privateDocumentC)).toEqual({ ids: [], matched: 0 })
+      expect(await sectionsForActor(bob, privateDocumentB)).toEqual({
+        ids: [privateSectionB],
+        matched: 1,
+      })
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 30_000)
+
+  test('keeps unauthorized polymorphic descendants out of navigation and counts', async () => {
+    const polymorphicGraph = new Graph({
+      entities: [
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'items',
+            inverse: 'library',
+            target: 'Item',
+            type: 'Inverse',
+          }],
+          name: 'Library',
+          security: { [Action.Read]: Security.Public },
+        },
+        {
+          fields: [{ field: 'library', inverse: 'items', target: 'Library', type: 'Entity' }],
+          name: 'Item',
+        },
+        { extends: 'Item', fields: [], name: 'PublicItem', security: { [Action.Read]: Security.Public } },
+        {
+          extends: 'Item',
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'PrivateItem',
+          security: { [Action.Read]: { where: 'owner = $me' } },
+        },
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+      ],
+    })
+    const install = tempDirectory('basis-authorization-polymorphic-leaves-')
+    const server = await start(install, polymorphicGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      if (!alice || !bob) throw new Error('authorization users were not enrolled')
+      const library = randomUUID()
+      const publicItem = randomUUID()
+      const aliceItem = randomUUID()
+      const bobItem = randomUUID()
+      await admin.sql.begin(async tx => {
+        await tx`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES
+            (${library}, 'Library', 'Library'),
+            (${publicItem}, 'Public item', 'PublicItem'),
+            (${aliceItem}, 'Alice item', 'PrivateItem'),
+            (${bobItem}, 'Bob item', 'PrivateItem')
+        `
+        await tx`INSERT INTO "Library" ("id") VALUES (${library})`
+        await tx`
+          INSERT INTO "Item" ("id", "library.id")
+          VALUES
+            (${publicItem}, ${library}),
+            (${aliceItem}, ${library}),
+            (${bobItem}, ${library})
+        `
+        await tx`INSERT INTO "PublicItem" ("id") VALUES (${publicItem})`
+        await tx`
+          INSERT INTO "PrivateItem" ("id", "owner.id")
+          VALUES
+            (${aliceItem}, ${alice}),
+            (${bobItem}, ${bob})
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const visibleItems = (actor: string | null) => asActor(actor, () => server.db.query<{ id: string }>('Item', {
+        fields: ['id'],
+        orderBy: 'id',
+      }))
+      expect((await visibleItems(null)).map(item => item.id)).toEqual([publicItem])
+      expect((await visibleItems(alice)).map(item => item.id)).toEqual(
+        [publicItem, aliceItem].sort((left, right) => left.localeCompare(right)),
+      )
+      expect((await visibleItems(bob)).map(item => item.id)).toEqual(
+        [publicItem, bobItem].sort((left, right) => left.localeCompare(right)),
+      )
+
+      const navigation = (actor: string | null) => asActor(actor, () => server.db.query<{
+        readonly id: string,
+        readonly items: {
+          readonly $matched: number,
+          readonly items: readonly { readonly id: string }[],
+        },
+      }>('Library', { fields: ['id', 'items{$limit:null}'], orderBy: 'id' }))
+      const forAlice = await navigation(alice)
+      expect(forAlice[0]?.items.items.map(item => item.id).sort((left, right) => left.localeCompare(right)))
+        .toEqual([publicItem, aliceItem].sort((left, right) => left.localeCompare(right)))
+      expect(forAlice[0]?.items.$matched).toBe(2)
+      const forBob = await navigation(bob)
+      expect(forBob[0]?.items.items.map(item => item.id).sort((left, right) => left.localeCompare(right)))
+        .toEqual([publicItem, bobItem].sort((left, right) => left.localeCompare(right)))
+      expect(forBob[0]?.items.$matched).toBe(2)
+      expect((await navigation(null))[0]?.items.$matched).toBe(1)
     } finally {
       await admin.close()
       await server.shutdown()
@@ -1725,11 +1846,20 @@ describe('Authorization RLS', () => {
       expect(await asActor(bob, () => authorization.can('update', 'Note', { id: note }))).toBe(false)
       expect(await asActor(alice, () => authorization.can('update', 'Note', { id: note }))).toBe(true)
 
-      const remove = (actor: string) => asActor(actor, () => server.db.tx(async sql => sql<{ id: string }[]>`
-        DELETE FROM "Note"
-        WHERE "id" = ${note}
-        RETURNING "id"
-      `))
+      const remove = (actor: string) => asActor(actor, () => server.db.tx(async sql => {
+        const removed = await sql<{ id: string }[]>`
+          DELETE FROM "Note"
+          WHERE "id" = ${note}
+          RETURNING "id"
+        `
+        if (removed.length > 0) {
+          await sql`
+            DELETE FROM "Entity"
+            WHERE "id" = ${note}
+          `
+        }
+        return removed
+      }))
       expect(await remove(bob)).toHaveLength(0)
       expect(await remove(alice)).toHaveLength(1)
     } finally {

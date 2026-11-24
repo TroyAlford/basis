@@ -14,12 +14,7 @@ export interface SQLOrder {
 }
 
 /** A validated parameterized pagination clause. */
-export interface SQLPagination {
-  /** Quoted `LIMIT`/`OFFSET` clause, or an empty string. */
-  readonly sql: string,
-  /** Values for the `$1`, `$2`, … placeholders. */
-  readonly values: readonly unknown[],
-}
+export type SQLPagination = SqlFragment
 
 /** A root-field sort request. */
 export interface OrderByField {
@@ -45,6 +40,10 @@ export interface SQLSelection {
 
 /** A validated parameterized predicate clause. */
 export interface SQLPredicate {
+  /** Ordered structural pieces, when built by the compiler. */
+  readonly pieces?: readonly SqlPiece[],
+  /** Predicate expression without the `WHERE` keyword. */
+  readonly predicate?: string,
   /** Quoted PostgreSQL `WHERE` clause, or an empty string. */
   readonly sql: string,
   /** Values for the `$1`, `$2`, … placeholders. */
@@ -66,8 +65,8 @@ export interface CollectionScope {
   /** Render one inner field expression. */
   readonly expression: (
     field: QueryFieldDefinition,
-    bind?: (value: BoundScalar) => string,
-  ) => string,
+    bind?: (value: BoundScalar) => SqlFragment,
+  ) => SqlFragment | string,
   /** Resolve one inner field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
   /** Optional count expression metadata for inner count paths. */
@@ -92,16 +91,126 @@ export interface CollectionScopeVariant {
   readonly scope: CollectionScope,
 }
 
+/** One literal SQL text piece or structural parameter slot. */
+type SqlPiece = string | { readonly value: unknown }
+
 /** One parameterized SQL fragment. */
 export interface SqlFragment {
+  /** Ordered literal text and parameter slots. */
+  readonly pieces: readonly SqlPiece[],
   /** SQL text with positional `$1`, `$2`, … placeholders. */
   readonly sql: string,
   /** Values bound to the placeholders, in order. */
   readonly values: readonly unknown[],
 }
 
+/**
+ * Render ordered pieces once into inspectable SQL and ordered values.
+ * @param pieces - Ordered literal and parameter pieces.
+ * @returns Inspectable SQL and ordered values.
+ */
+function compilePieces(pieces: readonly SqlPiece[]): { sql: string, values: readonly unknown[] } {
+  const values: unknown[] = []
+  let sql = ''
+  for (const piece of pieces) {
+    if (typeof piece === 'string') sql += piece
+    else {
+      values.push(piece.value)
+      sql += `$${values.length}`
+    }
+  }
+  return { sql, values }
+}
+
+/**
+ * Build a fragment from ordered pieces.
+ * @param pieces - Ordered literal and parameter pieces.
+ * @returns One ordered SQL fragment.
+ */
+function fragmentOf(pieces: readonly SqlPiece[]): SqlFragment {
+  const compiled = compilePieces(pieces)
+  const fragment = { sql: compiled.sql, values: compiled.values }
+  Object.defineProperty(fragment, 'pieces', { enumerable: false, value: pieces })
+  return fragment as SqlFragment
+}
+
+/**
+ * Literal SQL text.
+ * @param text - Literal SQL text.
+ * @returns One literal fragment.
+ */
+export function sqlText(text: string): SqlFragment {
+  return fragmentOf([text])
+}
+
+/**
+ * One bound value slot.
+ * @param value - Bound value.
+ * @returns One parameter fragment.
+ */
+export function sqlValue(value: unknown): SqlFragment {
+  return fragmentOf([{ value }])
+}
+
+/**
+ * Whether a value is an ordered SQL fragment.
+ * @param value - Candidate value.
+ * @returns Whether the value is a fragment.
+ */
+function isSqlFragment(value: unknown): value is SqlFragment {
+  return typeof value === 'object' && value !== null && 'pieces' in value
+}
+
+/**
+ * Build one fragment from template text and nested values.
+ * @param strings - Template literal text.
+ * @param values - Interpolated values and nested fragments.
+ * @returns One ordered SQL fragment.
+ */
+export function sqlFragment(strings: TemplateStringsArray, ...values: readonly unknown[]): SqlFragment {
+  const pieces: SqlPiece[] = []
+  strings.forEach((text, index) => {
+    pieces.push(text)
+    if (index >= values.length) return
+    const value = values[index]
+    if (isSqlFragment(value)) pieces.push(...value.pieces)
+    else pieces.push({ value })
+  })
+  return fragmentOf(pieces)
+}
+
+/**
+ * Concatenate fragments and literal strings in order.
+ * @param fragments - Ordered fragments and literals.
+ * @param separator - Text between non-empty fragments.
+ * @returns One ordered SQL fragment.
+ */
+export function sqlConcat(
+  fragments: readonly (SqlFragment | string | undefined)[],
+  separator = ' ',
+): SqlFragment {
+  const pieces: SqlPiece[] = []
+  let wrote = false
+  for (const value of fragments) {
+    if (value === undefined) continue
+    if (typeof value === 'string') {
+      if (value === '') continue
+      if (wrote && separator !== '') pieces.push(separator)
+      pieces.push(value)
+      wrote = true
+      continue
+    }
+    if (value.pieces === undefined) throw new Error(`SQL fragment missing pieces: ${JSON.stringify(value)}`)
+    if (value.pieces.length === 0) continue
+    if (wrote && separator !== '') pieces.push(separator)
+    pieces.push(...value.pieces)
+    wrote = true
+  }
+  return fragmentOf(pieces)
+}
+
 /** Render a count form through the caller's value binder. */
-export type CountRenderer = (bind: (value: BoundScalar) => string) => string
+export type CountRenderer = (bind: (value: BoundScalar) => SqlFragment) => SqlFragment | string
 
 /** Count expression forms used to canonicalize collection counts. */
 export interface CountScope {
@@ -122,7 +231,7 @@ export interface ArrayScope {
   /** Consume finite compiler work for one emitted member predicate. */
   readonly consume?: (units?: number) => void,
   /** SQL array expression to unnest. */
-  readonly expression: string,
+  readonly expression: SqlFragment | string,
   /** Native array field metadata. */
   readonly field: ArrayFieldDefinition,
   /** Scalar element metadata. */
@@ -138,7 +247,10 @@ export interface QueryScope {
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
-  readonly expression: (field: QueryFieldDefinition, bind?: (value: BoundScalar) => string) => string,
+  readonly expression: (
+    field: QueryFieldDefinition,
+    bind?: (value: BoundScalar) => SqlFragment,
+  ) => SqlFragment | string,
   /** Resolve a root ordering field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
   /** Optional count expression metadata for canonical zero/existence forms. */
@@ -183,16 +295,16 @@ interface ComparisonRenderer {
   /** Build the SQL fragment and bind its value. */
   readonly build: (
     field: QueryFieldDefinition,
-    column: string,
+    column: SqlFragment,
     operand: unknown,
-    bind: (value: BoundScalar) => string,
-  ) => string,
+    bind: (value: BoundScalar) => SqlFragment,
+  ) => SqlFragment,
 }
 
 /** A per-logical-operator definition used by the closed operator registry. */
 interface LogicalDefinition {
   /** Build a parenthesized logical group. */
-  readonly build: (children: readonly string[]) => string,
+  readonly build: (children: readonly SqlFragment[]) => SqlFragment,
   /** Maximum number of child predicates, when fixed. */
   readonly maximumOperands?: number,
   /** Minimum number of child predicates. */
@@ -204,12 +316,12 @@ const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
   [Operator.Comparison.Equal, {
     build: (field, column, operand, bind) => {
       if (field.type === FieldType.Array) {
-        if (operand === null) return `${column} IS NULL`
+        if (operand === null) return sqlFragment`${column} IS NULL`
         const rhs = arrayExpression(field, operand, bind)
-        return `(${column} IS NOT NULL AND ${column} @> ${rhs} AND ${column} <@ ${rhs})`
+        return sqlFragment`(${column} IS NOT NULL AND ${column} @> ${rhs} AND ${column} <@ ${rhs})`
       }
-      if (operand === null) return `${column} IS NULL`
-      return `${column} IS NOT DISTINCT FROM ${bind(operand as BoundScalar)}`
+      if (operand === null) return sqlFragment`${column} IS NULL`
+      return sqlFragment`${column} IS NOT DISTINCT FROM ${bind(operand as BoundScalar)}`
     },
   }],
   [Operator.Comparison.SequenceEqual, {
@@ -217,20 +329,20 @@ const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
       if (field.type !== FieldType.Array) {
         throw new Error(`Query operator "${Operator.Comparison.SequenceEqual}" requires an array field`)
       }
-      return `${column} IS NOT DISTINCT FROM ${arrayExpression(field, operand, bind)}`
+      return sqlFragment`${column} IS NOT DISTINCT FROM ${arrayExpression(field, operand, bind)}`
     },
   }],
   [Operator.Comparison.Contains, {
     build: (field, column, operand, bind) => {
       if (field.type === FieldType.Array) {
-        return `${column} @> ${arrayExpression(field, operand, bind)}`
+        return sqlFragment`${column} @> ${arrayExpression(field, operand, bind)}`
       }
       if (field.type === FieldType.JSON) {
-        return `${column} @> ${bind(JSON.stringify(operand))}::text::jsonb`
+        return sqlFragment`${column} @> ${bind(JSON.stringify(operand))}::text::jsonb`
       }
       const value = operand as string
       const pattern = `%${value.replace(/[\\%_]/gu, '\\$&')}%`
-      return `(${column} IS NOT NULL AND ${column} ILIKE ${bind(pattern)} ESCAPE '\\')`
+      return sqlFragment`(${column} IS NOT NULL AND ${column} ILIKE ${bind(pattern)} ESCAPE '\\')`
     },
   }],
   [Operator.Comparison.In, {
@@ -239,7 +351,7 @@ const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
       if (values.length === 0) {
         throw new Error(`Query operator "${Operator.Comparison.In}" requires a non-empty value list`)
       }
-      return `${column} IN (${values.map(value => bind(value)).join(', ')})`
+      return sqlFragment`${column} IN (${sqlConcat(values.map(value => bind(value)), ', ')})`
     },
   }],
   [Operator.Comparison.Overlaps, {
@@ -247,7 +359,7 @@ const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
       if (field.type !== FieldType.Array) {
         throw new Error(`Query operator "${Operator.Comparison.Overlaps}" requires an array field`)
       }
-      return `${column} && ${arrayExpression(field, operand, bind)}`
+      return sqlFragment`${column} && ${arrayExpression(field, operand, bind)}`
     },
   }],
   [Operator.Comparison.Empty, {
@@ -255,7 +367,7 @@ const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
       if (field.type !== FieldType.Array) {
         throw new Error(`Query operator "${Operator.Comparison.Empty}" requires an array field`)
       }
-      return `COALESCE(cardinality(${column}), 0) = 0`
+      return sqlFragment`COALESCE(cardinality(${column}), 0) = 0`
     },
   }],
   [Operator.Comparison.GreaterThan, rangeRenderer('>')],
@@ -267,16 +379,16 @@ const comparisonRenderers = new Map<Operator.Comparison, ComparisonRenderer>([
 /** The complete logical operator registry. */
 const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
   [Operator.Logical.And, {
-    build: children => `(${children.join(' AND ')})`,
+    build: children => sqlFragment`(${sqlConcat(children, ' AND ')})`,
     minimumOperands: 1,
   }],
   [Operator.Logical.Not, {
-    build: children => `(NOT COALESCE((${children[0]}), FALSE))`,
+    build: children => sqlFragment`(NOT COALESCE((${children[0] ?? sqlText('')}), FALSE))`,
     maximumOperands: 1,
     minimumOperands: 1,
   }],
   [Operator.Logical.Or, {
-    build: children => `(${children.join(' OR ')})`,
+    build: children => sqlFragment`(${sqlConcat(children, ' OR ')})`,
     minimumOperands: 1,
   }],
 ])
@@ -311,8 +423,30 @@ function whereClause(
     }
   })
   const filter = Predicate.normalize(entity, where, resolve, scope?.collection, array)
-  if (!filter) return { sql: '', values: [] }
+  if (!filter) return predicateResult('', [], '')
   return whereFilter(entities, entityName, filter, scope)
+}
+
+/**
+ * Build one predicate result with a non-enumerable bare expression.
+ * @param sql - Complete `WHERE` clause.
+ * @param values - Bound values.
+ * @param predicate - Expression without `WHERE`.
+ * @param fragment - Optional structural predicate fragment.
+ * @returns Predicate result.
+ */
+function predicateResult(
+  sql: string,
+  values: readonly BoundScalar[],
+  predicate: string,
+  fragment?: SqlFragment,
+): SQLPredicate {
+  const result = { sql, values }
+  Object.defineProperty(result, 'predicate', { enumerable: false, value: predicate })
+  if (fragment !== undefined) {
+    Object.defineProperty(result, 'pieces', { enumerable: false, value: fragment.pieces })
+  }
+  return result as SQLPredicate
 }
 
 /**
@@ -321,6 +455,7 @@ function whereClause(
  * @param entityName - Exact entity name.
  * @param filter - Canonical normalized filter.
  * @param scope - Optional effective-field expressions for polymorphic queries.
+ * @param literal - Optional renderer for literal policy SQL.
  * @returns The quoted `WHERE` clause and its parameter values.
  * @throws {Error} When a field, operator, or value is invalid.
  */
@@ -329,6 +464,7 @@ function whereFilter(
   entityName: string,
   filter: Filter,
   scope?: QueryScope,
+  literal?: (value: BoundScalar) => string,
 ): SQLPredicate {
   const entity = scope?.definition ?? definition(entities, entityName)
   const array = scope?.array ?? (name => {
@@ -342,11 +478,20 @@ function whereFilter(
     }
   })
 
-  const values: BoundScalar[] = []
-  const bind = (value: BoundScalar): string => {
-    if (value === ACTOR_FIELD_NAME) return ACTOR_SQL
-    values.push(value)
-    return `$${values.length}`
+  const bind = (value: BoundScalar): SqlFragment => {
+    if (value === ACTOR_FIELD_NAME) return sqlText(ACTOR_SQL)
+    if (literal !== undefined) return sqlText(literal(value))
+    return sqlValue(value)
+  }
+  const asFragment = (value: SqlFragment | string): SqlFragment => (
+    typeof value === 'string' ? sqlText(value) : value
+  )
+  const literalFragment = (fragment: SqlFragment): SqlFragment => {
+    if (literal === undefined) return fragment
+    const pieces = fragment.pieces ?? []
+    return fragmentOf(pieces.map(piece => (
+      typeof piece === 'string' ? piece : literal(piece.value as BoundScalar)
+    )))
   }
 
   const base: QueryScope = scope ?? {
@@ -356,7 +501,7 @@ function whereFilter(
     field: name => queryField(entity, name),
   }
   let arrayAlias = 0
-  const compile = (node: Filter, active: QueryScope): string => {
+  const compile = (node: Filter, active: QueryScope): SqlFragment => {
     if ('field' in node && 'filters' in node) {
       const collection = active.collection?.(node.field, active)
       const arrayScope = active.array?.(node.field, active)
@@ -389,20 +534,20 @@ function whereFilter(
           }
           const inner = compile(collectionFilter.filters[0] as Filter, memberScope)
           arrayScope.consume?.(1)
-          return `NOT EXISTS (SELECT 1 FROM ${source} WHERE NOT COALESCE((${inner}), FALSE))`
+          return sqlFragment`NOT EXISTS (SELECT 1 FROM ${sqlText(source)} WHERE NOT COALESCE((${inner}), FALSE))`
         }
         const requirements = collectionFilter.filters.map(requirement => {
           const inner = compile(requirement, memberScope)
           arrayScope.consume?.(1)
-          return `EXISTS (SELECT 1 FROM ${source} WHERE ${inner})`
+          return sqlFragment`EXISTS (SELECT 1 FROM ${sqlText(source)} WHERE ${inner})`
         })
-        return requirements.join(' AND ')
+        return sqlConcat(requirements, ' AND ')
       }
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
       if (collection.variants !== undefined && collection.variants.length > 0) {
-        return `(${collection.variants.map(variant => (
-          `(${variant.guard} AND ${compileCollection(collectionFilter, variant.scope)})`
-        )).join(' OR ')})`
+        return sqlFragment`(${sqlConcat(collection.variants.map(variant => (
+          sqlFragment`(${sqlText(variant.guard)} AND ${compileCollection(collectionFilter, variant.scope)})`
+        )), ' OR ')})`
       }
       return compileCollection(collectionFilter, collection)
     }
@@ -415,10 +560,10 @@ function whereFilter(
         : (active.filterField ?? active.field)(comparisonFilter.field)
       const count = active.filterCount?.(comparisonFilter.field)
       if (count && comparisonFilter.operator === Operator.Comparison.Equal && comparisonFilter.value === 0) {
-        return typeof count.empty === 'function' ? count.empty(bind) : count.empty
+        return typeof count.empty === 'function' ? asFragment(count.empty(bind)) : asFragment(count.empty)
       }
       if (count && comparisonFilter.operator === Operator.Comparison.GreaterThan && comparisonFilter.value === 0) {
-        return typeof count.exists === 'function' ? count.exists(bind) : count.exists
+        return typeof count.exists === 'function' ? asFragment(count.exists(bind)) : asFragment(count.exists)
       }
       if (
         active.filterKind?.(comparisonFilter.field) === 'identity'
@@ -437,7 +582,7 @@ function whereFilter(
       const operand = contract.operand(field, comparisonFilter.value)
       const renderer = comparisonRenderers.get(comparisonFilter.operator)
       if (!renderer) throw new Error(`Query operator "${comparisonFilter.operator}" is not supported`)
-      const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field, bind)
+      const column = field.name === ACTOR_FIELD_NAME ? sqlText(ACTOR_SQL) : asFragment(active.expression(field, bind))
       if (comparisonFilter.operator === Operator.Comparison.Contains
         && field.type === FieldType.Array
         && isFieldOperand(operand)) {
@@ -448,8 +593,8 @@ function whereFilter(
           )
         }
         const referenceSql = reference.name === ACTOR_FIELD_NAME
-          ? ACTOR_SQL
-          : active.expression(reference, bind)
+          ? sqlText(ACTOR_SQL)
+          : asFragment(active.expression(reference, bind))
         return renderer.build(field, column, [referenceSql], () => referenceSql)
       }
       if (isFieldOperand(operand)) {
@@ -463,8 +608,8 @@ function whereFilter(
           )
         }
         const referenceSql = reference.name === ACTOR_FIELD_NAME
-          ? ACTOR_SQL
-          : active.expression(reference, bind)
+          ? sqlText(ACTOR_SQL)
+          : asFragment(active.expression(reference, bind))
         return renderer.build(field, column, operand, () => referenceSql)
       }
       return renderer.build(field, column, operand, bind)
@@ -489,14 +634,15 @@ function whereFilter(
   const compileCollection = (
     collectionFilter: CollectionFilter,
     collection: CollectionScope,
-  ): string => {
+  ): SqlFragment => {
     if (collectionFilter.operator === Operator.Comparison.Empty) {
       const authored = collection.predicate === undefined
-        ? ''
-        : ` AND (${bindFragment(collection.predicate, bind)})`
+        ? sqlText('')
+        : sqlFragment` AND (${literalFragment(asFragment(collection.predicate))})`
       collection.consume?.(collection.work ?? 1)
-      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-        `${collection.condition}${authored})`
+      const relation = sqlText(collection.relation)
+      const condition = sqlText(collection.condition)
+      return sqlFragment`NOT EXISTS (SELECT 1 FROM ${relation} WHERE ${condition}${authored})`
     }
     if (collectionFilter.operator === Operator.Collection.All) {
       if (collectionFilter.filters.length !== 1) {
@@ -505,10 +651,12 @@ function whereFilter(
       const inner = compile(collectionFilter.filters[0] as Filter, collection)
       collection.consume?.(collection.work ?? 1)
       const predicate = collection.predicate === undefined
-        ? ''
-        : ` AND (${bindFragment(collection.predicate, bind)})`
-      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-        `${collection.condition}${predicate} AND NOT COALESCE((${inner}), FALSE))`
+        ? sqlText('')
+        : sqlFragment` AND (${literalFragment(asFragment(collection.predicate))})`
+      const relation = sqlText(collection.relation)
+      const condition = sqlText(collection.condition)
+      const body = sqlFragment`${condition}${predicate} AND NOT COALESCE((${inner}), FALSE)`
+      return sqlFragment`NOT EXISTS (SELECT 1 FROM ${relation} WHERE ${body})`
     }
     if (collectionFilter.operator !== Operator.Comparison.Contains) {
       throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
@@ -520,15 +668,18 @@ function whereFilter(
       const inner = compile(requirement, collection)
       collection.consume?.(collection.work ?? 1)
       const predicate = collection.predicate === undefined
-        ? ''
-        : ` AND (${bindFragment(collection.predicate, bind)})`
-      return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
-        `${collection.condition}${predicate} AND (${inner}))`
+        ? sqlText('')
+        : sqlFragment` AND (${literalFragment(asFragment(collection.predicate))})`
+      const relation = sqlText(collection.relation)
+      const condition = sqlText(collection.condition)
+      const body = sqlFragment`${condition}${predicate} AND (${inner})`
+      return sqlFragment`EXISTS (SELECT 1 FROM ${relation} WHERE ${body})`
     })
-    return requirements.join(' AND ')
+    return sqlConcat(requirements, ' AND ')
   }
 
-  return { sql: `WHERE ${compile(filter, base)}`, values }
+  const predicate = compile(filter, base)
+  return predicateResult(`WHERE ${predicate.sql}`, predicate.values as BoundScalar[], predicate.sql, predicate)
 }
 
 /**
@@ -540,7 +691,7 @@ function rangeRenderer(operator: string): ComparisonRenderer {
   return {
     build: (_field, column, operand, bind) => {
       if (operand === null) throw new Error(`Query operator "${operator}" requires a non-null value`)
-      return `COALESCE(${column} ${operator} ${bind(operand as BoundScalar)}, FALSE)`
+      return sqlFragment`COALESCE(${column} ${sqlText(operator)} ${bind(operand as BoundScalar)}, FALSE)`
     },
   }
 }
@@ -599,14 +750,12 @@ function orderByClause(
  * Build a validated parameterized pagination clause.
  * @param limit - Maximum rows to return, or null for unlimited.
  * @param offset - Rows to skip.
- * @param startIndex - Number of prior parameter values.
- * @returns The quoted pagination clause and its parameter values.
+ * @returns The pagination fragment and its ordered values.
  * @throws {Error} When limit or offset is not a non-negative integer.
  */
 function paginate(
   limit: number | null = 25,
   offset = 0,
-  startIndex = 0,
 ): SQLPagination {
   if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error('Query limit must be a non-negative integer or null')
@@ -615,86 +764,10 @@ function paginate(
     throw new Error('Query offset must be a non-negative integer')
   }
 
-  const clauses: string[] = []
-  const values: unknown[] = []
-  if (limit !== null) {
-    values.push(limit)
-    clauses.push(`LIMIT $${startIndex + values.length}`)
-  }
-  if (limit !== null || offset > 0) {
-    values.push(offset)
-    clauses.push(`OFFSET $${startIndex + values.length}`)
-  }
-
-  return { sql: clauses.join(' '), values }
-}
-
-/**
- * Require complete placeholder/value correspondence in one fragment.
- * @param fragment - Parameterized fragment.
- */
-function validateFragment(fragment: SqlFragment): void {
-  const referenced = new Set<number>()
-  for (const match of fragment.sql.matchAll(/\$(\d+)\b/gu)) {
-    const position = Number(match[1])
-    if (position < 1 || position > fragment.values.length) {
-      throw new Error(`SQL fragment placeholder $${position} has no matching value`)
-    }
-    referenced.add(position)
-  }
-  for (let position = 1; position <= fragment.values.length; position += 1) {
-    if (!referenced.has(position)) {
-      throw new Error(`SQL fragment value $${position} has no placeholder`)
-    }
-  }
-}
-
-/**
- * Rebind one fragment's values through a caller-owned binder.
- * @param fragment - Parameterized fragment.
- * @param bind - Caller owner of the value list.
- * @returns SQL text with rebased placeholders.
- */
-function bindFragment(
-  fragment: SqlFragment,
-  bind: (value: BoundScalar) => string,
-): string {
-  validateFragment(fragment)
-  return fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => (
-    bind(fragment.values[Number(index) - 1] as BoundScalar)
-  ))
-}
-
-/**
- * Compose SQL fragments into one parameterized statement.
- * @param fragments - Text or parameterized fragments in output order.
- * @param options - Separator and first placeholder index.
- * @param options.separator - Text inserted between fragments.
- * @param options.startIndex - First placeholder number.
- * @returns The composed SQL and its ordered values.
- */
-function compose(
-  fragments: readonly (SqlFragment | string | undefined)[],
-  options: { readonly separator?: string, readonly startIndex?: number } = {},
-): SqlFragment {
-  const separator = options.separator ?? ' '
-  const startIndex = options.startIndex ?? 1
-  const values: BoundScalar[] = []
-  const parts: string[] = []
-  for (const fragment of fragments) {
-    if (fragment === undefined) continue
-    if (typeof fragment === 'string') {
-      if (fragment !== '') parts.push(fragment)
-      continue
-    }
-    validateFragment(fragment)
-    if (fragment.sql === '') continue
-    parts.push(fragment.sql.replace(/\$(\d+)\b/gu, (_match, index: string) => {
-      values.push(fragment.values[Number(index) - 1] as BoundScalar)
-      return `$${startIndex + values.length - 1}`
-    }))
-  }
-  return { sql: parts.join(separator), values }
+  const clauses: SqlFragment[] = []
+  if (limit !== null) clauses.push(sqlFragment`LIMIT ${sqlValue(limit)}`)
+  if (limit !== null || offset > 0) clauses.push(sqlFragment`OFFSET ${sqlValue(offset)}`)
+  return sqlConcat(clauses, ' ')
 }
 
 /**
@@ -703,8 +776,7 @@ function compose(
  * validated entity metadata.
  */
 export const SQL = {
-  bindFragment,
-  compose,
+  concat: sqlConcat,
   orderBy: orderByClause,
   paginate,
   select,
@@ -742,12 +814,14 @@ function arraySQLType(field: ArrayFieldDefinition): string {
 function arrayExpression(
   field: ArrayFieldDefinition,
   operand: unknown,
-  bind: (value: BoundScalar) => string,
-): string {
+  bind: (value: BoundScalar) => SqlFragment,
+): SqlFragment {
   const values = operand as readonly BoundScalar[]
-  if (values.length === 0) return `ARRAY[]::${arraySQLType(field)}`
+  if (values.length === 0) return sqlText(`ARRAY[]::${arraySQLType(field)}`)
   const elementType = postgresScalarType(field.items.type)
-  return `ARRAY[${values.map(value => `${bind(value)}::${elementType}`).join(', ')}]`
+  return sqlFragment`ARRAY[${sqlConcat(values.map(value => (
+    sqlFragment`${bind(value)}::${sqlText(elementType)}`
+  )), ', ')}]`
 }
 
 /**
