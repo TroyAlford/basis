@@ -319,7 +319,7 @@ describe('Graph mutation authorization', () => {
       expect(upsertCreated).toMatchObject({
         created: 1,
         edited: 0,
-        record: { rank: 200, title: 'Upserted' },
+        record: { name: 'Upserted', rank: 200, title: 'Upserted' },
       })
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
@@ -454,11 +454,54 @@ describe('Graph mutation authorization', () => {
       )).catch((error: unknown) => error)
       expect(changedRead).toBeInstanceOf(MutationError)
       expect((changedRead as MutationError).code).toBe('authorization')
-      expect(await asActor(administrator, () => server.db.query('Draft', {
-        fields: ['rank'],
+
+      const createdArticle = await asActor(administrator, () => server.db.create('Article', {
+        name: 'Readable inherited',
+        owner: worker,
+        rank: 80,
+        score: 5,
+        title: 'Readable inherited',
+      }))
+      const articleId = createdArticle.record?.id
+      if (!articleId) throw new Error('Article was not created')
+      const changedInherited = await asActor(worker, () => server.db.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, articleId),
+        { name: 'Forbidden inherited edit' },
+      )).catch((error: unknown) => error)
+      expect(changedInherited).toEqual({ edited: 0 })
+      expect(await asActor(administrator, () => server.db.query('Article', {
+        fields: ['name', 'rank'],
         limit: null,
-        where: compare('id', Operator.Comparison.Equal, first.id),
-      }))).toEqual([{ rank: 10 }])
+        where: compare('id', Operator.Comparison.Equal, articleId),
+      }))).toEqual([{ name: 'Readable inherited', rank: 80 }])
+
+      const upsertInherited = await asActor(worker, () => server.db.upsert(
+        'Article',
+        compare('title', Operator.Comparison.Equal, 'Readable inherited'),
+        { name: 'Forbidden upsert', rank: 80, score: 5, title: 'Readable inherited' },
+      ))
+      expect(upsertInherited.edited).toBe(0)
+      expect(await asActor(administrator, () => server.db.query('Article', {
+        fields: ['name', 'rank'],
+        limit: null,
+        where: compare('id', Operator.Comparison.Equal, articleId),
+      }))).toEqual([{ name: 'Readable inherited', rank: 80 }])
+
+      const allowedArticle = await asActor(administrator, () => server.db.create('Article', {
+        name: 'Allowed inherited',
+        owner: worker,
+        rank: 10,
+        score: 5,
+        title: 'Allowed inherited',
+      }))
+      const allowedId = allowedArticle.record?.id
+      if (!allowedId) throw new Error('Allowed Article was not created')
+      expect(await asActor(worker, () => server.db.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, allowedId),
+        { name: 'Allowed inherited edit' },
+      ))).toMatchObject({ edited: 1, record: { name: 'Allowed inherited edit' } })
 
       await asActor(administrator, () => server.db.create('Project', [
         { code: 'A', name: 'Member project', title: 'Member project' },
@@ -522,4 +565,103 @@ describe('Graph mutation authorization', () => {
       },
     })
   })
+  test('checks the final inherited state before committing an edit', async () => {
+    const administrator = randomUUID()
+    const worker = randomUUID()
+    const transitionGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Article',
+          security: {
+            [Action.Read]: Security.Public,
+            [Action.Create]: { role: 'admin' },
+            [Action.Update]: { where: "name = 'Editable'" },
+          },
+        },
+      ],
+    })
+    await withDatabase('mutation-final-state', administrator, async database => {
+      const asActor = async <T>(actor: string | null, work: () => T | Promise<T>): Promise<T> => {
+        await database.sql`
+          SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+        `
+        return await work()
+      }
+      const created = await asActor(administrator, () => database.create('Article', {
+        name: 'Editable',
+        title: 'Original',
+      }))
+      const id = created.record?.id
+      if (!id) throw new Error('Article was not created')
+      expect(created.record).toMatchObject({ name: 'Editable', title: 'Original' })
+      expect(await asActor(worker, () => database.query('Article', {
+        fields: ['id', 'name', 'title'],
+      }))).toEqual([{ id, name: 'Editable', title: 'Original' }])
+
+      const denied = await asActor(worker, () => database.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, id),
+        { name: 'Locked' },
+      )).catch((error: unknown) => error)
+      expect(denied).toBeInstanceOf(MutationError)
+      expect((denied as MutationError).code).toBe('authorization')
+      expect(await asActor(administrator, () => database.query('Article', {
+        fields: ['name'],
+      }))).toEqual([{ name: 'Editable' }])
+
+      const [before] = await asActor(worker, () => database.sql<{ ctid: string }[]>`
+        SELECT ctid::TEXT AS ctid
+        FROM "Article"
+        WHERE "id" = ${id}
+      `)
+      const caught = await asActor(worker, () => database.tx(async sql => {
+        const error = await sql.edit(
+          'Article',
+          compare('id', Operator.Comparison.Equal, id),
+          { name: 'Caught failure' },
+        ).catch((failure: unknown) => failure)
+        const rows = await sql<{ ctid: string, name: string }[]>`
+          SELECT "article".ctid::TEXT AS ctid, "root"."name"
+          FROM "Entity" "root"
+          JOIN "Article" "article" ON "article"."id" = "root"."id"
+          WHERE "root"."id" = ${id}
+        `
+        expect(rows).toEqual([{ ctid: before?.ctid, name: 'Editable' }])
+        return error
+      }))
+      expect(caught).toBeInstanceOf(MutationError)
+      expect((caught as MutationError).code).toBe('authorization')
+      expect(await asActor(administrator, () => database.sql<{ ctid: string }[]>`
+        SELECT ctid::TEXT AS ctid
+        FROM "Article"
+        WHERE "id" = ${id}
+      `)).toEqual([{ ctid: before?.ctid }])
+
+      const deniedUpsert = await asActor(worker, () => database.upsert(
+        'Article',
+        compare('id', Operator.Comparison.Equal, id),
+        { name: 'Locked', title: 'Original' },
+      )).catch((error: unknown) => error)
+      expect(deniedUpsert).toBeInstanceOf(MutationError)
+      expect((deniedUpsert as MutationError).code).toBe('authorization')
+      expect(await asActor(administrator, () => database.query('Article', {
+        fields: ['name'],
+      }))).toEqual([{ name: 'Editable' }])
+
+      expect(await asActor(worker, () => database.edit(
+        'Article',
+        compare('id', Operator.Comparison.Equal, id),
+        { title: 'Allowed' },
+      ))).toMatchObject({ edited: 1, record: { name: 'Editable', title: 'Allowed' } })
+    }, {
+      graph: transitionGraph,
+      setup: async owner => {
+        await enroll(owner.sql, administrator, 'test', 'admin', 'admin@example.com', [ADMIN_ROLE_ID])
+        await enroll(owner.sql, worker, 'test', 'worker', 'worker@example.com', [])
+      },
+    })
+  })
+
 })

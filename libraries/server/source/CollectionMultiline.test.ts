@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { compileEntityQuery } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
-import { SQL } from './SQL'
+import { sqlConcat, sqlFragment, sqlText } from './SQL'
 
 /**
  * Build the multiline contract model.
@@ -202,26 +202,14 @@ describe('Graph multiline expression contract', () => {
   })
 })
 
-describe('SQL fragment binding contract', () => {
-  test('composes formatted fragments with bound values', () => {
-    const query = SQL.compose([
-      {
-        sql: 'SELECT "id", "title"',
-        values: [],
-      },
-      {
-        sql: 'FROM "Workspace"',
-        values: [],
-      },
-      {
-        sql: 'WHERE "title" = $1',
-        values: ["O'Brien"],
-      },
-      {
-        sql: 'AND "id" != $1',
-        values: ['excluded-id'],
-      },
-    ], { separator: '\n' })
+describe('SQL fragment structural composition', () => {
+  test('composes formatted fragments with ordered values', () => {
+    const query = sqlConcat([
+      sqlText('SELECT "id", "title"'),
+      sqlText('FROM "Workspace"'),
+      sqlFragment`WHERE "title" = ${"O'Brien"}`,
+      sqlFragment`AND "id" != ${'excluded-id'}`,
+    ], '\n')
 
     expect(query.sql).toMatchIndented(`
       SELECT "id", "title"
@@ -229,19 +217,14 @@ describe('SQL fragment binding contract', () => {
       WHERE "title" = $1
       AND "id" != $2
     `)
-
     expect(query.values).toEqual(["O'Brien", 'excluded-id'])
   })
 
-  test('rebases nested fragments without confusing $1 and $10', () => {
-    const conditions = SQL.compose(
-      Array.from({ length: 12 }, (_, index) => ({
-        sql: `"field${index}" = $1`,
-        values: [index],
-      })),
-      { separator: '\nAND ' },
+  test('keeps nested fragments and repeated values ordered', () => {
+    const conditions = sqlConcat(
+      Array.from({ length: 12 }, (_, index) => sqlFragment`"field${sqlText(String(index))}" = ${index}`),
+      '\nAND ',
     )
-
     expect(conditions.sql).toMatchIndented(`
       "field0" = $1
       AND "field1" = $2
@@ -256,88 +239,41 @@ describe('SQL fragment binding contract', () => {
       AND "field10" = $11
       AND "field11" = $12
     `)
+    expect(conditions.values).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
-    expect(conditions.values).toEqual([
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
-    ])
+    const repeated = sqlFragment`"a" = ${'same'} OR "b" = ${'same'}`
+    expect(sqlConcat([repeated]).values).toEqual(['same', 'same'])
   })
 
-  test('keeps SQL-looking values out of generated SQL', () => {
+  test('never treats values, literals, comments, or dollar quotes as slots', () => {
     const payloads = [
       'x\'; DROP TABLE "Workspace"; --',
       '$1 $10 $100',
       "' OR TRUE --",
       "'); SELECT pg_sleep(10); --",
     ]
-
-    const query = SQL.compose(
-      payloads.map(value => ({
-        sql: '"title" = $1',
-        values: [value],
-      })),
-      { separator: ' OR ' },
+    const query = sqlConcat(
+      payloads.map(value => sqlFragment`"title" = ${value}`),
+      ' OR ',
     )
-
     expect(query.sql).toMatchIndented(`
       "title" = $1 OR "title" = $2 OR "title" = $3 OR "title" = $4
     `)
-
     expect(query.values).toEqual(payloads)
+    for (const payload of payloads) expect(query.sql).not.toContain(payload)
 
-    for (const payload of payloads) {
-      expect(query.sql).not.toContain(payload)
-    }
+    const literal = sqlFragment`SELECT '$1 ? -- /* */ $tag$ $$' /* $1 ? */`
+    expect(literal.values).toEqual([])
+    expect(literal.sql).toContain('$1 ?')
   })
 
-  test('rejects missing or out-of-range placeholders', () => {
-    expect(() => SQL.compose([{
-      sql: '"title" = $2',
-      values: ['only-one-value'],
-    }])).toThrow()
-
-    expect(() => SQL.compose([{
-      sql: '"title" = $1',
-      values: [],
-    }])).toThrow()
-
-    expect(() => SQL.compose([{
-      sql: '"title" = $10',
-      values: ['only-one-value'],
-    }])).toThrow()
-  })
-
-  test('rejects surplus bound values', () => {
-    expect(() => SQL.compose([{
-      sql: '"title" = $1',
-      values: ['one', 'two'],
-    }])).toThrow()
-
-    expect(() => SQL.bindFragment(
-      { sql: '"title" = $1', values: ['one', 'two'] },
-      () => '$1',
-    )).toThrow()
-  })
-
-  test('preserves repeated references to one value', () => {
-    const fragment = { sql: '"a" = $1 OR "b" = $1', values: ['same'] }
-    const composed = SQL.compose([fragment])
-    expect(composed.sql).toBe('"a" = $1 OR "b" = $2')
-    expect(composed.values).toEqual(['same', 'same'])
-
-    const bound: unknown[] = []
-    const sql = SQL.bindFragment(fragment, value => {
-      bound.push(value)
-      return `$${bound.length}`
-    })
-    expect(sql).toBe('"a" = $1 OR "b" = $2')
-    expect(bound).toEqual(['same', 'same'])
-  })
-
-  test('supports multi-digit placeholders with complete values', () => {
-    const values = Array.from({ length: 10 }, (_, index) => index)
-    const sql = values.map((_, index) => `"field${index}" = $${index + 1}`).join(' AND ')
-    const composed = SQL.compose([{ sql, values }])
-    expect(composed.sql).toBe(sql)
-    expect(composed.values).toEqual(values)
+  test('preserves quoted identifiers and multi-digit values', () => {
+    const identifier = sqlText('"select"')
+    const query = sqlConcat([
+      sqlFragment`SELECT ${identifier} FROM ${sqlText('"from"')}`,
+      sqlFragment`WHERE ${identifier} = ${10}`,
+    ])
+    expect(query.sql).toContain('SELECT "select" FROM "from"')
+    expect(query.sql).toContain('"select" = $1')
   })
 })

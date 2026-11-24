@@ -319,7 +319,7 @@ describe('Query contract', () => {
       where: "owner.name = 'Ada'",
     })
     expect(source).toEqual(structured)
-    expect(structured.sql).toContain('JOIN "User"')
+    expect(structured.sql).toContain('JOIN "authorized_User"')
     expect(structured.sql).toContain('WHERE')
 
     expect(compileEntityQuery(definitions, 'Pet', {
@@ -416,7 +416,7 @@ describe('Query contract', () => {
       fields: ['id'],
       where: { 'owner.manager': identity },
     })
-    expect(nested.sql.match(/LEFT JOIN "Person"/g)).toHaveLength(1)
+    expect(nested.sql.match(/LEFT JOIN "authorized_Person"/g)).toHaveLength(1)
     expect(nested.values).toEqual([identity, 25, 0])
   })
 
@@ -432,15 +432,15 @@ describe('Query contract', () => {
       },
     })
     expect(filterOnly.sql).not.toContain('owner__id')
-    expect(filterOnly.sql.match(/LEFT JOIN "User"/g)).toHaveLength(1)
-    expect(filterOnly.sql.match(/LEFT JOIN "SystemUser"/g)).toHaveLength(1)
+    expect(filterOnly.sql.match(/LEFT JOIN "authorized_User"/g)).toHaveLength(1)
+    expect(filterOnly.sql).toContain('"SystemUser"')
 
     const combined = compileEntityQuery(definitions, 'Pet', {
       fields: ['id', 'owner'],
       where: { 'owner.name': 'Ada' },
     })
-    expect(combined.sql.match(/LEFT JOIN "User"/g)).toHaveLength(1)
-    expect(combined.sql.match(/LEFT JOIN "Entity"/g)).toHaveLength(1)
+    expect(combined.sql.match(/LEFT JOIN "authorized_User"/g)).toHaveLength(1)
+    expect(combined.sql).toContain('"authorized_User" AS NOT MATERIALIZED')
     expect(combined.sql).toContain('owner__id')
   })
 
@@ -589,7 +589,7 @@ describe('Query contract', () => {
     expect(setEqual.sql).toContain('"tags" @>')
     expect(setEqual.sql).toContain('"tags" <@')
     expect(setEqual.sql).not.toContain('unnest')
-    expect(setEqual.values).toEqual(['b', 'a', 25, 0])
+    expect(setEqual.values).toEqual(['b', 'a', 'b', 'a', 25, 0])
 
     const json = compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
@@ -895,8 +895,8 @@ describe('Query contract', () => {
       fields: ['id'],
       where: "pets $contains (title = 'Ada' $and owner.title = 'Grace')",
     })
-    expect(bracketed.sql.match(/EXISTS \(SELECT 1 FROM "Pet"/gu)).toHaveLength(2)
-    expect(grouped.sql.match(/EXISTS \(SELECT 1 FROM "Pet"/gu)).toHaveLength(1)
+    expect(bracketed.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Pet"/gu)).toHaveLength(2)
+    expect(grouped.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Pet"/gu)).toHaveLength(1)
     expect(bracketed.values).toEqual(['Ada', 'Grace', 25, 0])
 
     const all = compileEntityQuery(relationshipDefinitions, 'User', {
@@ -907,15 +907,15 @@ describe('Query contract', () => {
       fields: ['id'],
       where: "pets !$contains ($not (title = 'Ada'))",
     })
-    expect(all.sql).toContain('NOT EXISTS (SELECT 1 FROM "Pet"')
-    expect(explicitNegation.sql).toContain('EXISTS (SELECT 1 FROM "Pet"')
+    expect(all.sql).toContain('NOT EXISTS (SELECT 1 FROM "authorized_Pet"')
+    expect(explicitNegation.sql).toContain('EXISTS (SELECT 1 FROM "authorized_Pet"')
     expect(all.sql).not.toBe(explicitNegation.sql)
     expect(all.values).toEqual(explicitNegation.values)
 
     expect(compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $contains (owner.title = 'Ada')",
-    }).sql).toContain('LEFT JOIN "User"')
+    }).sql).toContain('LEFT JOIN "authorized_User"')
     expect(compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
       where: "members $contains (membership.role = 'GM')",
@@ -923,7 +923,7 @@ describe('Query contract', () => {
     expect(compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: 'pets $empty',
-    }).sql).toContain('NOT EXISTS (SELECT 1 FROM "Pet"')
+    }).sql).toContain('NOT EXISTS (SELECT 1 FROM "authorized_Pet"')
   })
 
   test('rejects invalid collection predicates without changing the SQL path', () => {
@@ -1075,7 +1075,7 @@ describe('Query contract', () => {
       limit: null,
       where: "toys $contains (label = 'ball')",
     })
-    expect(nested.sql).toMatch(/EXISTS \(SELECT 1 FROM "Toy"/u)
+    expect(nested.sql).toMatch(/EXISTS \(SELECT 1 FROM "authorized_Toy"/u)
     expect(nested.sql).toContain('"pet.id"')
 
     const composed = compileEntityQuery(nestedDefinitions, 'Pet', {
@@ -1084,14 +1084,14 @@ describe('Query contract', () => {
       where: "owner.pets $contains (label = 'Rex')",
     })
     expect(composed.sql).toContain('"owner.id" = "b1"."id"')
-    expect(composed.sql).toMatch(/EXISTS \(SELECT 1 FROM "Pet"/u)
+    expect(composed.sql).toMatch(/EXISTS \(SELECT 1 FROM "authorized_Pet"/u)
 
     const memberNested = compileEntityQuery(nestedDefinitions, 'User', {
       fields: ['id'],
       limit: null,
       where: "pets $contains (toys $contains (label = 'ball'))",
     })
-    expect(memberNested.sql.match(/EXISTS \(SELECT 1 FROM "Toy"/gu)).toHaveLength(1)
+    expect(memberNested.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Toy"/gu)).toHaveLength(1)
     expect(memberNested.sql).toContain('"pet.id"')
 
     const sameMember = compileEntityQuery(nestedDefinitions, 'User', {
@@ -1099,7 +1099,7 @@ describe('Query contract', () => {
       limit: null,
       where: "pets $contains (label = 'Rex' AND toys $contains (label = 'ball'))",
     })
-    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "Pet"/gu)).toHaveLength(1)
-    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "Toy"/gu)).toHaveLength(1)
+    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Pet"/gu)).toHaveLength(1)
+    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Toy"/gu)).toHaveLength(1)
   })
 })

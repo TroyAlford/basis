@@ -1,0 +1,273 @@
+---
+title: Query Planning Audit
+---
+
+# Query Planning Audit
+
+This page records the query-planning investigation and Stage 3 correction evidence. It is not a claim that the physical-root authorization design is complete. Stage 4 remains a separate design gate.
+
+## Evidence set
+
+- Basis branch: `fix/query-planning`
+- Identity correction: `932bffe`
+- Collection-count correction: `ba8f4ed`
+- Original MTG workload: Printing-rooted resource aggregate
+- Original metrics: 24,659 SQL bytes, 73 `Entity` joins, 823 SubPlans, 6,890 JIT functions, ~39.4 seconds JIT compilation, ~39.5 seconds execution
+- Version-controlled SQL artifacts: [`original.sql`](query-planning-audit/original.sql) (24,659 bytes, 73 joins) and [`current.sql`](query-planning-audit/current.sql) (11,817 bytes, 28 joins). The original/current hashes are recorded in the repository history.
+
+## Original occurrence breakdown
+
+| Scope | Physical `Entity` joins |
+|---|---:|
+| Outer references | 4 |
+| `CustomPrinting.panels` items | 14 |
+| `CustomPrinting.panels` `$matched` | 14 |
+| `CustomPrinting.decks` items | 12 |
+| `CustomPrinting.decks` `$matched` | 12 |
+| `CustomPrinting.decks` total/edge/existence | 12 |
+| `CustomPrinting.card.faces` items | 2 |
+| `CustomPrinting.card.faces` matched | 2 |
+| `deckEntries` existence | 1 |
+| **Total** | **73** |
+
+The root `CustomPrinting` occurrence had no `Entity` join. All 73 occurrences were nested reference/collection scopes and selected only the `entity`, `id`, and `name` identity trio. The breakdown and per-alias table are reproduced in `/tmp/opencode/entity-join-audit.md` and `/tmp/opencode/entity-join-occurrences.csv`.
+
+## Identity contract conflict
+
+The public reference hydration object is always:
+
+```ts
+{ entity: string, id: string, name: string }
+```
+
+Therefore an apparently ID-only path such as `workspace.id` still includes the inherited `name` in its reference object. For a final concrete target:
+
+- `id` is selected from the concrete alias;
+- `entity` is the compiler-known concrete type;
+- `name` is selected from `Entity`, so the inherited-storage join is required.
+
+Example generated SQL for `Document { fields: ["id", "workspace.id"] }`:
+
+```sql
+SELECT t."id" AS "id",
+       'Workspace' AS "workspace__entity",
+       b1."id" AS "workspace__id",
+       r2."name" AS "workspace__name"
+FROM "Document" "t"
+LEFT JOIN (
+  "Workspace" "b1"
+  INNER JOIN "Entity" "r2" ON "r2"."id" = "b1"."id"
+) ON "b1"."id" = t."workspace.id"
+```
+
+There is one physical `Entity` occurrence. Its required consumer is the inherited `name`; the ID and static type do not consume it.
+
+For an abstract `Card` target:
+
+```sql
+r2."entity" AS "card__entity",
+b1."id" AS "card__id",
+r2."name" AS "card__name"
+```
+
+The root is consumed for the runtime discriminator and inherited name.
+
+For a genuinely universal `Entity` target, the root is the only relation and supplies all three identity properties.
+
+## What Stage 3 eliminated
+
+The collection compiler now builds a count-only adapter for `$matched` and `$total`. Those scopes project identity only instead of rebuilding the complete nested target projection. Relationship-owned fields are projected from the relationship edge rather than by joining the target/root relation again.
+
+Example count-only matched scope:
+
+```sql
+SELECT count(*)::int
+FROM (
+  SELECT cm5."id" AS "id"
+  FROM "Printing" "cm5"
+  WHERE EXISTS (
+    SELECT 1
+    FROM "DeckPrinting" "cj3"
+    JOIN "Printing" "ct1" ON "ct1"."id" = "cj3"."printing.id"
+    JOIN "Entity" "cr2" ON "cr2"."id" = "ct1"."id"
+    WHERE "cj3"."deck.id" = "t"."id"
+      AND (ct1."title" IS NOT DISTINCT FROM $2)
+      AND ct1."id" = "cm5"."id"
+  )
+) AS "__member"
+```
+
+The count scope contains no Card, Face, Panel, or Art projection.
+
+Relationship quantity now reads only the edge:
+
+```sql
+SELECT json_build_object('quantity', "cj3"."quantity")
+FROM "DeckPrinting" "cj3"
+WHERE "cj3"."deck.id" = "t"."id"
+  AND "cj3"."printing.id" = "__child"."id"
+```
+
+Stage 3 reduced the saved MTG SQL from 24,659 bytes / 73 `Entity` joins to 11,817 bytes / 28 `Entity` joins. The remaining 28 joins are identity occurrences in the item and minimal count/existence scopes; this is not an authorization fix.
+
+## Deferred
+
+The universal `Entity` SELECT policy and its per-query expansion are unchanged. Stage 4 will establish the current PostgreSQL permission/RLS contract and compare the root storage access alternatives. No Graph policy or collection-planning change is part of this correction.
+
+## Full 73-occurrence reconciliation
+
+| # | Original alias | Original scope | Graph path | Type | Root supplies | Output | Current alias/scope | Disposition |
+|---:|---|---|---|---|---|---|---|---|
+| 1 | `r6` | outer SELECT | `CustomPrinting.card` | Card | entity, id, name | reference | new #1 (r6) | retained outer reference identity |
+| 2 | `r8` | outer SELECT | `CustomPrinting.workspace` | Workspace | entity, id, name | reference | new #2 (r8) | retained outer reference identity |
+| 3 | `r10` | outer SELECT | `CustomPrinting.edition` | CardEdition | entity, id, name | reference | new #3 (r10) | retained outer reference identity |
+| 4 | `r13` | outer SELECT | `CustomPrinting.card.workspace` | Workspace | entity, id, name | reference | new #4 (r13) | retained outer reference identity |
+| 5 | `r` | panels:items | `CustomPrinting.panels identity` | PrintingPanel | entity, id, name | items | new #5 (r) | retained item/edge identity |
+| 6 | `c16_r2` | panels:items | `panels.art identity` | Art | entity, id, name | items | new #6 (c16_r2) | retained item/edge identity |
+| 7 | `c16_r4` | panels:items | `panels.art.owner identity` | User | entity, id, name | items | new #7 (c16_r4) | retained item/edge identity |
+| 8 | `r` | panels:items | `panels.faces item identity` | CardFace | entity, id, name | items | new #8 (r) | retained item/edge identity |
+| 9 | `c16_cr6` | panels:items | `panels.faces edge target` | CardFace | entity, id, name | items | new #9 (c16_cr6) | retained item/edge identity |
+| 10 | `r` | panels:items | `panels.faces matched identity` | CardFace | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 11 | `c16_cr6` | panels:items | `panels.faces matched edge target` | CardFace | entity, id, name | items | new #10 (c16_cr6) | retained item/edge identity |
+| 12 | `c16_cr11` | panels:items | `panels.art.tagLinks item edge target` | Tag | entity, id, name | items | new #12 (c16_cr12) | retained item/edge identity |
+| 13 | `r` | panels:items | `panels.art.tagLinks item identity` | Tag | entity, id, name | items | new #11 (r) | retained item/edge identity |
+| 14 | `c16_cr11` | panels:items | `panels.art.tagLinks matched edge target` | Tag | entity, id, name | items | new #13 (c16_cr12) | retained item/edge identity |
+| 15 | `c16_cr11` | panels:items | `panels.art.tagLinks matched identity` | Tag | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 16 | `r` | panels:items | `panels.art.tagLinks edge identity` | Tag | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 17 | `c16_cr11` | panels:items | `panels.art.tagLinks edge target` | Tag | entity, id, name | items | ELIMINATED | removed from matched-only nested projection |
+| 18 | `cr15` | panels:items | `panels source/existence target` | PrintingPanel | entity, id, name | items | new #14 (cr15) | retained item/edge identity |
+| 19 | `r` | panels:matched | `CustomPrinting.panels identity` | PrintingPanel | entity, id, name | matched | new #15 (cr15) | retained count-only panel identity |
+| 20 | `c16_r2` | panels:matched | `panels.art identity` | Art | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 21 | `c16_r4` | panels:matched | `panels.art.owner identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 22 | `r` | panels:matched | `panels.faces item identity` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 23 | `c16_cr6` | panels:matched | `panels.faces edge target` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 24 | `r` | panels:matched | `panels.faces matched identity` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 25 | `c16_cr6` | panels:matched | `panels.faces matched edge target` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 26 | `c16_cr11` | panels:matched | `panels.art.tagLinks item edge target` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 27 | `r` | panels:matched | `panels.art.tagLinks item identity` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 28 | `c16_cr11` | panels:matched | `panels.art.tagLinks matched edge target` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 29 | `c16_cr11` | panels:matched | `panels.art.tagLinks matched identity` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 30 | `r` | panels:matched | `panels.art.tagLinks edge identity` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 31 | `c16_cr11` | panels:matched | `panels.art.tagLinks edge target` | Tag | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 32 | `cr15` | panels:matched | `panels source/existence target` | PrintingPanel | entity, id, name | matched | ELIMINATED | count-only matched scope projects panel identity only; nested art/face/tag/edge identity removed |
+| 33 | `r` | decks:items | `CustomPrinting.decks identity` | Deck | entity, id, name | items | new #16 (r) | retained item identity/edge occurrence |
+| 34 | `c21_r2` | decks:items | `decks.createdBy identity` | User | entity, id, name | items | new #17 (c22_r2) | retained item identity/edge occurrence |
+| 35 | `c21_cr4` | decks:items | `decks.members item edge target` | User | entity, id, name | items | new #19 (c22_cr4) | retained item identity/edge occurrence |
+| 36 | `r` | decks:items | `decks.members item identity` | User | entity, id, name | items | new #18 (r) | retained item identity/edge occurrence |
+| 37 | `c21_cr4` | decks:items | `decks.members matched edge target` | User | entity, id, name | items | new #20 (c22_cr4) | retained item identity/edge occurrence |
+| 38 | `c21_cr4` | decks:items | `decks.members edge projection target` | User | entity, id, name | items | new #21 (c22_cr4) | retained item identity/edge occurrence |
+| 39 | `r` | decks:items | `decks.members matched identity` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 40 | `c21_cr4` | decks:items | `decks.members edge projection target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 41 | `c21_cr4` | decks:items | `decks.members item edge target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 42 | `r` | decks:items | `decks.members matched edge target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 43 | `c21_cr4` | decks:items | `decks.members edge projection target` | User | entity, id, name | items | ELIMINATED | removed repeated member/edge projection from this scope |
+| 44 | `cr19` | decks:items | `decks edge target` | Deck | entity, id, name | items | new #22 (cr20) | retained item identity/edge occurrence |
+| 45 | `r` | decks:matched | `CustomPrinting.decks identity` | Deck | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 46 | `c21_r2` | decks:matched | `decks.createdBy identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 47 | `c21_cr4` | decks:matched | `decks.members item edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 48 | `r` | decks:matched | `decks.members item identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 49 | `c21_cr4` | decks:matched | `decks.members matched edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 50 | `c21_cr4` | decks:matched | `decks.members edge projection target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 51 | `r` | decks:matched | `decks.members matched identity` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 52 | `c21_cr4` | decks:matched | `decks.members edge projection target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 53 | `c21_cr4` | decks:matched | `decks.members item edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 54 | `r` | decks:matched | `decks.members matched edge target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 55 | `c21_cr4` | decks:matched | `decks.members edge projection target` | User | entity, id, name | matched | ELIMINATED | count-only matched scope projects target identity only; member edge/identity projection removed |
+| 56 | `cr19` | decks:matched | `decks edge target` | Deck | entity, id, name | matched | new #23 (cr20) | retained item identity/edge occurrence |
+| 57 | `r` | decks:total | `CustomPrinting.decks identity` | Deck | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 58 | `c21_r2` | decks:total | `decks.createdBy identity` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 59 | `c21_cr4` | decks:total | `decks.members item edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 60 | `r` | decks:total | `decks.members item identity` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 61 | `c21_cr4` | decks:total | `decks.members matched edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 62 | `c21_cr4` | decks:total | `decks.members edge projection target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 63 | `r` | decks:total | `decks.members matched identity` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 64 | `c21_cr4` | decks:total | `decks.members edge projection target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 65 | `c21_cr4` | decks:total | `decks.members item edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 66 | `r` | decks:total | `decks.members matched edge target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 67 | `c21_cr4` | decks:total | `decks.members edge projection target` | User | entity, id, name | total | ELIMINATED | count-only total scope projects target identity only; member edge/identity projection removed |
+| 68 | `cr19` | decks:total | `decks edge target` | Deck | entity, id, name | total | new #24 (cr20) | retained item identity/edge occurrence |
+| 69 | `r` | faces:items | `CustomPrinting.card.faces item identity` | CardFace | entity, id, name | items | new #25 (r) | retained identity occurrence |
+| 70 | `cr26` | faces:items | `card.faces item edge target` | CardFace | entity, id, name | items | new #26 (cr28) | retained identity occurrence |
+| 71 | `r` | faces:matched | `card.faces matched identity` | CardFace | entity, id, name | matched | new #27 (cr28) | retained identity occurrence |
+| 72 | `cr26` | faces:matched | `card.faces matched edge target` | CardFace | entity, id, name | matched | ELIMINATED | count-only matched scope does not need the edge target identity |
+| 73 | `cr2` | deckEntries:existence | `deckEntries.deck target` | Deck | entity, id, name | existence | new #28 (cr2) | retained root existence correlation |
+
+### Scope subtotals
+
+| Original scope | Original joins | Retained | Eliminated |
+|---|---:|---:|---:|
+| outer SELECT | 4 | 4 | 0 |
+| panels:items | 14 | 10 | 4 |
+| panels:matched | 14 | 1 | 13 |
+| decks:items | 12 | 7 | 5 |
+| decks:matched | 12 | 1 | 11 |
+| decks:total | 12 | 1 | 11 |
+| faces:items | 2 | 2 | 0 |
+| faces:matched | 2 | 1 | 1 |
+| deckEntries:existence | 1 | 1 | 0 |
+| **Total** | **73** | **28** | **45** |
+
+## Baseline and current structural tests
+
+The same test files were run against upstream `main` (`b251da6`) and the corrected branch.
+
+| Test | Baseline | Current |
+|---|---|---|
+| Concrete ID/type uses concrete storage and records inherited-name root requirement | FAIL | PASS |
+| Abstract target retains runtime discriminator | PASS | PASS |
+| Public reference contract name resolves from root storage | FAIL | PASS |
+| Repeated reference fields reuse one concrete/root occurrence | FAIL | PASS |
+| Universal `Entity` reference path retained | PASS | PASS |
+| Collection filter does not duplicate nested item projection for counts | FAIL | PASS |
+| Edge projection does not duplicate target traversal | FAIL | PASS |
+| `$total` and `$matched` use the correct row sets | FAIL | PASS |
+| Nested resources are not expanded for matched/total counts | FAIL | PASS |
+| Quantity is read from the collection edge | PASS | PASS |
+| Existence does not project nested item fields | PASS | PASS |
+| Deterministic SQL and bindings | PASS | PASS |
+| Unrelated entity definitions do not change concrete collection SQL | PASS | PASS |
+
+The baseline failures detect the pre-correction SQL shape: root ID/name access, separate concrete/root joins, full nested projections in count scopes, and target/root traversal in the edge projection. Current focused suite: 13 pass.
+
+## Final Phase 2 and Phase 3 test corrections
+
+- `keeps total and matched counts over their correct row sets` now uses `countSubqueries()` for both count scopes. It asserts the matched title predicate, the unfiltered total, no nested Card/Face/Panel/Art projection, item-only pagination, and ordered bindings `["One", 2, 1, "One", 25, 0]`.
+- `extracts balanced count scopes without parsing quoted parentheses` covers SQL string literals with parentheses and doubled quote escapes. This is a test-local extractor, not a production SQL parser.
+- `keeps independently filtered uses of one collection isolated` compiles one collection projection filtered by `title = "A"` together with an independent root existence predicate on `enabled = true`. It verifies both predicates, ordered bindings, separate scopes, and no nested target projection.
+- `CollectionFilterIsolation.e2e.ts` proves the same behavior against PostgreSQL with P1 = (A, false), P2 = (B, true), and P3 = (A, true). The projection returns P1 and P3; the existence predicate is satisfied independently, and `$matched` is 2 while `$total` is 3.
+
+All corrected focused tests pass: 11 compiler/e2e tests across `CollectionPlanning.test.ts` and `CollectionFilterIsolation.e2e.ts`.
+
+## Acceptance table
+
+| Requirement | Test or source | Baseline | Current |
+|---|---|---|---|
+| Full 73-row occurrence audit | `docs/server/query-planning-audit.mdx` | N/A | PASS |
+| Mechanical 73 → 28 reconciliation | Audit subtotals and SQL artifacts | N/A | PASS |
+| Original/current SQL artifacts | `original.sql`, `current.sql` | N/A | PASS |
+| Concrete ID from concrete storage | `ConcreteIdentity.test.ts` — uses concrete storage for ID and static type while retaining required inherited name access | FAIL | PASS |
+| Static concrete discriminator | Same test | FAIL | PASS |
+| Abstract runtime discriminator | `ConcreteIdentity.test.ts` — uses the runtime discriminator for an abstract target | PASS | PASS |
+| Inherited name from root storage | `ConcreteIdentity.test.ts` — keeps the public reference contract name and resolves it from root storage | FAIL | PASS |
+| Repeated reference field occurrence reuse | `ConcreteIdentity.test.ts` — uses one concrete/root occurrence for repeated reference fields | FAIL | PASS |
+| Optional inaccessible reference | `ConcreteIdentity.e2e.ts` — preserves an optional concrete reference when its target is inaccessible | N/A | PASS |
+| Count scopes avoid nested projections | `CollectionPlanning.test.ts` — does not expand nested resources for matched or total counts | FAIL | PASS |
+| Balanced count extraction | `CollectionPlanning.test.ts` — extracts balanced count scopes without parsing quoted parentheses | N/A | PASS |
+| Matched/total row sets and bindings | `CollectionPlanning.test.ts` — keeps total and matched counts over their correct row sets | FAIL | PASS |
+| Item pagination only | Same test | FAIL | PASS |
+| Edge quantity from the correct edge | `CollectionPlanning.test.ts` — keeps quantity on the collection edge | PASS | PASS |
+| Edge projection avoids target traversal | `CollectionPlanning.test.ts` — an edge projection does not duplicate target traversal | FAIL | PASS |
+| Independent filtered uses of one navigation | `CollectionPlanning.test.ts` — keeps independently filtered uses of one collection isolated | N/A | PASS |
+| PostgreSQL independent filter evidence | `CollectionFilterIsolation.e2e.ts` | N/A | PASS |
+| PostgreSQL filtered/paginated collection behavior | `ExplicitCollection.e2e.ts` | N/A | PASS |
+| Deterministic SQL and bindings | `CollectionPlanning.test.ts` | PASS | PASS |
+| Unrelated entity definitions do not alter SQL | `CollectionPlanning.test.ts` | PASS | PASS |
+| Authorization unresolved and unchanged | Audit limitations | N/A | PASS |
+
+## Ancestor-read contract
+
+Graph authorization is guaranteed for Basis-generated operations. Raw SQL operates under the privileges of its database connection and is not automatically constrained to Basis's Graph query semantics.
+
+Concrete leaf tables remain the RLS authorization boundary. Ancestor storage such as `Entity` is not an entity authorization boundary and must not install read RLS policies. Leaf-rooted CTEs may join ancestor storage for inherited fields. Privileged raw SQL may read ancestor storage outside the Graph contract; that is documented behavior, not a role-separation requirement.
+
+Removing the universal root read policy requires the leaf CTE compiler first, because the current compiler still roots abstract queries at their ancestor table and relies on root policies for write/read enforcement. Step 1 therefore remains part of the next compiler increment.

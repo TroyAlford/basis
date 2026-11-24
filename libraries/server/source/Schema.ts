@@ -904,7 +904,9 @@ export function plan(options: PlanOptions): SchemaPlan {
   const previousTriggers = new Set(previous?.triggers.map(trigger => trigger.name) ?? [])
   const previousFunctions = new Set(previous?.functions.flatMap(fn => fn.required) ?? [])
   const previousConstraints = new Set(previous?.constraints.map(constraint => constraint.name) ?? [])
-  const previousPolicies = new Set(previous?.policies.map(policy => policy.name) ?? [])
+  const previousPolicies = new Set(
+    previous?.policies.map(policy => policy.name),
+  )
   const previousFunctionMap = new Map(previous?.functions.map(fn => [fn.name, fn]) ?? [])
   const previousGrantNames = new Set((previous?.grants ?? [])
     .filter(grant => grant.kind !== 'revoke')
@@ -1257,6 +1259,26 @@ export function plan(options: PlanOptions): SchemaPlan {
         kind: 'row-security',
         risk: 'review',
         sql: `ALTER TABLE ${quote(table.name)} FORCE ROW LEVEL SECURITY`,
+        target: table.name,
+      })
+    }
+    if (!table.rowSecurity && actual.rowSecurity === true) {
+      operations.push({
+        dependsOn: [`table:${table.name}`],
+        id: `disable-rls:${table.name}`,
+        kind: 'row-security',
+        risk: 'review',
+        sql: `ALTER TABLE ${quote(table.name)} DISABLE ROW LEVEL SECURITY`,
+        target: table.name,
+      })
+    }
+    if (!table.forceRowSecurity && actual.forceRowSecurity === true) {
+      operations.push({
+        dependsOn: [`table:${table.name}`],
+        id: `no-force-rls:${table.name}`,
+        kind: 'row-security',
+        risk: 'review',
+        sql: `ALTER TABLE ${quote(table.name)} NO FORCE ROW LEVEL SECURITY`,
         target: table.name,
       })
     }
@@ -1677,6 +1699,18 @@ export function plan(options: PlanOptions): SchemaPlan {
     if (desiredPolicyNames.has(name)) continue
     const policy = actualPolicyMap.get(name)
     if (policy && removedTables.has(policy.table)) continue
+    const previousPolicy = (previous?.policies ?? []).find(candidate => candidate.name === name)
+    if (policy && previousPolicy && sameCatalogPolicy(previousPolicy, policy)) {
+      operations.push({
+        dependsOn: [],
+        id: `drop-policy:${name}`,
+        kind: 'policy',
+        risk: 'review',
+        sql: `DROP POLICY IF EXISTS ${quote(name)} ON ${quote(policy.table)}`,
+        target: name,
+      })
+      continue
+    }
     drift.push(`unexpected policy: ${name}`)
   }
 
