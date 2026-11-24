@@ -39,6 +39,10 @@ const main = (): void => {
      */
     const app = join(workspace, 'app')
     initApp(app, spec, { includeBasis: false })
+    assert(
+      !existsSync(join(app, 'mise.toml')),
+      'the clean install must not require a consumer toolchain file',
+    )
     run(['bun', 'add', '--dev', '--trust', spec], app)
 
     mkdirSync(join(app, 'emitters'), { recursive: true })

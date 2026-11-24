@@ -78,7 +78,9 @@ function generateExport(globals: PluginGlobalsOptions, name: string): string | u
 
   if (match) {
     const output = typeof match[1] === 'function' ? match[1](name) : match[1]
-    return output ? `module.exports = ${output}` : undefined
+    return output
+      ? `module.exports = ${output};if (import.meta.hot) import.meta.hot.accept();`
+      : undefined
   }
   return undefined
 }

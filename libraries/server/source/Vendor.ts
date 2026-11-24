@@ -58,6 +58,8 @@ export interface VendorBundleOptions {
 export interface VendorSourceMap {
   /** Byte size of the source map. */
   bytes: number,
+  /** Immutable source-map bytes captured at build time. */
+  contents: Uint8Array<ArrayBuffer>,
   /** Absolute path to the source map. */
   file: string,
   /** SHA-256 of the source map bytes. */
@@ -70,6 +72,8 @@ export interface VendorSourceMap {
 export interface VendorAsset {
   /** Byte size of the emitted file. */
   bytes: number,
+  /** Immutable artifact bytes captured at build time. */
+  contents: Uint8Array<ArrayBuffer>,
   /** Absolute path to the emitted file. */
   file: string,
   /** SHA-256 of the emitted bytes, used as the content version. */
@@ -193,7 +197,14 @@ export async function discoverVendorSpecifiers(options: DiscoverVendorOptions): 
  */
 export async function buildVendorBundle(options: VendorBundleOptions): Promise<VendorBuild> {
   const root = path.resolve(options.root ?? process.cwd())
-  const directory = path.join(root, '.basis')
+  const outdirOption = options.outdir ?? 'dist/vendor'
+  const outdir = path.isAbsolute(outdirOption) ? outdirOption : path.resolve(root, outdirOption)
+  /*
+   * Keep the generated entrypoint beside the artifacts it produces. Server
+   * instances build independently into their own scope, so two applications
+   * that share a root cannot overwrite or read each other's in-flight entry.
+   */
+  const directory = path.join(outdir, '.basis')
   await mkdir(directory, { recursive: true })
 
   const specifiers = [...new Set(options.specifiers)].sort()
@@ -213,7 +224,7 @@ export async function buildVendorBundle(options: VendorBundleOptions): Promise<V
 
   return buildVendor({
     entries: [{ entrypoint, name: 'vendor' }],
-    outdir: options.outdir,
+    outdir,
     root,
   })
 }
@@ -284,6 +295,7 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
       const mapHash = createHash('sha256').update(mapBytes).digest('hex')
       sourceMap = {
         bytes: mapBytes.byteLength,
+        contents: mapBytes,
         file: mapOutput.path,
         hash: mapHash,
         url: `/assets/vendor/${entry.name}.js.map?v=${mapHash}`,
@@ -291,6 +303,7 @@ export async function buildVendor(options: VendorBuildOptions): Promise<VendorBu
     }
     assets.push({
       bytes: bytes.byteLength,
+      contents: bytes,
       file: output.path,
       hash,
       name: entry.name,

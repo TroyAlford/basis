@@ -60,7 +60,6 @@ describe('Basis change-impact policy', () => {
     for (const path of [
       'libraries/server/source/DatabaseFixture.lifecycle.e2e.ts',
       'libraries/server/source/ReleaseRecovery.e2e.ts',
-      'libraries/testing/runtime.lifecycle.e2e.ts',
     ]) {
       const result = decision(path)
       expect(result.suites.lifecycle.needed).toBe(true)

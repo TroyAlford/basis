@@ -26,13 +26,14 @@ The end-to-end suffix is partitioned into a database suite and a browser suite. 
     "test:database": "bun test --concurrent --max-concurrency=8 <database e2e files>",
     "test:e2e": "bun test <browser e2e files>",
     "test:lifecycle": "bun test --parallel=2 --concurrent <fixture and recovery proofs>",
+    "test:runtime-lifecycle": "bun test <snapshot runtime lifecycle proof>",
     "test:recovery": "bun test <destructive database proofs>",
-    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:recovery"
+    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:runtime-lifecycle && bun run test:recovery"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. Basis CI runs the four test jobs in parallel: `test:unit` fans test files across Bun worker processes and includes screenshots, `test:database` runs one seeded PostgreSQL instance, `test:e2e` runs the browser journeys, and `test:lifecycle` runs the small fixture/recovery proofs concurrently. `test:recovery` is the explicit manual lane for the expensive destructive database proofs; it is not part of the required CI feedback path. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. Basis CI runs the four test jobs in parallel: `test:unit` fans test files across Bun worker processes and includes screenshots, `test:database` runs one seeded PostgreSQL instance, `test:e2e` runs the browser journeys, and `test:lifecycle` runs the small fixture/recovery proofs concurrently. `test:runtime-lifecycle` is the focused snapshot-runtime proof and is run explicitly rather than in the required CI lifecycle lane. `test:recovery` is the explicit manual lane for the expensive destructive database proofs; it is not part of the required CI feedback path. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Basis recognizes all three lanes when it attributes a caller, registers a test, and scopes orphan pruning. That recognition never makes a heavy lane a default test: Bun still discovers only `.test` and `.spec`.
 
@@ -190,7 +191,7 @@ The container is run-scoped: it uses a process-unique name and is removed at tea
 
 ## Proving the contract
 
-`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Visual runs start and remove one run-scoped container.
+`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark, run through `test:runtime-lifecycle`. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Visual runs start and remove one run-scoped container.
 
 ## Temp directories
 

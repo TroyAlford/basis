@@ -1,5 +1,8 @@
+import { setDefaultTimeout } from 'bun:test'
 import { join } from 'node:path'
 import { matchScreenshot, test, useApplication } from '../../testing'
+
+setDefaultTimeout(30_000)
 
 /**
  * Visual regression for the components whose meaningful state only exists after
@@ -21,6 +24,7 @@ const STAGES: [string, string][] = [
 test('captures mounted components', async () => {
   const app = await useApplication({
     cwd: join(import.meta.dir, '..', '..', '..'),
+    development: true,
     entry: './testing/components/serve.ts',
     timeoutMs: 120_000,
   })

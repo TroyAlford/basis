@@ -1,6 +1,7 @@
 import { describe, expect, mock, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
+import { waitFor } from '../../testing/waitFor'
 import * as loadImageModule from '../../utilities/loadImage'
 import { Image } from './Image'
 
@@ -83,8 +84,7 @@ describe('Image', () => {
         <Image src="/invalid-image.jpg" />,
       )
 
-      // Wait for loading to complete
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await waitFor(() => node.getAttribute('data-loading') === 'false')
 
       expect(node).toHaveAttribute('data-loading', 'false')
       expect(node).toHaveAttribute('data-error', 'true')

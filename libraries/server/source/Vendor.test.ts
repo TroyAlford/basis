@@ -1,7 +1,8 @@
-import { tempDirectory, useApplication } from 'basis/testing'
+import { tempDirectory, useApplication, waitFor } from 'basis/testing'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RawSourceMap } from 'source-map-js'
 import { SourceMapConsumer } from 'source-map-js'
@@ -37,6 +38,59 @@ function artifact(build: VendorBuild, name: string): VendorAsset {
   const found = build.byName[name]
   if (!found) throw new Error(`missing vendor chunk: ${name}`)
   return found
+}
+
+interface ActiveVendorSnapshot {
+  bytes: string,
+  hash: string,
+  mapBytes: string,
+  mapHash: string,
+  mapUrl: string,
+  url: string,
+}
+
+/**
+ * Resolve the server-owned vendor directory for a fixture root.
+ * @param root - The temporary project root.
+ * @returns The active vendor directory.
+ */
+async function activeVendorDirectory(root: string): Promise<string> {
+  const vendorRoot = join(root, 'dist', 'vendor')
+  const scopes = await readdir(vendorRoot)
+  const scope = scopes[0]
+  if (!scope) throw new Error('missing server-owned vendor directory')
+  return join(vendorRoot, scope)
+}
+
+/**
+ * Resolve the running server's active vendor script and source map through their
+ * unversioned redirects, then read their immutable bytes.
+ * @param base - The application origin.
+ * @returns The active snapshot metadata and bytes.
+ */
+async function activeVendorSnapshot(base: string): Promise<ActiveVendorSnapshot> {
+  const html = await Bun.fetch(base).then(response => response.text())
+  const source = /<script[^>]+src="([^"]*vendor[^"]*)"/.exec(html)?.[1]
+  if (!source) throw new Error('missing vendor script')
+  const vendorRedirect = await Bun.fetch(new URL(source, base), { redirect: 'manual' })
+  const location = vendorRedirect.headers.get('location')
+  if (!location) throw new Error('missing vendor redirect location')
+  const url = new URL(location, base).toString()
+  const hash = new URL(url).searchParams.get('v')
+  if (!hash) throw new Error('missing vendor hash')
+
+  const mapRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js.map', base), {
+    redirect: 'manual',
+  })
+  const mapLocation = mapRedirect.headers.get('location')
+  if (!mapLocation) throw new Error('missing vendor map redirect location')
+  const mapUrl = new URL(mapLocation, base).toString()
+  const mapHash = new URL(mapUrl).searchParams.get('v')
+  if (!mapHash) throw new Error('missing vendor map hash')
+
+  const bytes = await Bun.fetch(url).then(response => response.text())
+  const mapBytes = await Bun.fetch(mapUrl).then(response => response.text())
+  return { bytes, hash, mapBytes, mapHash, mapUrl, url }
 }
 
 describe('vendor assets', () => {
@@ -138,7 +192,7 @@ describe('vendor assets', () => {
     expect(shell).toContain('<!-- VENDORS -->')
 
     const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
-    expect(html).toContain('<script src="/assets/vendor/vendor.js"></script>')
+    expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
     expect(html).not.toContain('document.write')
 
     const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]
@@ -152,7 +206,23 @@ describe('vendor assets', () => {
     expect(vendor.headers.get('location')).toContain('?v=')
   })
 
-  test('reuses unchanged cache entries and invalidates changed chunks over HTTP', async () => {
+  test('uses a configured trusted public origin for vendor scripts', async () => {
+    const application = await useApplication({
+      cwd: repoRoot,
+      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
+      env: { PUBLIC_ORIGIN: 'https://app.example' },
+    })
+
+    try {
+      const html = await Bun.fetch(application.url).then(response => response.text())
+      expect(html).toContain('src="https://app.example/assets/vendor/vendor.js"')
+      expect(html).not.toContain('src="http://127.0.0.1')
+    } finally {
+      await application.stop()
+    }
+  })
+
+  test('preserves vendor HTTP cache headers and standalone chunk identity', async () => {
     const root = tempDirectory('basis-vendor-http-')
 
     try {
@@ -214,29 +284,257 @@ describe('vendor assets', () => {
       expect(mapResponse.status).toBe(200)
       expect(await mapResponse.text()).toContain('sourcesContent')
 
+      await application.stop()
+
+      /*
+       * The standalone builder may rewrite files after the server has stopped.
+       * A running Server's active snapshot is covered by the immutable-snapshot
+       * test below.
+       */
       const rebuilt = await buildVendor(options)
       expect(artifact(rebuilt, 'alpha').hash).toBe(alpha.hash)
       expect(artifact(rebuilt, 'beta').hash).toBe(beta.hash)
-      expect((await Bun.fetch(`${application.url}${artifact(rebuilt, 'alpha').url}`)).status).toBe(200)
-      expect(await Bun.fetch(`${application.url}${artifact(rebuilt, 'beta').url}`).then(result => result.text()))
-        .toContain('stable')
 
       await writeEntries(root, { alpha: 'globalThis.Alpha = "two"\n' })
       const changed = await buildVendor(options)
       expect(artifact(changed, 'alpha').hash).not.toBe(alpha.hash)
       expect(artifact(changed, 'beta').hash).toBe(beta.hash)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
 
-      const updated = await Bun.fetch(`${application.url}${artifact(changed, 'alpha').url}`)
-      expect(updated.status).toBe(200)
-      expect(await updated.text()).toContain('two')
+  test('keeps the vendor artifact fixed until the server restarts', async () => {
+    const root = tempDirectory('basis-vendor-restart-')
+    const modules = join(root, 'node_modules')
+    const probe = join(modules, 'vendor-probe')
 
-      const stale = await Bun.fetch(`${application.url}${alpha.url}`, { redirect: 'manual' })
-      expect(stale.status).toBe(307)
-      expect(stale.headers.get('location')).toContain(`?v=${artifact(changed, 'alpha').hash}`)
+    await mkdir(probe, { recursive: true })
+    for (const name of await readdir(join(repoRoot, 'node_modules'))) {
+      if (name === '.bin' || name === 'vendor-probe') continue
+      await symlink(join(repoRoot, 'node_modules', name), join(modules, name), 'dir')
+    }
+    await writeFile(join(probe, 'package.json'), JSON.stringify({
+      main: 'index.js',
+      name: 'vendor-probe',
+      type: 'module',
+    }))
+    await writeFile(join(probe, 'index.js'), 'export const probe = "one"\n')
+    await writeFile(join(root, 'bunfig.toml'), '[serve.static]\nplugins = ["basis/serve"]\n')
+    await writeFile(join(root, 'serve.ts'), `
+import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
 
-      const stable = await Bun.fetch(`${application.url}${beta.url}`)
-      expect(stable.status).toBe(200)
-      expect(await stable.text()).toContain('stable')
+new Server().root(import.meta.dir).main('./Application.tsx').start()
+    `.trim())
+    await writeFile(join(root, 'Application.tsx'), `
+import { Component } from ${JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))}
+import { probe } from 'vendor-probe'
+
+export class Application extends Component {
+  content() {
+    return <div id="probe">{probe}</div>
+  }
+}
+    `.trim())
+
+    const readVendor = async (url: string): Promise<string> => {
+      const html = await Bun.fetch(url).then(response => response.text())
+      const source = /<script[^>]+src="([^"]*vendor[^"]*)"/.exec(html)?.[1]
+      if (!source) throw new Error(`missing vendor script: ${html.slice(0, 2000)}`)
+      return Bun.fetch(new URL(source, url)).then(response => response.text())
+    }
+
+    let firstHash: string | undefined
+    try {
+      const first = await useApplication({
+        cwd: root,
+        entry: './serve.ts',
+        env: { VENDOR_PHASE: 'first' },
+        readyPath: '/',
+      })
+      try {
+        expect(await Bun.fetch(first.url).then(response => response.text())).toContain('one')
+        const snapshot = await activeVendorSnapshot(first.url)
+        firstHash = snapshot.hash
+        expect(snapshot.bytes).toContain('one')
+        expect(snapshot.mapBytes).toContain('sourcesContent')
+
+        /*
+         * Replace the files at the same paths while the server is running. The
+         * active URL must continue to identify the bytes activated at startup,
+         * not the replacement now sitting on disk.
+         */
+        const vendorDirectory = await activeVendorDirectory(root)
+        await writeFile(join(vendorDirectory, 'vendor.js'), 'globalThis.__replacement = true\n')
+        await writeFile(
+          join(vendorDirectory, 'vendor.js.map'),
+          JSON.stringify({ mappings: '', names: [], sources: ['replacement.ts'], version: 3 }),
+        )
+
+        const oldVendor = await Bun.fetch(snapshot.url, { redirect: 'manual' })
+        expect(oldVendor.status).toBe(200)
+        const oldBytes = await oldVendor.text()
+        expect(oldBytes).toContain('one')
+        expect(oldBytes).not.toContain('__replacement')
+        expect(await Bun.fetch(snapshot.url).then(response => response.text())).toBe(oldBytes)
+
+        const oldMap = await Bun.fetch(snapshot.mapUrl, { redirect: 'manual' })
+        expect(oldMap.status).toBe(200)
+        expect(await oldMap.text()).toBe(snapshot.mapBytes)
+
+        /*
+         * The active snapshot owns the bytes even after its backing files are
+         * deleted. Resolve the snapshot before requiring the file to exist.
+         */
+        await rm(join(vendorDirectory, 'vendor.js'), { force: true })
+        await rm(join(vendorDirectory, 'vendor.js.map'), { force: true })
+
+        const deletedVendor = await Bun.fetch(snapshot.url, { redirect: 'manual' })
+        expect(deletedVendor.status).toBe(200)
+        expect(await deletedVendor.text()).toBe(oldBytes)
+        expect(deletedVendor.headers.get('etag')).toBe(`"${snapshot.hash}"`)
+        expect(deletedVendor.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
+        const deletedMap = await Bun.fetch(snapshot.mapUrl, { redirect: 'manual' })
+        expect(deletedMap.status).toBe(200)
+        expect(await deletedMap.text()).toBe(snapshot.mapBytes)
+        expect(deletedMap.headers.get('etag')).toBe(`"${snapshot.mapHash}"`)
+        expect(deletedMap.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
+        const deletedRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js', first.url), {
+          redirect: 'manual',
+        })
+        expect(deletedRedirect.status).toBe(307)
+        expect(deletedRedirect.headers.get('location')).toContain(`?v=${snapshot.hash}`)
+
+        const deletedMapRedirect = await Bun.fetch(
+          new URL('/assets/vendor/vendor.js.map', first.url),
+          { redirect: 'manual' },
+        )
+        expect(deletedMapRedirect.status).toBe(307)
+        expect(deletedMapRedirect.headers.get('location')).toContain(`?v=${snapshot.mapHash}`)
+
+        const notModifiedVendor = await Bun.fetch(snapshot.url, {
+          headers: { 'If-None-Match': `"${snapshot.hash}"` },
+        })
+        expect(notModifiedVendor.status).toBe(304)
+        expect(notModifiedVendor.headers.get('etag')).toBe(`"${snapshot.hash}"`)
+
+        const notModifiedMap = await Bun.fetch(snapshot.mapUrl, {
+          headers: { 'If-None-Match': `"${snapshot.mapHash}"` },
+        })
+        expect(notModifiedMap.status).toBe(304)
+        expect(notModifiedMap.headers.get('etag')).toBe(`"${snapshot.mapHash}"`)
+
+        expect((await Bun.fetch(new URL('/assets/vendor/missing.js', first.url))).status).toBe(404)
+        expect((await Bun.fetch(new URL('/assets/vendor/.basis/secret', first.url))).status).toBe(404)
+
+        const oldRedirect = await Bun.fetch(new URL('/assets/vendor/vendor.js', first.url), {
+          redirect: 'manual',
+        })
+        expect(oldRedirect.status).toBe(307)
+        expect(oldRedirect.headers.get('location')).toContain(`?v=${snapshot.hash}`)
+
+        const stale = await Bun.fetch(`${first.url}/assets/vendor/vendor.js?v=stale`, {
+          redirect: 'manual',
+        })
+        expect(stale.status).toBe(307)
+        expect(stale.headers.get('location')).toContain(`?v=${snapshot.hash}`)
+
+        await writeFile(join(probe, 'index.js'), 'export const probe = "two"\n')
+        expect(await readVendor(first.url)).toContain('one')
+      } finally {
+        await first.stop()
+      }
+
+      const second = await useApplication({
+        cwd: root,
+        entry: './serve.ts',
+        env: { VENDOR_PHASE: 'second' },
+        readyPath: '/',
+      })
+      try {
+        expect(await Bun.fetch(second.url).then(response => response.text())).toContain('two')
+        const snapshot = await activeVendorSnapshot(second.url)
+        expect(snapshot.bytes).toContain('two')
+        expect(snapshot.hash).not.toBe(firstHash)
+      } finally {
+        await second.stop()
+      }
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  }, 120_000)
+  test('fails production readiness but preserves development fallback when vendor discovery fails', async () => {
+    const root = tempDirectory('basis-vendor-failure-')
+    await writeFile(join(root, 'bunfig.toml'), '[serve.static]\nplugins = ["basis/serve"]\n')
+    await symlink(join(repoRoot, 'node_modules'), join(root, 'node_modules'), 'dir')
+    await writeFile(join(root, 'serve.ts'), `
+const realBuild = Bun.build
+let builds = 0
+Bun.build = ((options) => {
+  builds += 1
+  if (builds === 1) return Promise.reject(new Error('injected vendor failure'))
+  return realBuild(options)
+}) as typeof Bun.build
+
+import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
+import { Logger } from ${JSON.stringify(join(repoRoot, 'libraries', 'utilities', 'index.ts'))}
+
+const logger = new Logger({ logFilePath: ${JSON.stringify(join(root, 'server.log'))} })
+new Server().root(import.meta.dir).main('./Application.tsx').start({ logger })
+    `.trim())
+    await writeFile(join(root, 'Application.tsx'), `
+import { Component } from ${JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))}
+
+export class Application extends Component {
+  componentDidMount() {
+    super.componentDidMount()
+    globalThis.__basisFallbackHydrated = true
+  }
+  content() {
+    return <h1>Vendor fallback</h1>
+  }
+}
+    `.trim())
+
+    try {
+      const production = await useApplication({
+        cwd: root,
+        development: false,
+        entry: './serve.ts',
+        readyStatus: status => status === 503,
+        timeoutMs: 10_000,
+      })
+      try {
+        const health = await waitFor(async () => {
+          const response = await Bun.fetch(`${production.url}/api/health`)
+          const body = await response.json() as { error?: string, status?: string }
+          return body.status === 'error' ? body : null
+        }, { timeout: 10_000 })
+        expect(health.error).toContain('injected vendor failure')
+      } finally {
+        await production.stop()
+      }
+
+      const development = await useApplication({
+        cwd: root,
+        development: true,
+        entry: './serve.ts',
+      })
+      try {
+        await development.visit('/', async page => {
+          await page.waitForSelector('h1')
+          await page.waitForFunction(
+            () => (globalThis as { __basisFallbackHydrated?: boolean }).__basisFallbackHydrated === true,
+          )
+          expect(await page.textContent('h1')).toBe('Vendor fallback')
+        })
+        expect(readFileSync(join(root, 'server.log'), 'utf8'))
+          .toContain('client vendor discovery failed: injected vendor failure')
+      } finally {
+        await development.stop()
+      }
     } finally {
       await rm(root, { force: true, recursive: true })
     }

@@ -24,9 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Run Basis compliance
@@ -57,9 +55,7 @@ jobs:
           git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
           git checkout --detach refs/remotes/origin/pr-head
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Detect base impact policy
@@ -120,6 +116,42 @@ jobs:
           done
           echo "lanes=$json" >> "$GITHUB_OUTPUT"
 
+  toolchain:
+    name: Bun toolchain (${{ matrix.os }})
+    if: ${{ !github.event.pull_request.draft }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v5
+      - name: Verify the pinned Bun canary
+        run: |
+          set -euo pipefail
+          test "$(bun --version)" = "1.4.6"
+          test "$(bun --revision)" = "1.4.6-canary.1+b15f51302"
+
+  production-hmr:
+    name: Production HMR browser
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v5
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Warm the Playwright container image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
+      - name: Run production HMR browser tests
+        run: >-
+          bun test --timeout 90000
+          ./libraries/testing/application.production-hmr.e2e.ts
+          ./libraries/testing/application.production-hmr.isolated.e2e.ts
+
   unit:
     name: Unit and screenshots
     if: ${{ !github.event.pull_request.draft && (fromJSON(needs.impact.outputs.lanes).unit == true || fromJSON(needs.impact.outputs.lanes).docs == true) }}
@@ -140,9 +172,7 @@ jobs:
           git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
           git checkout --detach refs/remotes/origin/pr-head
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Warm the Playwright container image
@@ -184,9 +214,7 @@ jobs:
           git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
           git checkout --detach refs/remotes/origin/pr-head
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Run one shared database suite
@@ -201,7 +229,7 @@ jobs:
     name: End-to-end
     if: ${{ !github.event.pull_request.draft && fromJSON(needs.impact.outputs.lanes).e2e == true }}
     needs: [impact]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -217,9 +245,7 @@ jobs:
           git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
           git checkout --detach refs/remotes/origin/pr-head
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Warm the Playwright container image
@@ -240,7 +266,7 @@ jobs:
     name: Lifecycle
     if: ${{ !github.event.pull_request.draft && fromJSON(needs.impact.outputs.lanes).lifecycle == true }}
     needs: [impact]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -256,9 +282,7 @@ jobs:
           git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
           git checkout --detach refs/remotes/origin/pr-head
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Warm the Playwright container image
@@ -273,9 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Run consumer self-install contract
@@ -286,9 +308,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
+      - uses: jdx/mise-action@v5
       - name: Install dependencies
         run: bun install --frozen-lockfile
       # Exercises the action's exit-code and config-discovery behavior directly.
@@ -310,6 +330,8 @@ jobs:
     needs:
       - compliance
       - impact
+      - toolchain
+      - production-hmr
       - unit
       - database
       - e2e
@@ -330,7 +352,7 @@ jobs:
           fail() { echo "::error::$*" >&2; failed=1; }
           result() { jq -r --arg job "$1" '.[$job].result // "missing"' <<<"$NEEDS"; }
 
-          for job in compliance impact knip consumer-install; do
+          for job in compliance impact knip consumer-install toolchain production-hmr; do
             value=$(result "$job")
             if [[ "$value" != "success" ]]; then fail "$job ($value)"; fi
           done

@@ -57,7 +57,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -93,7 +93,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -147,7 +147,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -160,8 +160,7 @@
     "lifecycle": {
       "testGlobs": [
         "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",
-        "libraries/server/source/ReleaseRecovery.e2e.ts",
-        "libraries/testing/runtime.lifecycle.e2e.ts"
+        "libraries/server/source/ReleaseRecovery.e2e.ts"
       ],
       "sourceGlobs": [
         "libraries/server/**/*.ts",
@@ -175,7 +174,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",
@@ -206,7 +205,7 @@
         "bun.lock",
         "bunfig.toml",
         "tsconfig*.json",
-        ".tool-versions"
+        "mise.toml"
       ],
       "ignoreGlobs": [
         "docs/**",

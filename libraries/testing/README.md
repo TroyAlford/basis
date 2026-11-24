@@ -33,8 +33,9 @@ The consumer scripts follow the same shape:
     "test:database": "bun test --concurrent --max-concurrency=8 <database e2e files>",
     "test:e2e": "bun test <browser e2e files>",
     "test:lifecycle": "bun test --parallel=2 --concurrent <fixture and recovery proofs>",
+    "test:runtime-lifecycle": "bun test <snapshot runtime lifecycle proof>",
     "test:recovery": "bun test <destructive database proofs>",
-    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:recovery"
+    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:runtime-lifecycle && bun run test:recovery"
   }
 }
 ```
@@ -191,6 +192,6 @@ Rasterisation is pinned by the container image, and the default comparison budge
 
 Snapshot capture runs Chromium inside the pinned Playwright container (`mcr.microsoft.com/playwright:v<installed playwright>-noble`). Every run uses a process-unique container and removes it at teardown. The container provides the browser and its operating-system libraries, so no host Chromium or `playwright install-deps` step is needed. Web fonts still load from Google Fonts over the network, as they do everywhere else.
 
-`basis/testing` resolves the installed Playwright version and runs the mounted Playwright package's `run-server` inside the container, publishing it to a random localhost port. It connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server. The run-scoped container name includes the process id; the host port is random and the browser connection is process-local. Set `BASIS_SNAPSHOT_ACTIVITY_LOG` to a path to record lifecycle events; `libraries/testing/runtime.lifecycle.e2e.ts` uses it to prove one ephemeral container start, one browser connection, and one teardown across several files and dozens of snapshots.
+`basis/testing` resolves the installed Playwright version and runs the mounted Playwright package's `run-server` inside the container, publishing it to a random localhost port. It connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server. The run-scoped container name includes the process id; the host port is random and the browser connection is process-local. Set `BASIS_SNAPSHOT_ACTIVITY_LOG` to a path to record lifecycle events; `libraries/testing/runtime.lifecycle.e2e.ts`, run through `test:runtime-lifecycle`, uses it to prove one ephemeral container start, one browser connection, and one teardown across several files and dozens of snapshots.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and build); `bun test` runs the fast lane, and `test:all` is the deliberate full acceptance run.

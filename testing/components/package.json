@@ -2,8 +2,8 @@
   "name": "@basis-fixtures/components",
   "dependencies": {
     "@basis/react": "workspace:*",
-    "react": "^19",
-    "react-dom": "^19"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "scripts": {
     "publish": "SKIP"

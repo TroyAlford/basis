@@ -28,9 +28,11 @@ make_fixture() {
   # asdf/mise are directory-scoped. The fixtures live under a temp dir, so give
   # them the repository's tool pin; otherwise the `bun` shim fails with
   # "No version is set for command bun" when the test runs from a temp dir.
-  if [ -f "$REPO_ROOT/.tool-versions" ]; then
-    cp "$REPO_ROOT/.tool-versions" "$dir/.tool-versions"
-  fi
+  for config in .tool-versions mise.toml; do
+    if [ -f "$REPO_ROOT/$config" ]; then
+      cp "$REPO_ROOT/$config" "$dir/$config"
+    fi
+  done
   cat > "$dir/package.json" <<'JSON'
 { "name": "knip-selftest", "private": true, "type": "module", "main": "src/index.ts" }
 JSON

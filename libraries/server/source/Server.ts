@@ -13,7 +13,7 @@ import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
-import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
+import { assertBasisServerCompatible, HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
@@ -40,6 +40,7 @@ import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
 import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import type { VendorBuild } from './Vendor'
 import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
 /** Request-scoped data supplied to a {@link Server.context} loader. */
@@ -95,6 +96,12 @@ function matchesETag(header: string | null, etag: string): boolean {
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
+  /**
+   * Enable Bun's live HMR server. Defaults to true outside production and
+   * false when `NODE_ENV=production`. Preview can set this explicitly while
+   * still using production React.
+   */
+  hmr?: boolean,
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
   /**
@@ -112,6 +119,12 @@ export interface ServerOptions {
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
+   * Trusted public origin used for executable vendor script URLs, for example
+   * `https://app.example` behind a TLS-terminating reverse proxy. Defaults to
+   * `PUBLIC_ORIGIN`, then the incoming request origin.
+   */
+  publicOrigin?: string,
+  /**
    * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
    * authoritative release version from the strict semver release tag (for
@@ -125,11 +138,13 @@ export interface ServerOptions {
  * A server for building, serving, and (in development) hot reloading React
  * applications.
  *
- * The server always delegates to Bun's dev server: the SPA shell is generated
- * and served through an HTML route, so Bun owns live compilation, file
- * watching, hot module replacement, and React Fast Refresh. A changed module is
- * replaced in place — no document reload — and only falls back to a reload when
- * nothing accepts the update.
+ * The server always delegates to Bun's server and serves the SPA shell through
+ * an HTML route. Development and explicit previews enable Bun's live HMR; a
+ * normal production start uses Bun's production serving mode without HMR.
+ * Development uses React Fast Refresh with the development React runtime.
+ * Preview and production-React HMR use Basis's production class-component
+ * transform, which preserves mounted instances for supported updates and falls
+ * back to remount or reload when an update cannot be applied safely.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities.
@@ -173,7 +188,10 @@ export class Server<
   #sse = new Map<string, SseHandler>()
   #status: HealthStatus = 'starting'
   #title = 'Document'
+  #publicOrigin: string | null = null
   #version = 'development'
+  #vendorBuild: VendorBuild | null = null
+  #vendorRoot: string | null = null
   #vendorScripts: readonly string[] = []
 
   constructor() {
@@ -437,7 +455,7 @@ export class Server<
    */
   async handleAsset(uri: URI, request?: Request): Promise<Response> {
     const vendorRoute = uri.route === 'vendor' || uri.route.startsWith('vendor/')
-    const vendorRoot = path.join(this.#root, 'dist', 'vendor')
+    const vendorRoot = this.#vendorRoot ?? path.join(this.#root, 'dist', 'vendor')
     const vendor = vendorRoute && fs.existsSync(vendorRoot)
     const root = vendor ? vendorRoot : this.#assets
     if (!root || isInternalStatePath(uri.route)) return Server.NotFound
@@ -454,10 +472,13 @@ export class Server<
       return Server.NotFound
     }
 
+    const active = vendor ? this.#activeVendorAsset(filePath) : null
+    if (active) return this.#serveVendor(uri, active, null, request, Bun.file(filePath).type)
+
     const asset = await publicStaticFile(filePath)
     if (!asset) return Server.NotFound
 
-    if (vendor) return this.#serveVendor(uri, asset, request)
+    if (vendor) return this.#serveVendor(uri, null, asset, request, asset.type)
 
     const version = asset.lastModified.toString()
 
@@ -482,18 +503,22 @@ export class Server<
   /**
    * Serve one content-versioned vendor artifact.
    * @param uri - The vendor request URI.
+   * @param active - The active immutable snapshot, or null for file fallback.
    * @param asset - The resolved vendor file.
    * @param request - The incoming request, when available.
+   * @param type - The response content type.
    * @returns The versioned asset, a redirect to the current version, or a 304.
    */
   async #serveVendor(
     uri: URI,
-    asset: ReturnType<typeof Bun.file>,
+    active: { contents: Uint8Array<ArrayBuffer>, hash: string } | null,
+    asset: ReturnType<typeof Bun.file> | null,
     request: Request | undefined,
+    type: string,
   ): Promise<Response> {
     try {
-      const bytes = new Uint8Array(await asset.arrayBuffer())
-      const hash = createHash('sha256').update(bytes).digest('hex')
+      const bytes = active?.contents ?? new Uint8Array(await asset?.arrayBuffer() ?? [])
+      const hash = active?.hash ?? createHash('sha256').update(bytes).digest('hex')
       const etag = `"${hash}"`
       const immutable = 'public, max-age=31536000, immutable'
 
@@ -513,12 +538,27 @@ export class Server<
       }
 
       return new Response(bytes, {
-        headers: { 'Cache-Control': immutable, 'Content-Type': asset.type, 'ETag': etag },
+        headers: { 'Cache-Control': immutable, 'Content-Type': type, 'ETag': etag },
         status: 200,
       })
     } catch {
       return Server.NotFound
     }
+  }
+
+  /**
+   * Resolve the active immutable bytes for one vendor file or source map.
+   * @param filePath - Absolute path being requested.
+   * @returns The active hash and contents, or null when no active build owns it.
+   */
+  #activeVendorAsset(filePath: string): { contents: Uint8Array<ArrayBuffer>, hash: string } | null {
+    for (const asset of this.#vendorBuild?.assets ?? []) {
+      if (asset.file === filePath) return { contents: asset.contents, hash: asset.hash }
+      if (asset.sourceMap?.file === filePath) {
+        return { contents: asset.sourceMap.contents, hash: asset.sourceMap.hash }
+      }
+    }
+    return null
   }
 
   /**
@@ -575,8 +615,9 @@ export class Server<
       }
 
       const response = await Bun.fetch(this.#devShellURL())
+      const origin = this.#publicOrigin ?? (request ? new URL(request.url).origin : '')
       const html = this.#vendorScripts.length > 0
-        ? this.#injectVendorScripts(await response.text())
+        ? this.#injectVendorScripts(await response.text(), origin)
         : await response.text()
       const headers = new Headers(response.headers)
       headers.delete('content-encoding')
@@ -603,12 +644,20 @@ export class Server<
 
   /**
    * Inject the standard vendor scripts at the generated shell marker.
+   *
+   * Bun's HTML bundler treats absolute local paths as files to resolve. Use an
+   * absolute HTTP origin so production HTML routes preserve the vendor script
+   * as an external request. Development behaves the same way.
    * @param html - The Bun-generated shell HTML.
+   * @param origin - The request origin, or an empty string when unavailable.
    * @returns The shell HTML with the vendor script tags in place of the marker.
    */
-  #injectVendorScripts(html: string): string {
+  #injectVendorScripts(html: string, origin: string): string {
     const scripts = this.#vendorScripts
-      .map(src => `<script src="${src.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`)
+      .map(src => {
+        const url = origin === '' ? src : `${origin}${src}`
+        return `<script src="${url.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`
+      })
       .join('')
     return html.replace(VENDOR_MARKER, scripts)
   }
@@ -626,20 +675,50 @@ export class Server<
   async #prepareVendor(entrypoints: readonly string[]): Promise<ReadonlySet<string>> {
     if (entrypoints.length === 0) return new Set()
 
-    try {
+    /*
+     * Every server gets its own vendor workspace. Applications and test
+     * processes can share a root, and a shared entrypoint or output directory
+     * would let one startup read or overwrite another's in-flight build.
+     */
+    const outdir = path.join(this.#root, 'dist', 'vendor', this.#ssrScope)
+    this.#vendorRoot = outdir
+
+    const prepare = async (): Promise<ReadonlySet<string>> => {
       const specifiers = await discoverVendorSpecifiers({
         entrypoint: entrypoints[0],
         plugins: [pluginSASS(), pluginMarkdown()],
         root: this.#root,
       })
-      await buildVendorBundle({ root: this.#root, specifiers })
+      this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers })
       return new Set(specifiers)
-    } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error))
-      this.#logger.error(`client vendor discovery failed: ${failure.message}`)
-      await buildVendorBundle({ root: this.#root, specifiers: [] }).catch(() => undefined)
-      return new Set()
     }
+
+    let failure: Error | null = null
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await prepare()
+      } catch (error) {
+        failure = error instanceof Error ? error : new Error(String(error))
+        /*
+         * Bun can report a generic "Bundle failed" under a transient startup
+         * race. Retry once; a deterministic failure still fails below.
+         */
+        if (attempt === 0 && failure.message === 'Bundle failed') {
+          await Bun.sleep(100)
+          continue
+        }
+        break
+      }
+    }
+
+    if (failure === null) failure = new Error('vendor preparation failed')
+    this.#logger.error(`client vendor discovery failed: ${failure.message}`)
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: failure })
+    }
+    this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers: [] })
+      .catch(() => null)
+    return new Set()
   }
 
   /**
@@ -758,6 +837,12 @@ export class Server<
     fs.rmSync(this.#ssrScopeDir(), { force: true, recursive: true })
   }
 
+  /** Remove the server-owned hydration and vendor artifacts for this instance. */
+  #cleanupScopedArtifacts(): void {
+    fs.rmSync(path.join(this.#root, '.basis', 'hydrate', this.#ssrScope), { force: true, recursive: true })
+    fs.rmSync(path.join(this.#root, 'dist', 'vendor', this.#ssrScope), { force: true, recursive: true })
+  }
+
   /**
    * The server-owned SSR artifact directory for this server instance.
    * @returns The absolute scope directory.
@@ -821,31 +906,57 @@ export class Server<
    * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
    * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
+   * @param options.hmr - Enable live HMR; defaults to true outside production.
    * @param options.hostname - The interface to bind.
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
+   * @param options.publicOrigin - Trusted public origin for vendor scripts.
    * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
   start = ({
+    hmr,
     hostname = Bun.env.HOST ?? '127.0.0.1',
     idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
+    publicOrigin = nonEmpty(Bun.env.PUBLIC_ORIGIN) ?? undefined,
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): this => {
+    assertBasisServerCompatible()
     if (logger) this.#logger = logger
+    this.#publicOrigin = publicOrigin ?? null
     this.#version = version
     if (!this.#assets) {
       const assets = path.join(this.#root, 'assets')
       if (fs.existsSync(assets)) this.#assets = assets
     }
 
+    const servingHmr = hmr ?? process.env.NODE_ENV !== 'production'
+    this.#vendorBuild = null
+    this.#vendorRoot = null
     this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
-    const entrypoints = this.#mainPath
-      ? [writeHydrationEntry({ directory: path.join(this.#root, '.basis'), mainPath: this.#mainPath })]
-      : []
+    /*
+     * The server owns a unique shell directory and hydration entry. Test
+     * processes and multiple applications commonly share one root; writing a
+     * shared hydrate entry would race its reads during Bun's HTML build.
+     */
+    const directory = devShellDirectory(JSON.stringify([
+      this.#root,
+      this.#title,
+      this.#mainPath,
+      this.#vendorScripts,
+      this.#ssrScope,
+    ]))
+    const entrypoints: string[] = []
+    if (this.#mainPath) {
+      entrypoints.push(writeHydrationEntry({
+        directory: path.join(this.#root, '.basis', 'hydrate', this.#ssrScope),
+        mainPath: this.#mainPath,
+        monitorRelease: !servingHmr,
+      }))
+    }
     const vendorReady = entrypoints.length > 0
       ? this.#prepareVendor(entrypoints)
       : Promise.resolve(new Set<string>())
@@ -878,7 +989,6 @@ export class Server<
     }
     const databaseReady = this.#databaseReady()
 
-    const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, this.#mainPath, this.#vendorScripts]))
     const shell = writeDevShell({ directory, entrypoints, title: this.#title })
     const routes = {
       [DEV_SHELL_ROUTE]: import.meta.require(shell),
@@ -886,10 +996,10 @@ export class Server<
 
     this.#readyError = null
     this.#status = 'starting'
-    const watcherReady = this.#watchMain()
+    const watcherReady = servingHmr ? this.#watchMain() : Promise.resolve()
 
     this.#server = Bun.serve({
-      development: { hmr: true },
+      development: servingHmr ? { hmr: true } : false,
       fetch: this.handle,
       hostname,
       ...(idleTimeout === undefined ? {} : { idleTimeout }),
@@ -940,6 +1050,8 @@ export class Server<
     this.#server?.stop()
     this.#server = null
     setVendorSpecifiers(null)
+    this.#vendorBuild = null
+    this.#vendorRoot = null
 
     if (!this.#closing) {
       const closing = this.#database.close()
@@ -963,6 +1075,7 @@ export class Server<
     await this.#closing
     await Promise.allSettled([...this.#mainBuilds.values()])
     this.#cleanupSSRArtifactsAll()
+    this.#cleanupScopedArtifacts()
   }
 
   /**
@@ -1286,7 +1399,7 @@ export class Server<
     watcherReady: Promise<void>,
     vendorReady: Promise<ReadonlySet<string>>,
   ): void {
-    const buildReady = Bun.fetch(this.#devShellURL()).then(response => {
+    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(response => {
       if (!response.ok) throw new Error(`development build failed (${response.status})`)
     })
     const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()

@@ -1,7 +1,9 @@
-import { beforeAll, expect } from 'bun:test'
+import { beforeAll, expect, setDefaultTimeout } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from '../../../testing'
 import { matchScreenshot, test, useApplication } from '../../../testing'
+
+setDefaultTimeout(30_000)
 
 const ROOT = join(import.meta.dir, '..', '..', '..', '..')
 
@@ -10,6 +12,7 @@ let app: ApplicationHandle
 beforeAll(async () => {
   app = await useApplication({
     cwd: ROOT,
+    development: true,
     entry: './testing/components/serve.ts',
     timeoutMs: 120_000,
   })

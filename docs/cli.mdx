@@ -27,8 +27,8 @@ bunx basis docs build
 - `format` applies every style autofix the policy supports and ignores warning-only diagnostics. SQL layout is applied by dprint.
 - `compliance` runs `lint` plus the authoritative architecture and infrastructure rules and the typechecker. Pick either `lint` or `compliance` for a repository gate, not both.
 - `emit` runs the conventional application emitter lifecycle; it is also run automatically before `typecheck`, `lint`, and `compliance`.
-- `typecheck` runs Bun's built-in TypeScript checker; it requires Bun 1.4.3 or newer.
-- `doctor` verifies the installed consumer/runtime setup.
+- `typecheck` runs Bun's built-in TypeScript checker; the checker requires Bun 1.4.3 or newer. The full Basis Server install requires Bun 1.4.6 or the approved canary described in [Installation](./installation.mdx).
+- `doctor` verifies the installed consumer/runtime setup, including the Basis Server Bun requirement.
 - `db` runs host database lifecycle operations against the managed installation. It resolves `graph.ts` and `migrations/` from the current directory; `graph.ts` may default-export the Graph or export it as `graph`. The application must be offline for `release`, `upgrade` and `rollback`; scheduling and retention remain host responsibilities.
 - `docs check` validates a docs tree; `docs build` writes the static documentation site.
 

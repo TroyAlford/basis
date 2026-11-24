@@ -108,7 +108,7 @@ afterEach(async () => {
 
 describe('Server', () => {
   test('serves the app through Bun dev-server HMR with runtime facts and no reload shim', async () => {
-    const server = await startServer()
+    const server = await startServer({ HMR: '1' })
     const base = `http://127.0.0.1:${server.port}`
 
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
@@ -478,7 +478,7 @@ export const Application = () => null
 `,
       )
 
-      const server = await startServer({ ENTRY: join(dir, 'entry.ts') })
+      const server = await startServer({ ENTRY: join(dir, 'entry.ts'), HMR: '1' })
       const base = `http://127.0.0.1:${server.port}`
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 

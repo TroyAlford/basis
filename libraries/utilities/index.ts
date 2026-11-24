@@ -1,4 +1,19 @@
 export { AbortablePromise } from './functions/AbortablePromise'
+export {
+  APPROVED_BUN_SERVER_COMMIT,
+  APPROVED_BUN_SERVER_PACKAGE,
+  APPROVED_BUN_SERVER_REVISION,
+  assertBasisServerCompatible,
+  basisServerUnsupportedReason,
+  bunCheckUnsupportedReason,
+  currentBunRuntime,
+  MINIMUM_BUN_FOR_CHECK,
+  MINIMUM_BUN_FOR_SERVER,
+  parseBunVersion,
+  supportsBasisServer,
+  supportsBunCheck,
+} from './functions/BunRuntime'
+export type { BunRuntimeInfo, ParsedVersion } from './functions/BunRuntime'
 export { clamp } from './functions/clamp'
 export { checksum } from './functions/checksum'
 export { classNames } from './functions/classNames'
