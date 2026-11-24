@@ -151,6 +151,7 @@ jobs:
           bun test --timeout 90000
           ./libraries/testing/application.production-hmr.e2e.ts
           ./libraries/testing/application.production-hmr.isolated.e2e.ts
+          ./libraries/testing/application.workspace-hmr.e2e.ts
 
   unit:
     name: Unit and screenshots
