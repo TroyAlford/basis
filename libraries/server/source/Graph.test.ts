@@ -222,6 +222,18 @@ describe('Graph', () => {
     expect(schema.functions.some(fn => fn.name === 'basis.matches')).toBe(false)
     expect(schema.functions.some(fn => fn.name === 'policy_field')).toBe(false)
   })
+  test('compiles role grants as statement-scoped scalar subqueries', () => {
+    const schema = graph.physicalSchema('basis_app', true)
+    const update = schema.policies.find(policy => (
+      policy.table === 'Article' && policy.command === 'UPDATE'
+    ))
+    const editor = graph.role('editor')
+    if (!editor) throw new Error('missing editor role')
+    expect(update?.sql).toContain(
+      `(SELECT basis.has_role('public', '${editor.id}'))`,
+    )
+  })
+
   test('normalizes and compiles named-relationship membership policies', () => {
     const membershipGraph = new Graph({
       entities: [
