@@ -2436,7 +2436,8 @@ class QueryProjection {
       : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
     const rowsDefinition = (name: string, child: SqlFragment): SqlFragment => sqlConcat([
       sqlText(`${name} AS MATERIALIZED (`),
-      sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
+      sqlText(`SELECT DISTINCT ON (${parentId}, ${quote('__child')}.${quote('id')}) ` +
+        `${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
       edgeFields.length === 0
         ? undefined
         : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
