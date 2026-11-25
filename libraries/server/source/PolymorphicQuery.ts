@@ -2119,7 +2119,7 @@ class QueryProjection {
       node.context.baseAlias,
       collectionKey(node.path, spec.collection.name),
     )
-    if (this.#collectionOptions(spec, plan).orderBy !== undefined) return false
+    if (node.path.length !== 0 || this.#collectionOptions(spec, plan).orderBy !== undefined) return false
     if (plan.resultType === 'record') {
       return plan.collection.kind === 'explicit'
         && plan.relationshipAlias !== undefined
