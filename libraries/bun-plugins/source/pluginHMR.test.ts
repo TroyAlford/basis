@@ -95,8 +95,33 @@ describe('isInstalledDependency', () => {
     }
   })
 
-  test('classifies Basis framework source as first-party even when installed', () => {
-    expect(isInstalledDependency(join(import.meta.dir, 'pluginHMR.ts'))).toBe(false)
+  test('classifies installed Basis source as first-party', () => {
+    const root = tempDirectory('basis-hmr-installed-')
+    try {
+      const basisRoot = join(root, 'node_modules', 'basis')
+      const source = join(basisRoot, 'libraries', 'react', 'Icon.tsx')
+      mkdirSync(join(basisRoot, 'libraries', 'react'), { recursive: true })
+      writeFileSync(source, 'export const Icon = () => <svg />')
+
+      expect(isInstalledDependency(source, basisRoot)).toBe(false)
+      expect(isInstalledDependency(join(import.meta.dir, 'pluginHMR.ts'))).toBe(false)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test('classifies dependencies nested inside an installed Basis package as third-party', () => {
+    const root = tempDirectory('basis-hmr-installed-dependency-')
+    try {
+      const basisRoot = join(root, 'node_modules', 'basis')
+      const dependency = join(basisRoot, 'node_modules', 'third-party', 'index.tsx')
+      mkdirSync(join(basisRoot, 'node_modules', 'third-party'), { recursive: true })
+      writeFileSync(dependency, 'export const value = <span />')
+
+      expect(isInstalledDependency(dependency, basisRoot)).toBe(true)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
   })
 
   test('classifies genuine installed dependencies as third-party', () => {

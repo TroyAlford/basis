@@ -50,18 +50,23 @@ const BASIS_ROOT = path.resolve(import.meta.dir, '..', '..', '..')
  * lexical path alone cannot distinguish a first-party package from a third-party
  * dependency. Resolve the real path and classify by its owning directory.
  * @param filePath - Absolute module path supplied by Bun.
+ * @param basisRoot - Basis package root; defaults to the running package.
  * @returns Whether the module is owned by `node_modules`.
  */
-export function isInstalledDependency(filePath: string): boolean {
+export function isInstalledDependency(filePath: string, basisRoot = BASIS_ROOT): boolean {
   let resolved = filePath
   try {
     resolved = realpathSync(filePath)
   } catch {
     // Virtual or not-yet-written modules keep their declared path.
   }
-  const relative = path.relative(BASIS_ROOT, resolved)
-  if (relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)) return false
-  return resolved.replace(/\\/g, '/').split('/').includes(INSTALLED_SEGMENT)
+  const normalized = resolved.replace(/\\/g, '/')
+  const relative = path.relative(basisRoot, resolved)
+  const withinBasis = relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
+  if (withinBasis) {
+    return relative.replace(/\\/g, '/').split('/').includes(INSTALLED_SEGMENT)
+  }
+  return normalized.split('/').includes(INSTALLED_SEGMENT)
 }
 
 /** A source edit positioned by absolute offsets. */
