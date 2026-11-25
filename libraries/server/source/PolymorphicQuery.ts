@@ -1341,6 +1341,49 @@ class QueryProjection {
   }
 
   /**
+   * Compile one collection member filter against the edge and target aliases
+   * already present in the batch rows. This keeps the filtered and unfiltered
+   * projections on one child query instead of compiling the child tree twice.
+   * @param plan - Collection relation plan.
+   * @param key - Stable logical collection path.
+   * @param filter - Collection member predicate.
+   * @returns Filter SQL fragment, or undefined when the filter is empty.
+   */
+  #collectionFilterPredicate(
+    plan: CollectionRelationPlan,
+    key: string,
+    filter: string,
+  ): SqlFragment | undefined {
+    const scope = this.#scopeForCollection(
+      { collection: plan.collection, parentAlias: plan.parentAlias },
+      key,
+    )
+    const normalized = QueryNormalizer.normalize(
+      plan.target,
+      filter,
+      scope.field,
+      scope.collection,
+      scope.array,
+    ) ?? undefined
+    const relationshipPrefix = plan.relationship === undefined
+      ? undefined
+      : `${lowerFirst(plan.relationship.name)}.`
+    let lowered: Filter | undefined
+    if (normalized !== undefined) {
+      lowered = PredicateEligibility.lowerMember(
+        this.#entities,
+        plan.target,
+        normalized,
+        relationshipPrefix,
+        plan.relationship?.fields.map(field => field.name),
+      )
+    }
+    if (lowered === undefined) return undefined
+    const predicate = SQL.whereFilter(this.#entities, plan.target.name, lowered, scope)
+    return predicate.sql === '' ? undefined : predicate as SqlFragment
+  }
+
+  /**
    * Render the authorized count of collection members matching one filter.
    * @param plan - Collection relation plan.
    * @param filter - Collection member predicate.
@@ -2302,7 +2345,7 @@ class QueryProjection {
         sqlText(`AS ${quote('__ordinal')}, `),
         sqlText(`${quote('__child')}.${quote('__parent_id')} AS ${quote('__parent_id')}, `),
         sqlText(`${selectedFiltered} `),
-        sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
+        sqlText(`FROM ${filterPredicate === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
         sqlText(`AS ${quote('__item')} `),
         sqlText(`GROUP BY ${quote('__parent_id')})`),
       ], ''),
@@ -2373,9 +2416,10 @@ class QueryProjection {
     const targetIds = sqlText(
       `${quote(childAlias)}.${quote('id')} IN (SELECT ${quote('id')} FROM ${targetIdsCte})`,
     )
+    let filterPredicate: SqlFragment | undefined
     if (filter !== undefined) {
       try {
-        this.#filteredCollectionCorrelation(plan, key, filter, childAlias)
+        filterPredicate = this.#collectionFilterPredicate(plan, key, filter)
       } catch {
         /*
          * Fall back to the member adapter so ambiguous relationship fields
@@ -2385,7 +2429,6 @@ class QueryProjection {
       }
     }
     let childAll: CompiledPolymorphicQuery
-    let childFiltered: CompiledPolymorphicQuery
     try {
       childAll = compilePolymorphicQuery(this.#entities, plan.target, {
         aliasPrefix: `${childAlias}_`,
@@ -2396,25 +2439,10 @@ class QueryProjection {
         relationPrefix: `${this.#relationPrefix}batch_`,
         rootAlias: childAlias,
       })
-      if (filter === undefined) {
-        childFiltered = childAll
-      } else {
-        childFiltered = compilePolymorphicQuery(this.#entities, plan.target, {
-          aliasPrefix: `${childAlias}_`,
-          fields,
-          limit: null,
-          offset: 0,
-          rawWhere: targetIds,
-          relationPrefix: `${this.#relationPrefix}batch_`,
-          rootAlias: childAlias,
-          where: filter,
-        })
-      }
     } catch {
       return false
     }
     const allSql = compiledFragment(childAll)
-    const filteredSql = filter === undefined ? allSql : compiledFragment(childFiltered)
     const suffix = this.#nextAlias('bg')
     const itemAlias = quote('__item')
     const ordinalAlias = quote('__ordinal')
@@ -2434,22 +2462,33 @@ class QueryProjection {
     const collectionPredicate = plan.predicate === undefined
       ? undefined
       : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
-    const rowsDefinition = (name: string, child: SqlFragment): SqlFragment => sqlConcat([
-      sqlText(`${name} AS MATERIALIZED (`),
-      sqlText(`SELECT DISTINCT ON (${parentId}, ${quote('__child')}.${quote('id')}) ` +
-        `${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
-      edgeFields.length === 0
+    const rowsDefinition = (
+      name: string,
+      child: SqlFragment,
+      filterFragment?: SqlFragment,
+    ): SqlFragment => {
+      const filterAlias = quote('__batch_filter')
+      const filterProjection = filterFragment === undefined
         ? undefined
-        : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
-      sqlText(' FROM '),
-      sqlText(`${plan.relation} `),
-      sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
-      sqlConcat([sqlText('JOIN ('), child, sqlText(`) AS ${quote('__child')} `)], ''),
-      sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
-      sqlText(`WHERE ${plan.condition}`),
-      collectionPredicate,
-      sqlText(')'),
-    ], '')
+        : sqlFragment`, (CASE WHEN (${filterFragment}) THEN TRUE ELSE FALSE END) AS ${sqlText(filterAlias)}`
+      return sqlConcat([
+        sqlText(`${name} AS MATERIALIZED (`),
+        sqlText(`SELECT DISTINCT ON (${parentId}, ${quote('__child')}.${quote('id')}) ` +
+          `${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
+        edgeFields.length === 0
+          ? undefined
+          : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
+        filterProjection,
+        sqlText(' FROM '),
+        sqlText(`${plan.relation} `),
+        sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
+        sqlConcat([sqlText('JOIN ('), child, sqlText(`) AS ${quote('__child')} `)], ''),
+        sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
+        sqlText(`WHERE ${plan.condition}`),
+        collectionPredicate,
+        sqlText(')'),
+      ], '')
+    }
     const page = limit === null
       ? `${quote('__ordinal')} > ${offset}`
       : `${quote('__ordinal')} > ${offset} AND ` +
@@ -2469,8 +2508,11 @@ class QueryProjection {
         collectionPredicate,
         sqlText(')'),
       ], ''),
-      rowsDefinition(rowsAllCte, allSql),
-      ...(filter === undefined ? [] : [rowsDefinition(rowsFilteredCte, filteredSql)]),
+      rowsDefinition(rowsAllCte, allSql, filterPredicate),
+      ...(filterPredicate === undefined ? [] : [sqlConcat([
+        sqlText(`${rowsFilteredCte} AS MATERIALIZED (`),
+        sqlText(`SELECT * FROM ${rowsAllCte} WHERE ${quote('__batch_filter')} IS TRUE)`),
+      ], '')]),
       sqlConcat([
         sqlText(`${countsCte} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
@@ -2524,7 +2566,7 @@ class QueryProjection {
           $matched: matchedTotal,
           $total: Number(row[totalAlias] ?? matchedTotal),
           items: entries.map(entry => {
-            const hydrated = childFiltered.hydrate(entry as Record<string, unknown>)
+            const hydrated = childAll.hydrate(entry as Record<string, unknown>)
             const edge = entry.__edge
             if (edge !== undefined && edge !== null && typeof edge === 'object') {
               Object.assign(hydrated, edge)
