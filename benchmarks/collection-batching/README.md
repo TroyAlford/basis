@@ -25,22 +25,22 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor | statement | rows | direct median | direct range | EXPLAIN | plan | shared hits |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| owner | pre-#364 | 106 | 316.4 ms | 315.0–330.4 | 292.0 ms | 27.0 ms | 20,365 |
-| owner | #364 previous | 106 | 159.3 ms | 157.2–163.3 | 170.8 ms | 25.1 ms | 9,061 |
-| owner | #364 current | 106 | 57.3 ms | 55.5–67.8 | 56.3 ms | 5.9 ms | 1,498 |
-| owner | N7 | 106 | 60.6 ms | 59.6–61.4 | 63.7 ms | 6.6 ms | 1,703 |
-| editor | pre-#364 | 106 | 469.2 ms | 463.0–514.5 | 460.5 ms | 27.1 ms | 39,647 |
-| editor | #364 previous | 106 | 320.6 ms | 306.2–328.6 | 291.2 ms | 24.4 ms | 22,284 |
-| editor | #364 current | 106 | 111.7 ms | 108.8–115.4 | 107.9 ms | 5.7 ms | 4,773 |
-| editor | N7 | 106 | 117.2 ms | 113.6–123.3 | 97.1 ms | 6.4 ms | 4,241 |
-| viewer | pre-#364 | 106 | 439.6 ms | 435.8–658.6 | 415.7 ms | 26.8 ms | 40,879 |
-| viewer | #364 previous | 106 | 298.6 ms | 295.9–425.9 | 320.2 ms | 24.3 ms | 23,123 |
-| viewer | #364 current | 106 | 116.8 ms | 114.4–125.2 | 115.9 ms | 5.5 ms | 4,980 |
-| viewer | N7 | 106 | 110.5 ms | 105.2–113.5 | 107.5 ms | 6.2 ms | 4,444 |
+| owner | pre-#364 | 106 | 320.6 ms | 314.7–324.8 | 289.8 ms | 27.0 ms | 20,365 |
+| owner | #364 previous | 106 | 154.3 ms | 151.5–157.7 | 165.4 ms | 25.1 ms | 9,061 |
+| owner | flat current | 106 | 73.4 ms | 69.6–79.1 | 70.4 ms | 8.6 ms | 2,768 |
+| owner | N7 | 106 | 58.5 ms | 57.2–60.4 | 58.6 ms | 6.8 ms | 1,703 |
+| editor | pre-#364 | 106 | 485.8 ms | 459.2–487.7 | 480.7 ms | 26.5 ms | 39,647 |
+| editor | #364 previous | 106 | 318.1 ms | 291.4–357.4 | 280.1 ms | 24.4 ms | 22,284 |
+| editor | flat current | 106 | 124.2 ms | 117.7–128.6 | 128.6 ms | 8.4 ms | 5,937 |
+| editor | N7 | 106 | 115.0 ms | 113.7–123.3 | 97.5 ms | 6.4 ms | 4,241 |
+| viewer | pre-#364 | 106 | 471.1 ms | 452.6–483.7 | 445.7 ms | 28.2 ms | 40,879 |
+| viewer | #364 previous | 106 | 290.9 ms | 288.3–302.7 | 316.7 ms | 24.7 ms | 23,123 |
+| viewer | flat current | 106 | 129.6 ms | 128.2–141.8 | 132.9 ms | 8.4 ms | 6,135 |
+| viewer | N7 | 106 | 109.5 ms | 105.3–110.6 | 107.3 ms | 6.3 ms | 4,444 |
 
-The flattened plan matches or beats N7 for owner and editor and is within roughly 6% for viewer on this fixture, with comparable shared-buffer work. The before/after comparison is against the pre-flat #364 plan, not against a production release.
+The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The small remaining gap is the price of that scaling-safe choice.
 
-All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. The current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 59.0 ms (owner), 122.6 ms (editor), and 146.8 ms (viewer); subtracting the direct SQL medians gives roughly 1.7 ms, 10.9 ms, and 30.0 ms of mapping/hydration work.
+All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. The current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 76.1 ms (owner), 150.0 ms (editor), and 130.9 ms (viewer); subtracting the direct SQL medians gives roughly 2.7 ms, 25.8 ms, and 1.3 ms of mapping/hydration work.
 
 ## Policy observation
 

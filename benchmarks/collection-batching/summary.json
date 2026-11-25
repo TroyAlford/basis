@@ -1,7 +1,7 @@
 [
   {
     "actor": "editor",
-    "execution": 460.509,
+    "execution": 480.723,
     "actualRows": 106,
     "hits": 39647,
     "nodes": [
@@ -15,7 +15,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 454.867
+        "time": 474.878
       },
       {
         "actualRows": 106,
@@ -27,7 +27,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 441.237
+        "time": 460.472
       },
       {
         "actualRows": 106,
@@ -39,7 +39,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 424.984
+        "time": 442.905
       },
       {
         "actualRows": 107,
@@ -51,7 +51,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 411.857
+        "time": 431.955
       },
       {
         "actualRows": 107,
@@ -63,7 +63,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 310.111
+        "time": 319.881
       },
       {
         "actualRows": 107,
@@ -75,7 +75,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 309.39
+        "time": 318.943
       },
       {
         "actualRows": 107,
@@ -87,7 +87,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 28.344
+        "time": 27.731
       },
       {
         "actualRows": 107,
@@ -99,7 +99,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 15.652
+        "time": 14.928
       },
       {
         "actualRows": 107,
@@ -112,7 +112,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 13.374
+        "time": 13.52
       },
       {
         "actualRows": 106,
@@ -124,7 +124,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 11.915
+        "time": 9.581
       },
       {
         "actualRows": 106,
@@ -137,7 +137,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 11.279
+        "time": 8.964
       },
       {
         "actualRows": 1,
@@ -150,11 +150,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 5.732
+        "time": 5.527
       }
     ],
     "planRows": 1,
-    "planning": 27.129,
+    "planning": 26.527,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -162,167 +162,167 @@
     "rows": 106,
     "statement": "pre364",
     "times": [
-      463.02548000000024,
-      468.770391,
-      469.16079399999944,
-      514.5091600000014,
-      485.3879620000007
+      485.79619999999977,
+      459.22801600000093,
+      476.293909,
+      487.65085,
+      486.84092600000076
     ],
     "values": 11
   },
   {
     "actor": "editor",
-    "execution": 107.916,
+    "execution": 128.601,
     "actualRows": 106,
-    "hits": 4773,
+    "hits": 5937,
     "nodes": [
       {
         "actualRows": 106,
         "node": "Hash Join",
         "path": "",
-        "planRows": 40,
+        "planRows": 13,
         "planWidth": 768,
-        "sharedHit": 4773,
+        "sharedHit": 5937,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 104.114
+        "time": 124.428
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53",
-        "planRows": 40,
+        "path": "/48",
+        "planRows": 13,
         "planWidth": 668,
-        "sharedHit": 4773,
+        "sharedHit": 5937,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 103.944
+        "time": 124.264
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0",
-        "planRows": 40,
+        "path": "/48/0",
+        "planRows": 13,
         "planWidth": 632,
-        "sharedHit": 4773,
+        "sharedHit": 5912,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 103.59
+        "time": 119.769
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0",
-        "planRows": 40,
+        "path": "/48/0/0",
+        "planRows": 13,
         "planWidth": 628,
-        "sharedHit": 4773,
+        "sharedHit": 5912,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 103.423
+        "time": 119.597
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0",
+        "planRows": 13,
         "planWidth": 592,
-        "sharedHit": 3607,
+        "sharedHit": 4746,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 80.707
+        "time": 96.894
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0/0",
+        "planRows": 13,
         "planWidth": 588,
-        "sharedHit": 3607,
+        "sharedHit": 4746,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 80.495
+        "time": 96.709
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0/0/0",
+        "planRows": 13,
         "planWidth": 552,
-        "sharedHit": 2417,
+        "sharedHit": 3009,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.164
+        "time": 57.293
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1",
-        "planRows": 25,
+        "path": "/48/0/0/0/0/0/1",
+        "planRows": 8,
         "planWidth": 520,
-        "sharedHit": 2417,
+        "sharedHit": 3009,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.091
+        "time": 57.201
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0/0/1/0",
-        "planRows": 25,
+        "path": "/48/0/0/0/0/0/1/0",
+        "planRows": 8,
         "planWidth": 520,
-        "sharedHit": 2417,
+        "sharedHit": 3009,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.05
+        "time": 57.159
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1/0/1",
-        "planRows": 25,
-        "planWidth": 456,
-        "sharedHit": 2417,
+        "path": "/48/0/0/0/0/0/1/0/1",
+        "planRows": 5,
+        "planWidth": 488,
+        "sharedHit": 2998,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.004
+        "time": 56.349
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0/0/1/0/1/0",
-        "planRows": 25,
-        "planWidth": 456,
-        "sharedHit": 2417,
+        "path": "/48/0/0/0/0/0/1/0/1/0",
+        "planRows": 5,
+        "planWidth": 488,
+        "sharedHit": 2998,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.964
+        "time": 56.305
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1/0/1/0/1",
-        "planRows": 7,
-        "planWidth": 360,
-        "sharedHit": 2399,
+        "path": "/48/0/0/0/0/0/1/0/1/0/1",
+        "planRows": 5,
+        "planWidth": 424,
+        "sharedHit": 2998,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.024
+        "time": 56.26
       }
     ],
-    "planRows": 40,
-    "planning": 5.736,
+    "planRows": 13,
+    "planning": 8.429,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -330,17 +330,17 @@
     "rows": 106,
     "statement": "364-current",
     "times": [
-      110.65668300000016,
-      111.74056799999926,
-      112.72245399999883,
-      115.35814800000117,
-      108.81935299999896
+      124.19227500000034,
+      128.61377900000025,
+      125.69816299999911,
+      120.80385700000079,
+      117.71932000000015
     ],
     "values": 3
   },
   {
     "actor": "editor",
-    "execution": 291.189,
+    "execution": 280.092,
     "actualRows": 106,
     "hits": 22284,
     "nodes": [
@@ -354,7 +354,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 281.92
+        "time": 271.293
       },
       {
         "actualRows": 106,
@@ -366,7 +366,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 281.531
+        "time": 270.983
       },
       {
         "actualRows": 106,
@@ -378,7 +378,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 277.18
+        "time": 266.496
       },
       {
         "actualRows": 106,
@@ -390,7 +390,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 264.035
+        "time": 254.076
       },
       {
         "actualRows": 106,
@@ -402,7 +402,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 226.765
+        "time": 218.017
       },
       {
         "actualRows": 107,
@@ -414,7 +414,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 215.376
+        "time": 207.125
       },
       {
         "actualRows": 107,
@@ -426,7 +426,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 190.553
+        "time": 183.013
       },
       {
         "actualRows": 107,
@@ -438,7 +438,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 100.701
+        "time": 98.264
       },
       {
         "actualRows": 107,
@@ -450,7 +450,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 100.603
+        "time": 98.194
       },
       {
         "actualRows": 106,
@@ -462,7 +462,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 89.739
+        "time": 84.61
       },
       {
         "actualRows": 106,
@@ -474,7 +474,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 89.672
+        "time": 84.535
       },
       {
         "actualRows": 106,
@@ -486,11 +486,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 89.559
+        "time": 84.454
       }
     ],
     "planRows": 1,
-    "planning": 24.38,
+    "planning": 24.392,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -498,17 +498,17 @@
     "rows": 106,
     "statement": "364-previous",
     "times": [
-      328.5885479999997,
-      327.1722609999997,
-      320.6267050000006,
-      306.24058700000023,
-      307.9055160000007
+      357.39074299999993,
+      318.09136899999976,
+      331.4326409999994,
+      291.4047040000005,
+      312.77786000000015
     ],
     "values": 7
   },
   {
     "actor": "editor",
-    "execution": 97.073,
+    "execution": 97.543,
     "actualRows": 106,
     "hits": 4241,
     "nodes": [
@@ -522,7 +522,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 94.677
+        "time": 95.005
       },
       {
         "actualRows": 106,
@@ -534,7 +534,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 92.548
+        "time": 92.718
       },
       {
         "actualRows": 106,
@@ -546,7 +546,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 91.113
+        "time": 91.281
       },
       {
         "actualRows": 106,
@@ -558,7 +558,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 73.639
+        "time": 74.371
       },
       {
         "actualRows": 106,
@@ -570,7 +570,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 72.315
+        "time": 73.067
       },
       {
         "actualRows": 106,
@@ -582,7 +582,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.833
+        "time": 56.462
       },
       {
         "actualRows": 106,
@@ -594,7 +594,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.729
+        "time": 56.355
       },
       {
         "actualRows": 106,
@@ -606,7 +606,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.94
+        "time": 55.583
       },
       {
         "actualRows": 106,
@@ -618,7 +618,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.113
+        "time": 54.77
       },
       {
         "actualRows": 106,
@@ -630,7 +630,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 53.243
+        "time": 53.904
       },
       {
         "actualRows": 106,
@@ -642,7 +642,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 49.289
+        "time": 49.859
       },
       {
         "actualRows": 106,
@@ -654,11 +654,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 49.147
+        "time": 49.716
       }
     ],
     "planRows": 1,
-    "planning": 6.372,
+    "planning": 6.353,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -666,17 +666,17 @@
     "rows": 106,
     "statement": "n7",
     "times": [
-      123.34367199999997,
-      119.7308920000005,
-      113.55893800000013,
-      117.18179799999962,
-      116.69371499999943
+      123.30174999999963,
+      113.6647780000003,
+      120.19069300000046,
+      115.02946499999962,
+      113.74757800000043
     ],
     "values": 11
   },
   {
     "actor": "owner",
-    "execution": 292.011,
+    "execution": 289.754,
     "actualRows": 106,
     "hits": 20365,
     "nodes": [
@@ -690,7 +690,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 288.165
+        "time": 286.072
       },
       {
         "actualRows": 106,
@@ -702,7 +702,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 280.332
+        "time": 278.792
       },
       {
         "actualRows": 106,
@@ -714,7 +714,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 272.206
+        "time": 270.726
       },
       {
         "actualRows": 107,
@@ -726,7 +726,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 264.68
+        "time": 263.045
       },
       {
         "actualRows": 107,
@@ -738,7 +738,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 231.027
+        "time": 229.01
       },
       {
         "actualRows": 107,
@@ -750,7 +750,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 230.377
+        "time": 228.21
       },
       {
         "actualRows": 107,
@@ -762,7 +762,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 14.68
+        "time": 14.284
       },
       {
         "actualRows": 107,
@@ -774,7 +774,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 7.333
+        "time": 7.126
       },
       {
         "actualRows": 107,
@@ -787,7 +787,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 6.844
+        "time": 6.601
       },
       {
         "actualRows": 106,
@@ -799,7 +799,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 6.378
+        "time": 6.494
       },
       {
         "actualRows": 106,
@@ -812,7 +812,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 6.223
+        "time": 6.335
       },
       {
         "actualRows": 1,
@@ -825,11 +825,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 2.012
+        "time": 1.995
       }
     ],
     "planRows": 1,
-    "planning": 27.033,
+    "planning": 27.005,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -837,167 +837,167 @@
     "rows": 106,
     "statement": "pre364",
     "times": [
-      324.3739249999999,
-      316.41900200000055,
-      315.02903400000105,
-      315.7085589999988,
-      330.4300380000004
+      324.8434849999994,
+      322.04635099999905,
+      314.73195099999975,
+      317.9790890000004,
+      320.6454629999971
     ],
     "values": 11
   },
   {
     "actor": "owner",
-    "execution": 56.323,
+    "execution": 70.384,
     "actualRows": 106,
-    "hits": 1498,
+    "hits": 2768,
     "nodes": [
       {
         "actualRows": 106,
         "node": "Hash Join",
         "path": "",
-        "planRows": 40,
+        "planRows": 13,
         "planWidth": 768,
-        "sharedHit": 1498,
+        "sharedHit": 2768,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 53.022
+        "time": 66.75
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53",
-        "planRows": 40,
+        "path": "/48",
+        "planRows": 13,
         "planWidth": 668,
-        "sharedHit": 1498,
+        "sharedHit": 2768,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 52.855
+        "time": 66.574
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0",
-        "planRows": 40,
+        "path": "/48/0",
+        "planRows": 13,
         "planWidth": 632,
-        "sharedHit": 1498,
+        "sharedHit": 2762,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 52.495
+        "time": 63.055
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0",
-        "planRows": 40,
+        "path": "/48/0/0",
+        "planRows": 13,
         "planWidth": 628,
-        "sharedHit": 1498,
+        "sharedHit": 2762,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 52.334
+        "time": 62.859
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0",
+        "planRows": 13,
         "planWidth": 592,
-        "sharedHit": 1074,
+        "sharedHit": 2338,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 40.163
+        "time": 50.947
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0/0",
+        "planRows": 13,
         "planWidth": 588,
-        "sharedHit": 1074,
+        "sharedHit": 2338,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 39.974
-      },
-      {
-        "actualRows": 106,
-        "node": "Hash Join",
-        "path": "/53/0/0/0/0/0",
-        "planRows": 40,
-        "planWidth": 552,
-        "sharedHit": 630,
-        "sharedRead": 0,
-        "tempRead": 0,
-        "tempWritten": 0,
-        "time": 25.719
+        "time": 50.758
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1",
-        "planRows": 25,
-        "planWidth": 520,
-        "sharedHit": 630,
+        "path": "/48/0/0/0/0/1",
+        "planRows": 1,
+        "planWidth": 68,
+        "sharedHit": 1104,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.639
+        "time": 25.981
       },
       {
         "actualRows": 106,
-        "node": "Hash Join",
-        "path": "/53/0/0/0/0/0/1/0",
-        "planRows": 25,
-        "planWidth": 520,
-        "sharedHit": 630,
+        "node": "CTE Scan",
+        "path": "/48/0/0/0/0/1/0",
+        "planRows": 1,
+        "planWidth": 68,
+        "sharedHit": 1104,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.598
+        "time": 25.938
       },
       {
         "actualRows": 106,
-        "node": "Hash",
-        "path": "/53/0/0/0/0/0/1/0/1",
-        "planRows": 25,
-        "planWidth": 456,
-        "sharedHit": 630,
+        "node": "Aggregate",
+        "path": "/38",
+        "planRows": 1,
+        "planWidth": 68,
+        "sharedHit": 1104,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.552
+        "time": 25.84
       },
       {
         "actualRows": 106,
-        "node": "Hash Join",
-        "path": "/53/0/0/0/0/0/1/0/1/0",
-        "planRows": 25,
-        "planWidth": 456,
-        "sharedHit": 630,
+        "node": "Subquery Scan",
+        "path": "/38/0",
+        "planRows": 1,
+        "planWidth": 393,
+        "sharedHit": 1104,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.511
+        "time": 25.149
       },
       {
         "actualRows": 106,
-        "node": "Hash",
-        "path": "/53/0/0/0/0/0/1/0/1/0/1",
-        "planRows": 7,
-        "planWidth": 360,
-        "sharedHit": 621,
+        "node": "WindowAgg",
+        "path": "/38/0/0",
+        "planRows": 1,
+        "planWidth": 329,
+        "sharedHit": 1104,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.161
+        "time": 25.097
+      },
+      {
+        "actualRows": 106,
+        "node": "Sort",
+        "path": "/38/0/0/0",
+        "planRows": 1,
+        "planWidth": 321,
+        "sharedHit": 1104,
+        "sharedRead": 0,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "time": 25.003
       }
     ],
-    "planRows": 40,
-    "planning": 5.941,
+    "planRows": 13,
+    "planning": 8.649,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -1005,17 +1005,17 @@
     "rows": 106,
     "statement": "364-current",
     "times": [
-      56.313146999998935,
-      55.5187420000002,
-      57.33911199999966,
-      67.80956900000092,
-      59.645683999999164
+      73.44183899999916,
+      79.12363000000005,
+      69.64433800000006,
+      73.66043999999965,
+      71.76226999999926
     ],
     "values": 3
   },
   {
     "actor": "owner",
-    "execution": 170.761,
+    "execution": 165.368,
     "actualRows": 106,
     "hits": 9061,
     "nodes": [
@@ -1029,7 +1029,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 164.161
+        "time": 158.619
       },
       {
         "actualRows": 106,
@@ -1041,7 +1041,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 163.857
+        "time": 158.302
       },
       {
         "actualRows": 106,
@@ -1053,7 +1053,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 162.783
+        "time": 157.278
       },
       {
         "actualRows": 106,
@@ -1065,7 +1065,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 147.626
+        "time": 142.535
       },
       {
         "actualRows": 106,
@@ -1077,7 +1077,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 115.573
+        "time": 111.764
       },
       {
         "actualRows": 107,
@@ -1089,7 +1089,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 108.266
+        "time": 104.753
       },
       {
         "actualRows": 107,
@@ -1101,31 +1101,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 91.684
-      },
-      {
-        "actualRows": 107,
-        "node": "Hash Join",
-        "path": "/21/0/0/0/0/0/0",
-        "planRows": 647,
-        "planWidth": 616,
-        "sharedHit": 2165,
-        "sharedRead": 0,
-        "tempRead": 0,
-        "tempWritten": 0,
-        "time": 46.479
-      },
-      {
-        "actualRows": 107,
-        "node": "Hash Join",
-        "path": "/21/0/0/0/0/0/0/0",
-        "planRows": 647,
-        "planWidth": 612,
-        "sharedHit": 2165,
-        "sharedRead": 0,
-        "tempRead": 0,
-        "tempWritten": 0,
-        "time": 46.406
+        "time": 88.342
       },
       {
         "actualRows": 106,
@@ -1137,7 +1113,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 45.029
+        "time": 44.556
       },
       {
         "actualRows": 106,
@@ -1149,7 +1125,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 44.989
+        "time": 44.515
       },
       {
         "actualRows": 106,
@@ -1161,11 +1137,35 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 44.897
+        "time": 44.428
+      },
+      {
+        "actualRows": 106,
+        "node": "Subquery Scan",
+        "path": "/10/0",
+        "planRows": 1,
+        "planWidth": 360,
+        "sharedHit": 3431,
+        "sharedRead": 0,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "time": 43.805
+      },
+      {
+        "actualRows": 106,
+        "node": "WindowAgg",
+        "path": "/10/0/0",
+        "planRows": 1,
+        "planWidth": 296,
+        "sharedHit": 3431,
+        "sharedRead": 0,
+        "tempRead": 0,
+        "tempWritten": 0,
+        "time": 43.756
       }
     ],
     "planRows": 1,
-    "planning": 25.07,
+    "planning": 25.127,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -1173,17 +1173,17 @@
     "rows": 106,
     "statement": "364-previous",
     "times": [
-      160.5115139999998,
-      157.18505600000026,
-      157.79241900000125,
-      163.31492900000012,
-      159.30678700000135
+      157.67921699999897,
+      156.49197000000095,
+      154.2369179999987,
+      154.31375900000057,
+      151.46802300000127
     ],
     "values": 7
   },
   {
     "actor": "owner",
-    "execution": 63.694,
+    "execution": 58.614,
     "actualRows": 106,
     "hits": 1703,
     "nodes": [
@@ -1197,7 +1197,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 61.108
+        "time": 56.082
       },
       {
         "actualRows": 106,
@@ -1209,7 +1209,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 59.86
+        "time": 54.849
       },
       {
         "actualRows": 106,
@@ -1221,7 +1221,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 58.366
+        "time": 53.385
       },
       {
         "actualRows": 106,
@@ -1233,7 +1233,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 40.804
+        "time": 36.475
       },
       {
         "actualRows": 106,
@@ -1245,7 +1245,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 39.455
+        "time": 35.162
       },
       {
         "actualRows": 106,
@@ -1257,7 +1257,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 26.041
+        "time": 23.718
       },
       {
         "actualRows": 106,
@@ -1269,7 +1269,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.926
+        "time": 23.613
       },
       {
         "actualRows": 106,
@@ -1281,7 +1281,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.705
+        "time": 23.388
       },
       {
         "actualRows": 106,
@@ -1293,7 +1293,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.308
+        "time": 23.003
       },
       {
         "actualRows": 106,
@@ -1305,7 +1305,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 24.966
+        "time": 22.725
       },
       {
         "actualRows": 106,
@@ -1317,7 +1317,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 23.586
+        "time": 21.447
       },
       {
         "actualRows": 106,
@@ -1329,11 +1329,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 23.429
+        "time": 21.32
       }
     ],
     "planRows": 1,
-    "planning": 6.567,
+    "planning": 6.765,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -1341,17 +1341,17 @@
     "rows": 106,
     "statement": "n7",
     "times": [
-      60.00988700000016,
-      59.57740399999966,
-      61.312653999999384,
-      61.40289400000074,
-      60.58741000000009
+      60.38244900000063,
+      58.52067800000077,
+      57.79883399999926,
+      57.22683099999995,
+      59.57292400000006
     ],
     "values": 11
   },
   {
     "actor": "viewer",
-    "execution": 415.739,
+    "execution": 445.728,
     "actualRows": 106,
     "hits": 40879,
     "nodes": [
@@ -1365,7 +1365,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 410.101
+        "time": 439.777
       },
       {
         "actualRows": 106,
@@ -1377,7 +1377,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 397.853
+        "time": 426.223
       },
       {
         "actualRows": 106,
@@ -1389,7 +1389,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 383.803
+        "time": 410.569
       },
       {
         "actualRows": 107,
@@ -1401,7 +1401,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 371.896
+        "time": 398.78
       },
       {
         "actualRows": 107,
@@ -1413,7 +1413,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 299.378
+        "time": 317.849
       },
       {
         "actualRows": 107,
@@ -1425,7 +1425,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 298.76
+        "time": 316.874
       },
       {
         "actualRows": 107,
@@ -1437,7 +1437,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 25.938
+        "time": 28.1
       },
       {
         "actualRows": 107,
@@ -1449,7 +1449,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 14.095
+        "time": 15.397
       },
       {
         "actualRows": 107,
@@ -1462,7 +1462,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 12.86
+        "time": 13.839
       },
       {
         "actualRows": 106,
@@ -1474,7 +1474,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 10.715
+        "time": 10.444
       },
       {
         "actualRows": 106,
@@ -1487,7 +1487,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 10.045
+        "time": 9.726
       },
       {
         "actualRows": 1,
@@ -1500,11 +1500,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 6.082
+        "time": 6.094
       }
     ],
     "planRows": 1,
-    "planning": 26.801,
+    "planning": 28.215,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -1512,167 +1512,167 @@
     "rows": 106,
     "statement": "pre364",
     "times": [
-      439.5541919999996,
-      437.81446300000243,
-      446.6979910000009,
-      435.81553300000087,
-      658.5719050000007
+      473.02229100000113,
+      469.7811929999989,
+      483.71778899999845,
+      452.63218100000086,
+      471.14272100000017
     ],
     "values": 11
   },
   {
     "actor": "viewer",
-    "execution": 115.917,
+    "execution": 132.859,
     "actualRows": 106,
-    "hits": 4980,
+    "hits": 6135,
     "nodes": [
       {
         "actualRows": 106,
         "node": "Hash Join",
         "path": "",
-        "planRows": 40,
+        "planRows": 13,
         "planWidth": 768,
-        "sharedHit": 4980,
+        "sharedHit": 6135,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 112.025
+        "time": 128.567
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53",
-        "planRows": 40,
+        "path": "/48",
+        "planRows": 13,
         "planWidth": 668,
-        "sharedHit": 4980,
+        "sharedHit": 6135,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 111.851
+        "time": 128.349
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0",
-        "planRows": 40,
+        "path": "/48/0",
+        "planRows": 13,
         "planWidth": 632,
-        "sharedHit": 4980,
+        "sharedHit": 6108,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 111.414
+        "time": 123.696
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0",
-        "planRows": 40,
+        "path": "/48/0/0",
+        "planRows": 13,
         "planWidth": 628,
-        "sharedHit": 4980,
+        "sharedHit": 6108,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 111.244
+        "time": 123.514
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0",
+        "planRows": 13,
         "planWidth": 592,
-        "sharedHit": 3814,
+        "sharedHit": 4942,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 80.328
+        "time": 100.108
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0/0",
+        "planRows": 13,
         "planWidth": 588,
-        "sharedHit": 3814,
+        "sharedHit": 4942,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 80.138
+        "time": 99.914
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0/0",
-        "planRows": 40,
+        "path": "/48/0/0/0/0/0",
+        "planRows": 13,
         "planWidth": 552,
-        "sharedHit": 2624,
+        "sharedHit": 3205,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 55.003
+        "time": 59.01
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1",
-        "planRows": 25,
+        "path": "/48/0/0/0/0/0/1",
+        "planRows": 8,
         "planWidth": 520,
-        "sharedHit": 2624,
+        "sharedHit": 3205,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.923
+        "time": 58.924
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0/0/1/0",
-        "planRows": 25,
+        "path": "/48/0/0/0/0/0/1/0",
+        "planRows": 8,
         "planWidth": 520,
-        "sharedHit": 2624,
+        "sharedHit": 3205,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.881
+        "time": 58.879
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1/0/1",
-        "planRows": 25,
-        "planWidth": 456,
-        "sharedHit": 2624,
+        "path": "/48/0/0/0/0/0/1/0/1",
+        "planRows": 5,
+        "planWidth": 488,
+        "sharedHit": 3194,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.835
+        "time": 58.135
       },
       {
         "actualRows": 106,
         "node": "Hash Join",
-        "path": "/53/0/0/0/0/0/1/0/1/0",
-        "planRows": 25,
-        "planWidth": 456,
-        "sharedHit": 2624,
+        "path": "/48/0/0/0/0/0/1/0/1/0",
+        "planRows": 5,
+        "planWidth": 488,
+        "sharedHit": 3194,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.797
+        "time": 58.095
       },
       {
         "actualRows": 106,
         "node": "Hash",
-        "path": "/53/0/0/0/0/0/1/0/1/0/1",
-        "planRows": 7,
-        "planWidth": 360,
-        "sharedHit": 2604,
+        "path": "/48/0/0/0/0/0/1/0/1/0/1",
+        "planRows": 5,
+        "planWidth": 424,
+        "sharedHit": 3194,
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 53.822
+        "time": 58.048
       }
     ],
-    "planRows": 40,
-    "planning": 5.48,
+    "planRows": 13,
+    "planning": 8.366,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -1680,17 +1680,17 @@
     "rows": 106,
     "statement": "364-current",
     "times": [
-      116.34655399999974,
-      116.75595500000054,
-      125.17804199999955,
-      117.8673209999979,
-      114.38298299999951
+      141.76068999999916,
+      128.53985900000043,
+      128.23285699999906,
+      129.5519839999979,
+      130.89271100000042
     ],
     "values": 3
   },
   {
     "actor": "viewer",
-    "execution": 320.155,
+    "execution": 316.664,
     "actualRows": 106,
     "hits": 23123,
     "nodes": [
@@ -1704,7 +1704,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 311.525
+        "time": 307.511
       },
       {
         "actualRows": 106,
@@ -1716,7 +1716,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 311.175
+        "time": 307.182
       },
       {
         "actualRows": 106,
@@ -1728,7 +1728,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 306.733
+        "time": 302.78
       },
       {
         "actualRows": 106,
@@ -1740,7 +1740,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 286.8
+        "time": 284.633
       },
       {
         "actualRows": 106,
@@ -1752,7 +1752,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 225.934
+        "time": 222.915
       },
       {
         "actualRows": 107,
@@ -1764,7 +1764,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 214.573
+        "time": 211.811
       },
       {
         "actualRows": 107,
@@ -1776,7 +1776,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 190.095
+        "time": 187.687
       },
       {
         "actualRows": 107,
@@ -1788,7 +1788,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 99.196
+        "time": 97.916
       },
       {
         "actualRows": 107,
@@ -1800,7 +1800,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 99.112
+        "time": 97.839
       },
       {
         "actualRows": 106,
@@ -1812,7 +1812,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 90.777
+        "time": 89.655
       },
       {
         "actualRows": 106,
@@ -1824,7 +1824,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 90.703
+        "time": 89.607
       },
       {
         "actualRows": 106,
@@ -1836,11 +1836,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 90.614
+        "time": 89.519
       }
     ],
     "planRows": 1,
-    "planning": 24.261,
+    "planning": 24.745,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -1848,17 +1848,17 @@
     "rows": 106,
     "statement": "364-previous",
     "times": [
-      297.2874980000015,
-      295.9075309999971,
-      298.60982499999955,
-      425.8729190000013,
-      316.76900399999795
+      288.2850470000012,
+      295.7198870000029,
+      290.8742209999982,
+      302.6576849999983,
+      289.740815000001
     ],
     "values": 7
   },
   {
     "actor": "viewer",
-    "execution": 107.522,
+    "execution": 107.268,
     "actualRows": 106,
     "hits": 4444,
     "nodes": [
@@ -1872,7 +1872,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 105.049
+        "time": 104.773
       },
       {
         "actualRows": 106,
@@ -1884,7 +1884,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 102.941
+        "time": 102.583
       },
       {
         "actualRows": 106,
@@ -1896,7 +1896,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 101.529
+        "time": 101.13
       },
       {
         "actualRows": 106,
@@ -1908,7 +1908,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 84.07
+        "time": 84.153
       },
       {
         "actualRows": 106,
@@ -1920,7 +1920,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 82.7
+        "time": 82.857
       },
       {
         "actualRows": 106,
@@ -1932,7 +1932,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.912
+        "time": 54.917
       },
       {
         "actualRows": 106,
@@ -1944,7 +1944,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 54.766
+        "time": 54.806
       },
       {
         "actualRows": 106,
@@ -1956,7 +1956,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 53.872
+        "time": 53.927
       },
       {
         "actualRows": 106,
@@ -1968,7 +1968,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 53.001
+        "time": 53.075
       },
       {
         "actualRows": 106,
@@ -1980,7 +1980,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 52.099
+        "time": 52.116
       },
       {
         "actualRows": 106,
@@ -1992,7 +1992,7 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 48.749
+        "time": 48.7
       },
       {
         "actualRows": 106,
@@ -2004,11 +2004,11 @@
         "sharedRead": 0,
         "tempRead": 0,
         "tempWritten": 0,
-        "time": 48.608
+        "time": 48.55
       }
     ],
     "planRows": 1,
-    "planning": 6.17,
+    "planning": 6.257,
     "reads": 0,
     "tempRead": 0,
     "tempWritten": 0,
@@ -2016,11 +2016,11 @@
     "rows": 106,
     "statement": "n7",
     "times": [
-      108.00566799999797,
-      105.23069199999736,
-      110.52792199999749,
-      113.5054170000003,
-      111.07600400000229
+      109.4813549999999,
+      107.45814400000017,
+      110.63332100000116,
+      109.70311600000059,
+      105.26873200000045
     ],
     "values": 11
   }
