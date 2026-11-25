@@ -310,12 +310,12 @@ describe('chosen collection compilation', () => {
       'j3"."root.id" = "t"."id"), "batch_counts_bg5" AS MATERIALIZED (SELECT "__parent_id", count(*)::int A',
       'S "__total" FROM "batch_rows_all_bg5" GROUP BY "__parent_id"), "batch_items_bg5" AS MATERIALIZED (SE',
       'LECT "__parent_id", COALESCE(json_agg(row_to_json("__item") ORDER BY "__item"."__ordinal") FILTER (W',
-      'HERE "__ordinal" > 0), \'[]\'::json) AS "__items", count(*)::int AS "__matched" FROM (SELECT "__parent',
-      '_id", row_number() OVER (PARTITION BY "__parent_id" ORDER BY "__child"."id") AS "__ordinal", "__chil',
-      'd".* FROM "batch_rows_all_bg5" AS "__child") AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "i',
-      'd", "bc6"."__items" AS "items", "bc6"."__matched" AS "items__matched", "bn7"."__total" AS "items__to',
-      'tal" FROM "authorized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "bc6"."__parent_id" =',
-      ' "t"."id" LEFT JOIN "batch_counts_bg5" "bn7" ON "bn7"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
+      'HERE "__ordinal" > 0), \'[]\'::json) AS "__items", count(*)::int AS "__matched" FROM (SELECT row_numbe',
+      'r() OVER (PARTITION BY "__parent_id" ORDER BY "__child"."id") AS "__ordinal", "__child".* FROM "batc',
+      'h_rows_all_bg5" AS "__child") AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "id", "bc6"."__it',
+      'ems" AS "items", "bc6"."__matched" AS "items__matched", "bn7"."__total" AS "items__total" FROM "auth',
+      'orized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "bc6"."__parent_id" = "t"."id" LEFT ',
+      'JOIN "batch_counts_bg5" "bn7" ON "bn7"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
     ].join('')
     expect(sql).toMatchIndented(expectedBatch)
 

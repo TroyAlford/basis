@@ -2068,10 +2068,10 @@ class QueryProjection {
   /**
    * Whether one root collection can use the set-oriented batch plan.
    *
-   * This is intentionally conservative while the compiler develops: it
-   * accepts only unfiltered root collections with direct scalar target
-   * fields, no relationship-owned projection, and no target pagination.
-   * Unsupported shapes continue through the established correlated path.
+   * This remains conservative: it rejects explicit ordering and unsupported
+   * relationship shapes. Filters, pagination, nested target projections,
+   * edge fields, and record collections use the batch path when their
+   * canonical Graph relation supports it.
    * @param node - Projection occurrence owning the collection.
    * @param spec - Requested target fields.
    * @returns `true` when the collection has the proven simple batch shape.
@@ -2165,7 +2165,7 @@ class QueryProjection {
     ], '')
     const itemOrder = identity.map(name => `${quote('__child')}.${quote(name)}`).join(', ')
     const itemFields = fields
-      .map(name => `${quote(name)}, ${quote('__item')}.${quote(name)}`)
+      .map(name => `${quoteLiteral(name)}, ${quote('__item')}.${quote(name)}`)
       .join(', ')
     const page = limit === null
       ? `${quote('__ordinal')} > ${offset}`
@@ -2194,10 +2194,12 @@ class QueryProjection {
         sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')}, `),
         sqlText(`count(*)::int AS ${quote('__matched')} `),
         sqlText('FROM ('),
-        sqlText(`SELECT ${quote('__parent_id')}, `),
+        sqlText('SELECT '),
         sqlText('row_number() OVER ('),
         sqlText(`PARTITION BY ${quote('__parent_id')} ORDER BY ${itemOrder}) `),
-        sqlText(`AS ${quote('__ordinal')}, ${selectedFiltered} `),
+        sqlText(`AS ${quote('__ordinal')}, `),
+        sqlText(`${quote('__child')}.${quote('__parent_id')} AS ${quote('__parent_id')}, `),
+        sqlText(`${selectedFiltered} `),
         sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
         sqlText(`AS ${quote('__item')} `),
         sqlText(`GROUP BY ${quote('__parent_id')})`),
@@ -2349,7 +2351,7 @@ class QueryProjection {
         sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')}, `),
         sqlText(`count(*)::int AS ${quote('__matched')} `),
         sqlText('FROM ('),
-        sqlText(`SELECT ${quote('__parent_id')}, `),
+        sqlText('SELECT '),
         sqlText('row_number() OVER ('),
         sqlText(`PARTITION BY ${quote('__parent_id')} ORDER BY ${quote('__child')}.${quote('id')}) `),
         sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
