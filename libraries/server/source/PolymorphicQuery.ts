@@ -2306,6 +2306,10 @@ class QueryProjection {
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const childAlias = this.#nextAlias('b')
+    const targetIdsCte = quote(`batch_target_ids_${childAlias}`)
+    const targetIds = sqlText(
+      `${quote(childAlias)}.${quote('id')} IN (SELECT ${quote('id')} FROM ${targetIdsCte})`,
+    )
     if (filter !== undefined) {
       try {
         this.#filteredCollectionCorrelation(plan, key, filter, childAlias)
@@ -2325,6 +2329,7 @@ class QueryProjection {
         fields,
         limit: null,
         offset: 0,
+        rawWhere: targetIds,
         relationPrefix: `${this.#relationPrefix}batch_`,
         rootAlias: childAlias,
       })
@@ -2336,6 +2341,7 @@ class QueryProjection {
           fields,
           limit: null,
           offset: 0,
+          rawWhere: targetIds,
           relationPrefix: `${this.#relationPrefix}batch_`,
           rootAlias: childAlias,
           where: filter,
@@ -2359,6 +2365,9 @@ class QueryProjection {
     const rootWhere = this.#rootPredicate === undefined
       ? undefined
       : sqlConcat([' WHERE ', this.#rootPredicate], '')
+    const collectionPredicate = plan.predicate === undefined
+      ? undefined
+      : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
     const rowsDefinition = (name: string, child: SqlFragment): SqlFragment => sqlConcat([
       sqlText(`${name} AS MATERIALIZED (`),
       sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
@@ -2370,7 +2379,9 @@ class QueryProjection {
       sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
       sqlConcat([sqlText('JOIN ('), child, sqlText(`) AS ${quote('__child')} `)], ''),
       sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
-      sqlText(`WHERE ${plan.condition})`),
+      sqlText(`WHERE ${plan.condition}`),
+      collectionPredicate,
+      sqlText(')'),
     ], '')
     const page = limit === null
       ? `${quote('__ordinal')} > ${offset}`
@@ -2384,6 +2395,15 @@ class QueryProjection {
           sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
           rootWhere,
         ], ''),
+        sqlText(')'),
+      ], ''),
+      sqlConcat([
+        sqlText(`${targetIdsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT DISTINCT ${quote(plan.targetAlias)}.${quote('id')} AS ${quote('id')} `),
+        sqlText(`FROM ${plan.relation} `),
+        sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
+        sqlText(`WHERE ${plan.condition}`),
+        collectionPredicate,
         sqlText(')'),
       ], ''),
       rowsDefinition(rowsAllCte, allSql),
