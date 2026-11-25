@@ -534,7 +534,9 @@ class QueryProjection {
   /** Authorized relation requirements and their CTE definitions. */
   readonly #relations: AuthorizedRelations
   /** Batched collection CTE definitions emitted after authorized relations. */
-  readonly #batchDefinitions: string[] = []
+  readonly #batchDefinitions: SqlFragment[] = []
+  /** Root predicate used to scope batched collection roots. */
+  #rootPredicate?: SqlFragment
   /** Next generated table alias number. */
   #alias = 0
   /** Filter-only expression overrides keyed by logical path. */
@@ -609,14 +611,17 @@ class QueryProjection {
    * Build the requested projection paths.
    * @param fields - Effective scalar names or dotted singular-reference paths.
    * @param _valueStart - Retained value-start compatibility argument.
+   * @param rootPredicate - Root predicate used to scope batched roots.
    * @returns A row hydrator for the requested nested shape.
    * @throws {Error} When a path is invalid or an expansion is not supported.
    */
   build(
     fields: readonly string[],
     _valueStart: number,
+    rootPredicate?: SqlFragment,
   ): (row: Record<string, unknown>) => Record<string, unknown> {
     void _valueStart
+    this.#rootPredicate = rootPredicate
     if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
     this.#validateBudget(fields)
     const root = this.#node(this.root, [])
@@ -695,7 +700,7 @@ class QueryProjection {
    * Emit batched collection CTE definitions.
    * @returns Ordered batch CTE definitions.
    */
-  batchDefinitions(): string[] {
+  batchDefinitions(): SqlFragment[] {
     return [...this.#batchDefinitions]
   }
 
@@ -2122,23 +2127,34 @@ class QueryProjection {
     const rootAlias = node.context.baseAlias
     const owner = plan.collection.ownerEndpoint.field
     const parentId = `${quote(plan.relationshipAlias)}.${quote(`${owner}.id`)}`
+    const rootWhere = this.#rootPredicate === undefined
+      ? undefined
+      : sqlConcat([' WHERE ', this.#rootPredicate], '')
     this.#batchDefinitions.push(
-      `${rootCte} AS MATERIALIZED (` +
-        `SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} ` +
-        `FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)})`,
-      `${rowsCte} AS MATERIALIZED (` +
-        `SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.* ` +
-        `FROM ${plan.relation} ` +
-        `JOIN ${rootCte} ${quote(rootAlias)} ON TRUE ` +
-        `JOIN (${child.sql}) AS ${quote('__child')} ` +
-        `ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} ` +
-        `WHERE ${plan.condition})`,
-      `${itemsCte} AS MATERIALIZED (` +
-        `SELECT ${quote('__parent_id')}, ` +
-        `json_agg(row_to_json(${quote('__item')}) ORDER BY ${quote('__item')}.${quote('id')}) ` +
-        `AS ${quote('__items')}, ` +
-        `count(*)::int AS ${quote('__matched')} ` +
-        `FROM ${rowsCte} AS ${quote('__item')} GROUP BY ${quote('__parent_id')})`,
+      sqlConcat([
+        sqlText(`${rootCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
+        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
+        rootWhere,
+        sqlText(')'),
+      ], ''),
+      sqlConcat([
+        sqlText(`${rowsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.* `),
+        sqlText(`FROM ${plan.relation} `),
+        sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
+        sqlText(`JOIN (${child.sql}) AS ${quote('__child')} `),
+        sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
+        sqlText(`WHERE ${plan.condition})`),
+      ], ''),
+      sqlConcat([
+        sqlText(`${itemsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, `),
+        sqlText(`json_agg(row_to_json(${quote('__item')}) ORDER BY ${quote('__item')}.${quote('id')}) `),
+        sqlText(`AS ${quote('__items')}, `),
+        sqlText(`count(*)::int AS ${quote('__matched')} `),
+        sqlText(`FROM ${rowsCte} AS ${quote('__item')} GROUP BY ${quote('__parent_id')})`),
+      ], ''),
     )
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
@@ -2822,12 +2838,19 @@ export function compilePolymorphicQuery(
       `${projection.root.baseAlias}."id" ASC`
   }
   const rawValues = options.rawWhere?.values ?? []
-  const hydrate = projection.build(options.fields, predicate.values.length + rawValues.length + 1)
+  const hydrate = projection.build(
+    options.fields,
+    predicate.values.length + rawValues.length + 1,
+    predicate.sql === '' ? undefined : predicate as SqlFragment,
+  )
   const rootRelation = projection.relation(definition.name)
   const relationDefinitions = [
-    ...projection.relationDefinitions(),
+    ...projection.relationDefinitions().map(relation => sqlText(relation)),
     ...projection.batchDefinitions(),
   ]
+  const relationSql = relationDefinitions.length === 0
+    ? undefined
+    : sqlConcat(relationDefinitions, ', ')
 
   const leaves = definition.abstract
     ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
@@ -2847,9 +2870,7 @@ export function compilePolymorphicQuery(
   const limit = options.limit === undefined ? 25 : options.limit
   const pagination = SQL.paginate(limit, options.offset ?? 0)
   const query = sqlConcat([
-    relationDefinitions.length === 0
-      ? sqlText('')
-      : sqlText(`WITH ${relationDefinitions.join(', ')}`),
+    relationSql === undefined ? sqlText('') : sqlConcat([sqlText('WITH '), relationSql], ''),
     sqlFragment`SELECT ${sqlConcat(projection.columns, ', ')}`,
     sqlFragment`FROM ${sqlText(rootRelation)} ${sqlText(`"${projection.root.baseAlias}"`)}`,
     ...projection.joins,

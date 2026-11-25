@@ -298,23 +298,34 @@ describe('chosen collection compilation', () => {
     })
     expect(sql).not.toContain('LEFT JOIN LATERAL')
     const expectedBatch = [
-      '      WITH "authorized_CollectionRoot" AS NOT MATERIALIZED (SELECT "root"."id" AS "id" FROM "Collect',
-      'ionRoot" "leaf" JOIN "Entity" "root" ON "root"."id" = "leaf"."id"), "authorized_CollectionItem" AS N',
-      'OT MATERIALIZED (SELECT "root"."id" AS "id", NULL AS "root.id" FROM "CollectionItem" "leaf" JOIN "En',
-      'tity" "root" ON "root"."id" = "leaf"."id"), "batch_roots_bg5" AS MATERIALIZED (SELECT "t"."id" AS "i',
-      'd" FROM "authorized_CollectionRoot" "t"), "batch_rows_bg5" AS MATERIALIZED (SELECT "cj3"."root.id" A',
-      'S "__parent_id", "__child".* FROM "RootItem" "cj3" JOIN "authorized_CollectionItem" "ct1" ON "ct1"."',
-      'id" = "cj3"."item.id" JOIN "batch_roots_bg5" "t" ON TRUE JOIN (WITH "authorized_batch_CollectionItem',
-      '" AS NOT MATERIALIZED (SELECT "root"."entity" AS "entity", "root"."id" AS "id", "leaf"."label" AS "l',
-      'abel", "root"."name" AS "name" FROM "CollectionItem" "leaf" JOIN "Entity" "root" ON "root"."id" = "l',
-      'eaf"."id") SELECT b4."id" AS "id", b4."name" AS "name", b4."entity" AS "entity", b4."label" AS "labe',
-      'l" FROM "authorized_batch_CollectionItem" "b4"  ) AS "__child" ON "__child"."id" = "ct1"."id" WHERE ',
-      '"cj3"."root.id" = "t"."id"), "batch_items_bg5" AS MATERIALIZED (SELECT "__parent_id", json_agg(row_t',
-      'o_json("__item") ORDER BY "__item"."id") AS "__items", count(*)::int AS "__matched" FROM "batch_rows',
-      '_bg5" AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "id", "bc6"."__items" AS "items", "bc6"."',
-      '__matched" AS "items__matched" FROM "authorized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6',
-      '" ON "bc6"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
+      'WITH "authorized_CollectionRoot" AS NOT MATERIALIZED (SELECT "root"."id" AS "id" FROM "CollectionRoo',
+      't" "leaf" JOIN "Entity" "root" ON "root"."id" = "leaf"."id"), "authorized_CollectionItem" AS NOT MAT',
+      'ERIALIZED (SELECT "root"."id" AS "id", NULL AS "root.id" FROM "CollectionItem" "leaf" JOIN "Entity" ',
+      '"root" ON "root"."id" = "leaf"."id"), "batch_roots_bg5" AS MATERIALIZED (SELECT "t"."id" AS "id" FRO',
+      'M "authorized_CollectionRoot" "t"), "batch_rows_bg5" AS MATERIALIZED (SELECT "cj3"."root.id" AS "__p',
+      'arent_id", "__child".* FROM "RootItem" "cj3" JOIN "authorized_CollectionItem" "ct1" ON "ct1"."id" = ',
+      '"cj3"."item.id" JOIN "batch_roots_bg5" "t" ON TRUE JOIN (WITH "authorized_batch_CollectionItem" AS N',
+      'OT MATERIALIZED (SELECT "root"."entity" AS "entity", "root"."id" AS "id", "leaf"."label" AS "label",',
+      ' "root"."name" AS "name" FROM "CollectionItem" "leaf" JOIN "Entity" "root" ON "root"."id" = "leaf"."',
+      'id") SELECT b4."id" AS "id", b4."name" AS "name", b4."entity" AS "entity", b4."label" AS "label" FRO',
+      'M "authorized_batch_CollectionItem" "b4"  ) AS "__child" ON "__child"."id" = "ct1"."id" WHERE "cj3".',
+      '"root.id" = "t"."id"), "batch_items_bg5" AS MATERIALIZED (SELECT "__parent_id", json_agg(row_to_json',
+      '("__item") ORDER BY "__item"."id") AS "__items", count(*)::int AS "__matched" FROM "batch_rows_bg5" ',
+      'AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "id", "bc6"."__items" AS "items", "bc6"."__matc',
+      'hed" AS "items__matched" FROM "authorized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "',
+      'bc6"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
     ].join('')
     expect(sql).toMatchIndented(expectedBatch)
+
+    const scoped = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'items{$limit:null}', 'items.label'],
+      where: "label = 'One'",
+    })
+    expect(scoped.sql).toContain(
+      '"batch_roots_bg5" AS MATERIALIZED (SELECT "t"."id" AS "id" ' +
+      'FROM "authorized_CollectionRoot" "t" WHERE t."label" IS NOT DISTINCT FROM $1)',
+    )
+    expect(scoped.sql).toContain('WHERE t."label" IS NOT DISTINCT FROM $2')
+    expect(scoped.values).toEqual(['One', 'One', 25, 0])
   })
 })
