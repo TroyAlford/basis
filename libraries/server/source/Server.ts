@@ -39,7 +39,7 @@ import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import { internalStateRoot, isInternalStatePath, isWithinPath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
 import type { VendorBuild } from './Vendor'
 import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
@@ -464,10 +464,10 @@ export class Server<
     if (relative.length === 0) return Server.NotFound
 
     const filePath = path.join(root, relative)
+    const internalRoot = internalStateRoot(root)
     if (
-      containsInternalStateSegment(root)
-      || containsInternalStateSegment(filePath)
-      || (vendor && !filePath.startsWith(`${root}${path.sep}`))
+      !isWithinPath(filePath, root)
+      || isWithinPath(filePath, internalRoot)
     ) {
       return Server.NotFound
     }
@@ -475,7 +475,7 @@ export class Server<
     const active = vendor ? this.#activeVendorAsset(filePath) : null
     if (active) return this.#serveVendor(uri, active, null, request, Bun.file(filePath).type)
 
-    const asset = await publicStaticFile(filePath)
+    const asset = await publicStaticFile(filePath, internalRoot)
     if (!asset) return Server.NotFound
 
     if (vendor) return this.#serveVendor(uri, null, asset, request, asset.type)
@@ -860,7 +860,16 @@ export class Server<
     const { watch } = await import('chokidar')
     const watcher = watch(this.#root, {
       ignoreInitial: true,
-      ignored: [/(^|[/\\])(?:node_modules|\.basis)([/\\]|$)/],
+      ignored: [
+        /*
+         * Dot entries are ignored by basename; a dotted ancestor (a checkout under
+         * a hidden directory, or an app under .basis/tmp) must stay watchable.
+         */
+        /(^|[/\\])\.[^/\\]+$/,
+        /(^|[/\\])node_modules([/\\]|$)/,
+        // The server's own generated artifacts would otherwise trigger rebuild loops.
+        /(^|[/\\])\.basis[/\\](?:hydrate|ssr)([/\\]|$)/,
+      ],
     })
     this.#watcher = watcher
     watcher.on('all', (_event, filename) => {
@@ -1399,8 +1408,12 @@ export class Server<
     watcherReady: Promise<void>,
     vendorReady: Promise<ReadonlySet<string>>,
   ): void {
-    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(response => {
-      if (!response.ok) throw new Error(`development build failed (${response.status})`)
+    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(async response => {
+      if (response.ok) return
+      const detail = (await response.text()).trim()
+      throw new Error(
+        `development build failed (${response.status})${detail ? `: ${detail.slice(0, 1_000)}` : ''}`,
+      )
     })
     const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()
     this.#ready = this.#trackReady(

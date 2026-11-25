@@ -195,17 +195,25 @@ The container is run-scoped: it uses a process-unique name and is removed at tea
 
 ## Temp directories
 
-The testing preload isolates the process temp directory: it points `TMPDIR` / `TMP` / `TEMP` at one run-scoped root, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency, or any spawned child that uses it — writes inside that root. The preload removes the root when the run ends — success, failure, thrown error, or `SIGINT` / `SIGTERM` — so a detonating test cannot leak a directory or its contents, with no per-repo configuration.
+The testing preload points `TMPDIR` / `TMP` / `TEMP` at `./.basis/tmp`, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency, or any spawned child that uses it — writes inside the project. Nothing lands in the host's `/tmp`, and one checkout's temp tree is physically separate from another's.
 
-For a fixture that wants a named directory, `tempDirectory(prefix, base?)` from `basis/testing` creates a fresh directory under the same isolated root:
+A fixture asks for a named directory with `tempDirectory(prefix)` from `basis/testing`. The name is deterministic, normally the test's own name:
 
 ```ts
 import { tempDirectory } from 'basis/testing'
 
-const directory = tempDirectory('my-fixture')
+const directory = tempDirectory('my-test') // ./.basis/tmp/my-test
 ```
 
-Plain `mkdtemp(os.tmpdir())` is captured the same way. The optional `base` places the run root elsewhere, for a fixture a tool resolves only below the working tree; a base the run created is removed again once empty.
+Reusing a name clears the previous contents, including any managed PostgreSQL container installed there. A second use of the same name in one process gets a numeric suffix (`my-test-2`) so independent fixtures never share a directory. Plain `mkdtemp(os.tmpdir())` is captured under the same root.
+
+The run removes `./.basis/tmp` when it ends — success, failure, thrown error, or `SIGINT` / `SIGTERM`. Sibling test processes share the tree, so it is removed only by the last live owner; `.basis/tmp/.owners/<pid>` records each owner and a marker from a dead process is discarded. A `SIGKILL`ed run therefore leaves its tree behind, but the next run in the same checkout reuses the deterministic paths and, as the last owner, removes the tree and its containers. Another checkout is never in scope.
+
+## Managed PostgreSQL in tests
+
+Every Basis-managed PostgreSQL container and its named volume is labeled with the installation root that owns it (`basis.install`). Because that root now lives under `./.basis/tmp/<test>`, every container belongs to exactly one checkout and one test name.
+
+Removing `./.basis/tmp` also removes every managed container and named volume installed below it, including named volumes (`docker rm -v` only removes anonymous ones). Teardown and the per-name reset in `tempDirectory` both use that same scoped sweep, so a reaped installation is always one the current checkout owned.
 
 ## Updating snapshots
 
