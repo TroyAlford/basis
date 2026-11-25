@@ -46,6 +46,21 @@ The captured plans use the canonical Graph RLS policies. The role check introduc
 
 This PR also groups predicates by role inside one policy expression, so identical role checks can be shared when one target has multiple grants for the same role. It does not change the `SECURITY DEFINER` boundary, does not introduce a session cache, and does not disable or bypass RLS. A production policy cache would need a separately reviewed transaction-scoped actor-role contract; it is not included here.
 
+## Policy A/B
+
+The grouped-policy variant is the only policy change in this PR: predicates for the same role are factored under one role check. It was applied to the disposable fixture schema by replacing the installed policies with the current Graph policy SQL; the table structures and data were unchanged. The canonical and grouped runs used the same actor, fixture, statements, warm-up, and five direct repetitions.
+
+| actor | statement | canonical median | grouped median | canonical EXPLAIN | grouped EXPLAIN |
+| --- | --- | ---: | ---: | ---: | ---: |
+| owner | #364 current | 200.9 ms | 30.0 ms | 197.3 ms | 34.8 ms |
+| owner | N7 | 48.2 ms | 10.5 ms | 51.5 ms | 11.1 ms |
+| editor | #364 current | 317.6 ms | 118.6 ms | 284.0 ms | 121.9 ms |
+| editor | N7 | 94.4 ms | 41.7 ms | 97.6 ms | 42.2 ms |
+| viewer | #364 current | 277.5 ms | 121.4 ms | 293.9 ms | 130.6 ms |
+| viewer | N7 | 85.8 ms | 39.4 ms | 94.0 ms | 39.2 ms |
+
+A hydrated comparison across owner, editor, viewer, anonymous, and nonmember actors returned identical requested fields and nested collections before and after the policy replacement; allowed actors had 106 rows, anonymous and nonmember had 0, and the old and new policy sets both contained 120 policy objects. `policy-verification.json` records the check. The grouped variant preserves the existing `basis.has_role` `SECURITY DEFINER` function, actor-setting contract, and fail-closed behavior. It does not add a session cache, does not disable RLS, and does not change privilege boundaries. The result is a measured policy-compilation improvement, not the experimental inline membership/R configuration.
+
 ## Policy diagnostic
 
 The following is a **diagnostic floor only**, not product behavior and not a proposed policy. It runs the same statements and fixture with `RESET ROLE` immediately before the no-RLS measurement, on the same connection and actor setting; the application-role measurement is the canonical policy. The role switch changes planner state as well as RLS visibility, so the two columns are not a controlled estimate of policy cost.

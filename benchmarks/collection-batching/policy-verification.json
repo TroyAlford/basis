@@ -1,0 +1,13 @@
+{
+  "canonicalPolicyCount": 120,
+  "groupedPolicyCount": 120,
+  "actors": {
+    "anonymous": { "groupedRows": 0, "sameAsCanonical": true },
+    "editor": { "groupedRows": 106, "sameAsCanonical": true },
+    "nonmember": { "groupedRows": 0, "sameAsCanonical": true },
+    "owner": { "groupedRows": 106, "sameAsCanonical": true },
+    "viewer": { "groupedRows": 106, "sameAsCanonical": true }
+  },
+  "fixture": "MTG canonical graph with deck membership owner/editor/viewer and 106 printings",
+  "policyChange": "same-role predicate grouping only"
+}
