@@ -2271,7 +2271,7 @@ function assertPolicySafe(filter: Filter): void {
  */
 function roleCondition(role: string, schema: string): string {
   if (role === PUBLIC_ROLE_ID) return 'TRUE'
-  return `(SELECT basis.has_role(${literal(schema)}, ${literal(role)}))`
+  return `(SELECT basis.has_role(${literal(schema)}, ${literal(role)}) AS has_role)`
 }
 
 /**

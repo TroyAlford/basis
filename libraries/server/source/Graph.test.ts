@@ -252,7 +252,7 @@ describe('Graph', () => {
     const editor = graph.role('editor')
     if (!editor) throw new Error('missing editor role')
     expect(update?.sql).toContain(
-      `(SELECT basis.has_role('public', '${editor.id}'))`,
+      `(SELECT basis.has_role('public', '${editor.id}') AS has_role)`,
     )
   })
 
