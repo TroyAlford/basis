@@ -276,6 +276,7 @@ describe('chosen collection compilation', () => {
           fields: [
             { field: 'label', type: 'String' },
             { field: 'items', target: 'CollectionItem', type: 'Collection', via: 'RootItem[root = @].item' },
+            { field: 'entries', target: 'RootItem', type: 'Collection', via: 'RootItem[root = @]' },
           ],
           name: 'CollectionRoot',
         },
@@ -286,7 +287,7 @@ describe('chosen collection compilation', () => {
           { field: 'root', target: 'CollectionRoot' },
           { field: 'item', target: 'CollectionItem' },
         ],
-        fields: [],
+        fields: [{ field: 'quantity', type: 'Number' }],
         name: 'RootItem',
       }],
     })
@@ -311,10 +312,10 @@ describe('chosen collection compilation', () => {
       'LECT "__parent_id", COALESCE(json_agg(row_to_json("__item") ORDER BY "__item"."__ordinal") FILTER (W',
       'HERE "__ordinal" > 0), \'[]\'::json) AS "__items", count(*)::int AS "__matched" FROM (SELECT "__parent',
       '_id", row_number() OVER (PARTITION BY "__parent_id" ORDER BY "__child"."id") AS "__ordinal", "__chil',
-      'd".* FROM "batch_rows_all_bg5") AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "id", "bc6"."__',
-      'items" AS "items", "bc6"."__matched" AS "items__matched", "bn7"."__total" AS "items__total" FROM "au',
-      'thorized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "bc6"."__parent_id" = "t"."id" LEF',
-      'T JOIN "batch_counts_bg5" "bn7" ON "bn7"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
+      'd".* FROM "batch_rows_all_bg5" AS "__child") AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "i',
+      'd", "bc6"."__items" AS "items", "bc6"."__matched" AS "items__matched", "bn7"."__total" AS "items__to',
+      'tal" FROM "authorized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "bc6"."__parent_id" =',
+      ' "t"."id" LEFT JOIN "batch_counts_bg5" "bn7" ON "bn7"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
     ].join('')
     expect(sql).toMatchIndented(expectedBatch)
 
@@ -328,5 +329,18 @@ describe('chosen collection compilation', () => {
     )
     expect(scoped.sql).toContain('WHERE t."label" IS NOT DISTINCT FROM $2')
     expect(scoped.values).toEqual(['One', 'One', 25, 0])
+
+    const edge = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'items{$limit:null}', 'items.label', 'items.quantity'],
+    })
+    expect(edge.sql).toContain(' AS "__edge"')
+    expect(edge.sql).toContain('json_build_object')
+
+    const record = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'entries{$limit:null}', 'entries.quantity'],
+    })
+    expect(record.sql).toContain('batch_rows_all_')
+    expect(record.sql).toContain('json_build_object("quantity"')
+    expect(record.sql).not.toContain('LEFT JOIN LATERAL')
   })
 })

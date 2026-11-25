@@ -2077,16 +2077,165 @@ class QueryProjection {
    * @returns `true` when the collection has the proven simple batch shape.
    */
   #canBatchCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
-    if (node.path.length !== 0 || spec.orderBy !== undefined || spec.edgeFields.size !== 0) return false
+    if (node.path.length !== 0 || spec.orderBy !== undefined) return false
     const plan = this.#collectionPlan(
       spec.collection,
       node.context.baseAlias,
       collectionKey(node.path, spec.collection.name),
     )
+    if (plan.resultType === 'record') {
+      return plan.collection.kind === 'explicit'
+        && plan.relationshipAlias !== undefined
+        && spec.edgeFields.size === 0
+    }
     return plan.resultType === 'entity'
       && plan.collection.kind === 'explicit'
       && plan.relationshipAlias !== undefined
       && plan.targetAlias !== undefined
+      && (spec.edgeFields.size === 0 || this.#edgeProjectionAllowed(plan))
+  }
+
+  /**
+   * Add a relationship-record collection as a shared relational batch.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested record fields.
+   * @param plan - Collection relation plan.
+   * @returns Whether the record batch plan was emitted.
+   */
+  #addBatchedRecordCollection(
+    node: ProjectionNode,
+    spec: ProjectedCollectionSpec,
+    plan: CollectionRelationPlan,
+  ): boolean {
+    if (plan.collection.kind !== 'explicit'
+      || plan.relationship === undefined
+      || plan.relationshipAlias === undefined) return false
+    this.#consume(plan.work)
+    const limit = spec.limit === undefined ? 3 : spec.limit
+    const offset = spec.offset ?? 0
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
+    if (!Number.isInteger(offset) || offset < 0) return false
+    let fields: readonly string[]
+    let identity: readonly string[]
+    let filter: ReturnType<typeof SQL.where> | undefined
+    try {
+      fields = recordFields(plan, spec.fields)
+      identity = plan.relationship.between.map(endpoint => endpoint.field)
+      const filterText = spec.filters.size === 0
+        ? undefined
+        : [...spec.filters].map(value => `(${value})`).join(' $and ')
+      filter = filterText === undefined ? undefined : this.#recordPredicate(plan, filterText)
+    } catch {
+      return false
+    }
+    const selectedNames = [...new Set([...fields, ...identity])]
+    const selected = selectedNames
+      .map(name => `${recordColumn(plan, name)} AS ${quote(name)}`)
+      .join(', ')
+    const selectedFiltered = selectedNames
+      .map(name => `${quote('__child')}.${quote(name)} AS ${quote(name)}`)
+      .join(', ')
+    const suffix = this.#nextAlias('br')
+    const rootCte = quote(`batch_roots_${suffix}`)
+    const rowsAllCte = quote(`batch_rows_all_${suffix}`)
+    const rowsFilteredCte = quote(`batch_rows_filtered_${suffix}`)
+    const countsCte = quote(`batch_counts_${suffix}`)
+    const itemsCte = quote(`batch_items_${suffix}`)
+    const rootAlias = node.context.baseAlias
+    const owner = plan.collection.ownerEndpoint.field
+    const parentId = `${quote(plan.relationshipAlias)}.${quote(`${owner}.id`)}`
+    const rootWhere = this.#rootPredicate === undefined
+      ? undefined
+      : sqlConcat([' WHERE ', this.#rootPredicate], '')
+    const planPredicate = plan.predicate === undefined
+      ? undefined
+      : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
+    const filterPredicate = filter === undefined || filter.sql === ''
+      ? undefined
+      : sqlConcat([' AND (', filter as SqlFragment, ')'])
+    const rowsDefinition = (name: string, filtered: boolean): SqlFragment => sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${selected} `),
+      sqlText(`FROM ${plan.relation} `),
+      sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
+      sqlText(`WHERE ${plan.condition}`),
+      planPredicate,
+      filtered ? filterPredicate : undefined,
+      sqlText(')'),
+    ], '')
+    const itemOrder = identity.map(name => `${quote('__child')}.${quote(name)}`).join(', ')
+    const itemFields = fields
+      .map(name => `${quote(name)}, ${quote('__item')}.${quote(name)}`)
+      .join(', ')
+    const page = limit === null
+      ? `${quote('__ordinal')} > ${offset}`
+      : `${quote('__ordinal')} > ${offset} AND ` +
+        `${quote('__ordinal')} <= ${offset + limit}`
+    this.#batchDefinitions.push(
+      sqlConcat([
+        sqlText(`${rootCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
+        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
+        rootWhere,
+        sqlText(')'),
+      ], ''),
+      rowsDefinition(rowsAllCte, false),
+      ...(filter === undefined ? [] : [rowsDefinition(rowsFilteredCte, true)]),
+      sqlConcat([
+        sqlText(`${countsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
+        sqlText(`FROM ${rowsAllCte} GROUP BY ${quote('__parent_id')})`),
+      ], ''),
+      sqlConcat([
+        sqlText(`${itemsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, `),
+        sqlText(`COALESCE(json_agg(json_build_object(${itemFields}) `),
+        sqlText(`ORDER BY ${quote('__item')}.${quote('__ordinal')}) `),
+        sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')}, `),
+        sqlText(`count(*)::int AS ${quote('__matched')} `),
+        sqlText('FROM ('),
+        sqlText(`SELECT ${quote('__parent_id')}, `),
+        sqlText('row_number() OVER ('),
+        sqlText(`PARTITION BY ${quote('__parent_id')} ORDER BY ${itemOrder}) `),
+        sqlText(`AS ${quote('__ordinal')}, ${selectedFiltered} `),
+        sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
+        sqlText(`AS ${quote('__item')} `),
+        sqlText(`GROUP BY ${quote('__parent_id')})`),
+      ], ''),
+    )
+    const alias = columnAlias(node.path, spec.collection.name)
+    const matchedAlias = `${alias}__matched`
+    const totalAlias = `${alias}__total`
+    const joinAlias = this.#nextAlias('bc')
+    const countsAlias = this.#nextAlias('bn')
+    this.joins.push(sqlText(
+      `LEFT JOIN ${itemsCte} ${quote(joinAlias)} ` +
+      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')} ` +
+      `LEFT JOIN ${countsCte} ${quote(countsAlias)} ` +
+      `ON ${quote(countsAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
+    ))
+    this.columns.push(sqlText(`${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`))
+    this.columns.push(sqlText(`${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`))
+    this.columns.push(sqlText(`${quote(countsAlias)}.${quote('__total')} AS ${quote(totalAlias)}`))
+    node.projectedCollections.push({
+      alias,
+      hydrate: row => {
+        const raw = row[alias]
+        const entries = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string' ? JSON.parse(raw) as unknown[] : []
+        const matchedTotal = Number(row[matchedAlias] ?? 0)
+        return {
+          $matched: matchedTotal,
+          $total: Number(row[totalAlias] ?? matchedTotal),
+          items: entries,
+        }
+      },
+      matchedAlias,
+      name: spec.collection.name,
+      totalAlias,
+    })
+    return true
   }
 
   /**
@@ -2104,14 +2253,16 @@ class QueryProjection {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     if (plan.collection.kind !== 'explicit'
-      || plan.targetAlias === undefined
       || plan.relationshipAlias === undefined) return false
+    if (plan.resultType === 'record') return this.#addBatchedRecordCollection(node, spec, plan)
+    if (plan.targetAlias === undefined) return false
     this.#consume(plan.work)
     const limit = spec.limit === undefined ? 3 : spec.limit
     const offset = spec.offset ?? 0
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
+    const edgeFields = [...spec.edgeFields]
     const filter = spec.filters.size === 0
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
@@ -2161,8 +2312,12 @@ class QueryProjection {
       : sqlConcat([' WHERE ', this.#rootPredicate], '')
     const rowsDefinition = (name: string, child: SqlFragment): SqlFragment => sqlConcat([
       sqlText(`${name} AS MATERIALIZED (`),
-      sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.* `),
-      sqlText(`FROM ${plan.relation} `),
+      sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
+      edgeFields.length === 0
+        ? undefined
+        : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
+      sqlText(' FROM '),
+      sqlText(`${plan.relation} `),
       sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
       sqlConcat([sqlText('JOIN ('), child, sqlText(`) AS ${quote('__child')} `)], ''),
       sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
@@ -2198,7 +2353,8 @@ class QueryProjection {
         sqlText('row_number() OVER ('),
         sqlText(`PARTITION BY ${quote('__parent_id')} ORDER BY ${quote('__child')}.${quote('id')}) `),
         sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
-        sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte}) AS ${quote('__item')} `),
+        sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
+        sqlText(`AS ${quote('__item')} `),
         sqlText(`GROUP BY ${quote('__parent_id')})`),
       ], ''),
     )
@@ -2233,7 +2389,14 @@ class QueryProjection {
         return {
           $matched: matchedTotal,
           $total: Number(row[totalAlias] ?? matchedTotal),
-          items: entries.map(entry => childFiltered.hydrate(entry as Record<string, unknown>)),
+          items: entries.map(entry => {
+            const hydrated = childFiltered.hydrate(entry as Record<string, unknown>)
+            const edge = entry.__edge
+            if (edge !== undefined && edge !== null && typeof edge === 'object') {
+              Object.assign(hydrated, edge)
+            }
+            return hydrated
+          }),
         }
       },
       matchedAlias,
