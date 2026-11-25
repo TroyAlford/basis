@@ -116,7 +116,7 @@ function transpilerFor(loader: JavaScriptLoader): Bun.Transpiler {
 function registrationSource(name: string, id: string, unstable: boolean): string {
   return [
     `\n${name} = ${REGISTER}(${JSON.stringify(id)}, ${name}${unstable ? ', true' : ''});`,
-    `\nif (${name}.displayName == null) ${name}.displayName = ${JSON.stringify(name)};`,
+    `\nif (!Object.hasOwn(${name}, "displayName")) ${name}.displayName = ${JSON.stringify(name)};`,
   ].join('')
 }
 
