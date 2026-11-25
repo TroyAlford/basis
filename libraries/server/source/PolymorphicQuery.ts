@@ -2306,6 +2306,17 @@ class QueryProjection {
       ? undefined
       : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const childAlias = this.#nextAlias('b')
+    if (filter !== undefined) {
+      try {
+        this.#filteredCollectionCorrelation(plan, key, filter, childAlias)
+      } catch {
+        /*
+         * Fall back to the member adapter so ambiguous relationship fields
+         * still surface the canonical projection error.
+         */
+        return false
+      }
+    }
     let childAll: CompiledPolymorphicQuery
     let childFiltered: CompiledPolymorphicQuery
     try {

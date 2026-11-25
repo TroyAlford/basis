@@ -677,7 +677,8 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"visits"')
     expect(compiled.sql).toContain('"visits__matched"')
     expect(compiled.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(compiled.values).toEqual([2, 1, 25, 0])
+    expect(compiled.sql).toContain('"__ordinal" > 1 AND "__ordinal" <= 3')
+    expect(compiled.values).toEqual([25, 0, 25, 0])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
@@ -705,7 +706,8 @@ describe('SQL.where', () => {
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
     expect(members.sql).toMatch(/"cj\d+"\."user\.id"/)
     expect(members.sql).toContain('"members"')
-    expect(members.values).toEqual([2, 1, 25, 0])
+    expect(members.sql).toContain('"__ordinal" > 1 AND "__ordinal" <= 3')
+    expect(members.values).toEqual([25, 0, 25, 0])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id', 'articles{$limit:1}'],
@@ -731,13 +733,13 @@ describe('SQL.where', () => {
       fields: ['id', 'members', 'members.name'],
     })
     expect(defaults.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(defaults.values).toContain(3)
+    expect(defaults.sql).toContain('"__ordinal" <= 3')
     expect(defaults.sql).toContain('__matched')
 
     const capped = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:50}', 'members.name'],
     })
-    expect(capped.values).toContain(50)
+    expect(capped.sql).toContain('"__ordinal" <= 50')
 
     const filtered = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[name != 'Ada']{$limit:null}", 'members.name'],
@@ -829,7 +831,8 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(nestedCollectionDefinitions, 'User', {
       fields: ['id', 'pets', 'pets.toys', 'pets.toys.label'],
     })
-    expect(compiled.sql.match(/LEFT JOIN LATERAL/gu)?.length).toBeGreaterThanOrEqual(2)
+    expect(compiled.sql).not.toContain('LEFT JOIN LATERAL')
+    expect(compiled.sql).toContain('"batch_roots_')
     expect(compiled.sql).toContain('"toys"')
     expect(compiled.sql).toContain('"pets"')
   })
