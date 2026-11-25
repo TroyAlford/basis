@@ -340,7 +340,7 @@ describe('chosen collection compilation', () => {
       fields: ['id', 'entries{$limit:null}', 'entries.quantity'],
     })
     expect(record.sql).toContain('batch_rows_all_')
-    expect(record.sql).toContain('json_build_object("quantity"')
+    expect(record.sql).toContain("json_build_object('quantity'")
     expect(record.sql).not.toContain('LEFT JOIN LATERAL')
   })
 })
