@@ -39,6 +39,36 @@ async function start(
   delay = 0,
   publicOrigin = '',
 ): Promise<ReturnType<typeof Bun.spawn>> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await startOnce(value, version, delay, publicOrigin)
+    } catch (error) {
+      lastError = error
+      if (attempt === 0 && String(error).includes('development build failed (500)')) {
+        await Bun.sleep(250)
+        continue
+      }
+      throw error
+    }
+  }
+  throw lastError
+}
+
+/**
+ * Start one release fixture attempt.
+ * @param value - Port to bind.
+ * @param version - Release version to serve.
+ * @param delay - Readiness delay in milliseconds.
+ * @param publicOrigin - Trusted public origin for vendor script URLs.
+ * @returns The child process.
+ */
+async function startOnce(
+  value: number,
+  version: string,
+  delay = 0,
+  publicOrigin = '',
+): Promise<ReturnType<typeof Bun.spawn>> {
   const child = Bun.spawn([process.execPath, './serve.ts'], {
     cwd: fixture,
     env: {

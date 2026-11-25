@@ -39,6 +39,9 @@ const LOADER_BY_EXTENSION: Record<string, JavaScriptLoader> = {
 /** Path segment that owns installed dependencies rather than first-party source. */
 const INSTALLED_SEGMENT = 'node_modules'
 
+/** Basis's own source is framework code even when installed under node_modules. */
+const BASIS_ROOT = path.resolve(import.meta.dir, '..', '..', '..')
+
 /**
  * Whether a module belongs to an installed dependency rather than first-party
  * source.
@@ -47,16 +50,23 @@ const INSTALLED_SEGMENT = 'node_modules'
  * lexical path alone cannot distinguish a first-party package from a third-party
  * dependency. Resolve the real path and classify by its owning directory.
  * @param filePath - Absolute module path supplied by Bun.
+ * @param basisRoot - Basis package root; defaults to the running package.
  * @returns Whether the module is owned by `node_modules`.
  */
-export function isInstalledDependency(filePath: string): boolean {
+export function isInstalledDependency(filePath: string, basisRoot = BASIS_ROOT): boolean {
   let resolved = filePath
   try {
     resolved = realpathSync(filePath)
   } catch {
     // Virtual or not-yet-written modules keep their declared path.
   }
-  return resolved.replace(/\\/g, '/').split('/').includes(INSTALLED_SEGMENT)
+  const normalized = resolved.replace(/\\/g, '/')
+  const relative = path.relative(basisRoot, resolved)
+  const withinBasis = relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
+  if (withinBasis) {
+    return relative.replace(/\\/g, '/').split('/').includes(INSTALLED_SEGMENT)
+  }
+  return normalized.split('/').includes(INSTALLED_SEGMENT)
 }
 
 /** A source edit positioned by absolute offsets. */
