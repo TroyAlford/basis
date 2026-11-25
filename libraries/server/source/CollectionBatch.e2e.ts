@@ -1,5 +1,6 @@
+import { withDatabase } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { withDatabase as withInternalDatabase } from '../testing/DatabaseFixture'
+import type { DatabaseContext } from '../testing/DatabaseFixture'
 import { Action, Graph, Security } from './Graph'
 
 interface BatchItem {
@@ -41,21 +42,13 @@ const graph = new Graph({
     between: [{ field: 'group', target: 'Group' }, { field: 'member', target: 'Member' }],
     fields: [{ field: 'quantity', type: 'Number' }],
     name: 'GroupMember',
+    security: { [Action.Read]: Security.Public },
   }],
 })
 
 describe('batched collection execution', () => {
   test('returns entity and record collections from one batched projection', async () => {
-    await withInternalDatabase('collection-batch', async database => {
-      await database.create('Group', { id: group, label: 'Group', name: 'Group' })
-      await database.create('Member', [
-        { id: memberA, label: 'A', name: 'A' },
-        { id: memberB, label: 'B', name: 'B' },
-      ])
-      await database.sql`
-        INSERT INTO "GroupMember" ("group.id", "member.id", "quantity")
-        VALUES (${group}, ${memberA}, 1), (${group}, ${memberB}, 2)
-      `
+    await withDatabase('collection-batch', null, async database => {
       const rows = await database.query<BatchRow>('Group', {
         fields: [
           'id',
@@ -72,6 +65,19 @@ describe('batched collection execution', () => {
       expect(rows[0]?.members.items.map(item => item.label).sort()).toEqual(['A', 'B'])
       expect(rows[0]?.members.items.map(item => item.quantity).sort()).toEqual([1, 2])
       expect(rows[0]?.entries.items.map(item => item.quantity).sort()).toEqual([1, 2])
-    }, { entities: graph.definitions })
+    }, {
+      graph,
+      setup: async (database: DatabaseContext) => {
+        await database.create('Group', { id: group, label: 'Group', name: 'Group' })
+        await database.create('Member', [
+          { id: memberA, label: 'A', name: 'A' },
+          { id: memberB, label: 'B', name: 'B' },
+        ])
+        await database.sql`
+          INSERT INTO "GroupMember" ("group.id", "member.id", "quantity")
+          VALUES (${group}, ${memberA}, 1), (${group}, ${memberB}, 2)
+        `
+      },
+    })
   })
 })
