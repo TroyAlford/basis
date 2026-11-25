@@ -4,6 +4,7 @@ import type { DatabaseContext } from '../testing/DatabaseFixture'
 import { Action, Graph, Security } from './Graph'
 
 interface BatchItem {
+  readonly badges?: BatchCollection,
   readonly label?: string,
   readonly quantity?: number,
 }
@@ -20,6 +21,8 @@ interface BatchRow {
 const group = '00000000-0000-4000-8000-000000000501'
 const memberA = '00000000-0000-4000-8000-000000000502'
 const memberB = '00000000-0000-4000-8000-000000000503'
+const badgeA = '00000000-0000-4000-8000-000000000504'
+const badgeB = '00000000-0000-4000-8000-000000000505'
 
 const graph = new Graph({
   entities: [
@@ -33,8 +36,16 @@ const graph = new Graph({
       security: { [Action.Read]: Security.Public },
     },
     {
-      fields: [{ field: 'label', type: 'String' }],
+      fields: [
+        { field: 'label', type: 'String' },
+        { field: 'badges', target: 'Badge', type: 'Collection', via: 'MemberBadge[member = @].badge' },
+      ],
       name: 'Member',
+      security: { [Action.Read]: Security.Public },
+    },
+    {
+      fields: [{ field: 'label', type: 'String' }],
+      name: 'Badge',
       security: { [Action.Read]: Security.Public },
     },
   ],
@@ -42,6 +53,11 @@ const graph = new Graph({
     between: [{ field: 'group', target: 'Group' }, { field: 'member', target: 'Member' }],
     fields: [{ field: 'quantity', type: 'Number' }],
     name: 'GroupMember',
+    security: { [Action.Read]: Security.Public },
+  }, {
+    between: [{ field: 'member', target: 'Member' }, { field: 'badge', target: 'Badge' }],
+    fields: [],
+    name: 'MemberBadge',
     security: { [Action.Read]: Security.Public },
   }],
 })
@@ -56,6 +72,8 @@ describe('batched collection execution', () => {
           'members{$limit:null}',
           'members.label',
           'members.quantity',
+          'members.badges{$limit:null}',
+          'members.badges.label',
           'entries{$limit:null}',
           'entries.quantity',
         ],
@@ -65,6 +83,10 @@ describe('batched collection execution', () => {
       expect(rows[0]?.members.items.map(item => item.label).sort()).toEqual(['A', 'B'])
       expect(rows[0]?.members.items.map(item => item.quantity).sort()).toEqual([1, 2])
       expect(rows[0]?.entries.items.map(item => item.quantity).sort()).toEqual([1, 2])
+      expect(rows[0]?.members.items.find(item => item.label === 'A')?.badges?.items.map(badge => badge.label))
+        .toEqual(['Badge A'])
+      expect(rows[0]?.members.items.find(item => item.label === 'B')?.badges?.items.map(badge => badge.label))
+        .toEqual(['Badge B'])
     }, {
       graph,
       setup: async (database: DatabaseContext) => {
@@ -73,9 +95,17 @@ describe('batched collection execution', () => {
           { id: memberA, label: 'A', name: 'A' },
           { id: memberB, label: 'B', name: 'B' },
         ])
+        await database.create('Badge', [
+          { id: badgeA, label: 'Badge A', name: 'Badge A' },
+          { id: badgeB, label: 'Badge B', name: 'Badge B' },
+        ])
         await database.sql`
           INSERT INTO "GroupMember" ("group.id", "member.id", "quantity")
           VALUES (${group}, ${memberA}, 1), (${group}, ${memberB}, 2)
+        `
+        await database.sql`
+          INSERT INTO "MemberBadge" ("member.id", "badge.id")
+          VALUES (${memberA}, ${badgeA}), (${memberB}, ${badgeB})
         `
       },
     })

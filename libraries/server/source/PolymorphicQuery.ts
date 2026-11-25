@@ -2119,7 +2119,7 @@ class QueryProjection {
       node.context.baseAlias,
       collectionKey(node.path, spec.collection.name),
     )
-    if (node.path.length !== 0 || this.#collectionOptions(spec, plan).orderBy !== undefined) return false
+    if (this.#collectionOptions(spec, plan).orderBy !== undefined) return false
     if (plan.resultType === 'record') {
       return plan.collection.kind === 'explicit'
         && plan.relationshipAlias !== undefined
@@ -2365,6 +2365,20 @@ class QueryProjection {
     const rootWhere = this.#rootPredicate === undefined
       ? undefined
       : sqlConcat([' WHERE ', this.#rootPredicate], '')
+    const nested = node.path.length !== 0
+    let rootSelection: SqlFragment
+    if (nested) {
+      rootSelection = sqlConcat([
+        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
+        sqlText(`FROM ${this.relation(node.context.definition.name)} ${quote(rootAlias)}`),
+      ], '')
+    } else {
+      rootSelection = this.#rootSelection ?? sqlConcat([
+        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
+        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
+        rootWhere,
+      ], '')
+    }
     const collectionPredicate = plan.predicate === undefined
       ? undefined
       : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
@@ -2390,11 +2404,7 @@ class QueryProjection {
     this.#batchDefinitions.push(
       sqlConcat([
         sqlText(`${rootCte} AS MATERIALIZED (`),
-        this.#rootSelection ?? sqlConcat([
-          sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
-          sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
-          rootWhere,
-        ], ''),
+        rootSelection,
         sqlText(')'),
       ], ''),
       sqlConcat([

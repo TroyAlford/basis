@@ -162,7 +162,7 @@ describe('collection planning', () => {
     expect(values).toEqual([25, 0, 'One', 25, 0])
   })
 
-  test('does not expand nested resources for matched or total counts', () => {
+  test('batches nested counts without expanding nested resources', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
       fields: [
         'id',
@@ -173,11 +173,9 @@ describe('collection planning', () => {
         'printings.panels.art.name',
       ],
     })
-    const scopes = countSubqueries(sql)
-    expect(scopes.length).toBeGreaterThan(1)
-    for (const scope of scopes) {
-      expect(scope).not.toMatch(/"Card"|"Art"/)
-    }
+    expect(countSubqueries(sql)).toEqual([])
+    expect(sql.match(/batch_counts_/gu)?.length).toBeGreaterThan(1)
+    expect(sql).not.toContain('LEFT JOIN LATERAL')
   })
 
   test('keeps quantity on the collection edge', () => {
