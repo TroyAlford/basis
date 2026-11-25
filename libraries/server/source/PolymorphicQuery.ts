@@ -293,6 +293,13 @@ interface AuthorizedField {
   readonly field: EffectiveFieldDefinition,
 }
 
+/** Snapshot of authorized-relation planning state for atomic fallback. */
+interface AuthorizedRelationsSnapshot {
+  readonly excluded: ReadonlySet<string>,
+  readonly materialized: boolean,
+  readonly relations: ReadonlyMap<string, ReadonlyMap<string, AuthorizedField | null>>,
+}
+
 /**
  * Plan leaf-rooted authorized relations from Graph field requirements.
  *
@@ -309,6 +316,8 @@ class AuthorizedRelations {
   readonly #prefix: string
   /** Whether set-oriented flat plans materialize concrete relations. */
   #materialized = false
+  /** Root relations that must remain inline so filters can narrow them. */
+  readonly #excluded = new Set<string>()
 
   /**
    * Create one relation planner for a query compilation.
@@ -322,9 +331,36 @@ class AuthorizedRelations {
 
   /**
    * Materialize concrete authorized relations for a flat set plan.
+   * @param exclude - Relations that must remain inline for early filtering.
    */
-  materialize(): void {
+  materialize(exclude?: string | readonly string[]): void {
     this.#materialized = true
+    const names = typeof exclude === 'string' ? [exclude] : exclude ?? []
+    for (const name of names) this.#excluded.add(name)
+  }
+
+  /**
+   * Capture planning state before a flat candidate is attempted.
+   * @returns Restorable snapshot.
+   */
+  snapshot(): AuthorizedRelationsSnapshot {
+    return {
+      excluded: new Set(this.#excluded),
+      materialized: this.#materialized,
+      relations: new Map([...this.#relations].map(([name, fields]) => [name, new Map(fields)])),
+    }
+  }
+
+  /**
+   * Restore planning state after a rejected flat candidate.
+   * @param snapshot - State captured before the candidate.
+   */
+  restore(snapshot: AuthorizedRelationsSnapshot): void {
+    this.#excluded.clear()
+    for (const name of snapshot.excluded) this.#excluded.add(name)
+    this.#materialized = snapshot.materialized
+    this.#relations.clear()
+    for (const [name, fields] of snapshot.relations) this.#relations.set(name, new Map(fields))
   }
 
   /**
@@ -514,7 +550,9 @@ class AuthorizedRelations {
       return `${quote(ownerAlias)}.${quote(alias)} AS ${quote(alias)}`
     })
     const name = definition.name
-    const mode = this.#materialized ? 'MATERIALIZED' : 'NOT MATERIALIZED'
+    const mode = this.#materialized && !this.#excluded.has(name)
+      ? 'MATERIALIZED'
+      : 'NOT MATERIALIZED'
     return `${quote(`authorized_${this.#prefix}${name}`)} AS ${mode} (` +
       `SELECT ${projection.join(', ')} FROM ${quote(name)} ${quote('leaf')} ${joins.join(' ')})`
   }
@@ -772,8 +810,7 @@ class QueryProjection {
       throw new Error(`Collection "${plan.collection.name}" has no relationship source`)
     }
     const sourceSql = typeof parentSource === 'string' ? parentSource : parentSource.sql
-    const key = `${sourceSql}\u0000${relationship.name}\u0000${plan.condition}\u0000` +
-      `${plan.predicate?.sql ?? ''}`
+    const key = `${sourceSql}\u0000${relationship.name}\u0000${plan.predicate?.sql ?? ''}`
     const cached = this.#shared.sources.get(key)
     if (cached !== undefined) return cached
     const name = this.#nextBatchCte('source')
@@ -2613,7 +2650,10 @@ class QueryProjection {
     } catch {
       return false
     }
-    this.#relations.materialize()
+    this.#relations.materialize([this.root.definition.name, plan.target.name])
+    const workStart = this.#work
+    const relationsSnapshot = this.#relations.snapshot()
+    const sourcesSnapshot = new Map(this.#shared.sources)
     this.#consume(plan.work)
     const roots = this.#ensureBatchRootSelection()
     const parentSource = node.path.length === 0
@@ -2704,6 +2744,26 @@ class QueryProjection {
         sqlText(`FROM ${baseCte} GROUP BY ${quote('__parent_id')}, ${quote('__item_id')})`),
       ], ''))
     }
+    const scopeCte = quote(`flat_scope_${suffix}`)
+    const scopeNeeded = filterPredicate !== undefined || limit !== null || offset > 0
+    if (scopeNeeded) {
+      const scopePage = limit === null
+        ? `${quote('__ordinal')} > ${offset}`
+        : `${quote('__ordinal')} > ${offset} AND ` +
+          `${quote('__ordinal')} <= ${offset + limit}`
+      this.#batchDefinitions.push(sqlConcat([
+        sqlText(`${scopeCte} AS MATERIALIZED (`),
+        sqlText('SELECT * FROM ('),
+        sqlText(`SELECT ${baseCte}.*, row_number() OVER (` +
+          `PARTITION BY ${baseCte}.${quote('__parent_id')} ` +
+          `ORDER BY ${baseCte}.${quote('__item_id')}) AS ${quote('__ordinal')} `),
+        sqlText(`FROM ${baseCte} `),
+        filterPredicate === undefined
+          ? undefined
+          : sqlText(`WHERE ${quote('__batch_filter')} IS TRUE `),
+        sqlText(`) AS ${quote('__scope')} WHERE ${scopePage})`),
+      ], ''))
+    }
 
     const childRoot = this.#nextAlias('fi')
     const child = new QueryProjection(
@@ -2714,7 +2774,7 @@ class QueryProjection {
       `${childRoot}_`,
       `${this.#relationPrefix}flat_`,
       this.#shared,
-      baseCte,
+      scopeNeeded ? scopeCte : baseCte,
       targetContext(this.#entities, plan.target, childRoot, childRoot),
     )
     let hydrateItem: (row: Record<string, unknown>) => Record<string, unknown>
@@ -2729,6 +2789,10 @@ class QueryProjection {
       this.#batchDefinitions.splice(definitionStart)
       this.#shared.cte = cteStart
       this.#shared.alias = aliasStart
+      this.#work = workStart
+      this.#relations.restore(relationsSnapshot)
+      this.#shared.sources.clear()
+      for (const [name, source] of sourcesSnapshot) this.#shared.sources.set(name, source)
       return false
     }
     const rowColumns = sqlConcat([
@@ -2808,7 +2872,7 @@ class QueryProjection {
     } catch {
       return false
     }
-    this.#relations.materialize()
+    this.#relations.materialize([this.root.definition.name, plan.target.name])
     this.#consume(plan.work)
     const selectedNames = [...new Set([...fields, ...identity])]
     const selected = selectedNames
