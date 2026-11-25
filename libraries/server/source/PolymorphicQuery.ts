@@ -537,6 +537,8 @@ class QueryProjection {
   readonly #batchDefinitions: SqlFragment[] = []
   /** Root predicate used to scope batched collection roots. */
   #rootPredicate?: SqlFragment
+  /** Complete selected-root query reused by batched collection CTEs. */
+  #rootSelection?: SqlFragment
   /** Next generated table alias number. */
   #alias = 0
   /** Filter-only expression overrides keyed by logical path. */
@@ -694,6 +696,14 @@ class QueryProjection {
    */
   relationDefinitions(): string[] {
     return this.#relations.definitions()
+  }
+
+  /**
+   * Store the complete selected-root query for batched collection CTEs.
+   * @param selection - Root identity query including filters, ordering and pagination.
+   */
+  setRootSelection(selection: SqlFragment): void {
+    this.#rootSelection = selection
   }
 
   /**
@@ -2066,6 +2076,30 @@ class QueryProjection {
   }
 
   /**
+   * Resolve the effective collection directives shared by batch and fallback paths.
+   * @param spec - Requested collection projection.
+   * @param plan - Canonical collection relation plan.
+   * @returns Effective limit, offset, and ordering.
+   */
+  #collectionOptions(
+    spec: ProjectedCollectionSpec,
+    plan: CollectionRelationPlan,
+  ): { readonly limit: number | null, readonly offset: number, readonly orderBy?: OrderBy } {
+    const authored = plan.collection.kind === 'explicit' ? plan.collection : undefined
+    return {
+      limit: spec.limit !== undefined
+        ? spec.limit
+        : authored?.viaLimit !== undefined ? authored.viaLimit : 3,
+      offset: spec.offset !== undefined
+        ? spec.offset
+        : authored?.viaOffset !== undefined ? authored.viaOffset : 0,
+      ...(spec.orderBy ?? authored?.viaOrderBy) === undefined
+        ? {}
+        : { orderBy: spec.orderBy ?? authored?.viaOrderBy },
+    }
+  }
+
+  /**
    * Whether one root collection can use the set-oriented batch plan.
    *
    * This remains conservative: it rejects explicit ordering and unsupported
@@ -2077,12 +2111,12 @@ class QueryProjection {
    * @returns `true` when the collection has the proven simple batch shape.
    */
   #canBatchCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
-    if (node.path.length !== 0 || spec.orderBy !== undefined) return false
     const plan = this.#collectionPlan(
       spec.collection,
       node.context.baseAlias,
       collectionKey(node.path, spec.collection.name),
     )
+    if (node.path.length !== 0 || this.#collectionOptions(spec, plan).orderBy !== undefined) return false
     if (plan.resultType === 'record') {
       return plan.collection.kind === 'explicit'
         && plan.relationshipAlias !== undefined
@@ -2111,8 +2145,8 @@ class QueryProjection {
       || plan.relationship === undefined
       || plan.relationshipAlias === undefined) return false
     this.#consume(plan.work)
-    const limit = spec.limit === undefined ? 3 : spec.limit
-    const offset = spec.offset ?? 0
+    const options = this.#collectionOptions(spec, plan)
+    const { limit, offset } = options
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     let fields: readonly string[]
@@ -2174,9 +2208,11 @@ class QueryProjection {
     this.#batchDefinitions.push(
       sqlConcat([
         sqlText(`${rootCte} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
-        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
-        rootWhere,
+        this.#rootSelection ?? sqlConcat([
+          sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
+          sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
+          rootWhere,
+        ], ''),
         sqlText(')'),
       ], ''),
       rowsDefinition(rowsAllCte, false),
@@ -2259,8 +2295,8 @@ class QueryProjection {
     if (plan.resultType === 'record') return this.#addBatchedRecordCollection(node, spec, plan)
     if (plan.targetAlias === undefined) return false
     this.#consume(plan.work)
-    const limit = spec.limit === undefined ? 3 : spec.limit
-    const offset = spec.offset ?? 0
+    const options = this.#collectionOptions(spec, plan)
+    const { limit, offset } = options
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
@@ -2332,9 +2368,11 @@ class QueryProjection {
     this.#batchDefinitions.push(
       sqlConcat([
         sqlText(`${rootCte} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
-        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
-        rootWhere,
+        this.#rootSelection ?? sqlConcat([
+          sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
+          sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
+          rootWhere,
+        ], ''),
         sqlText(')'),
       ], ''),
       rowsDefinition(rowsAllCte, allSql),
@@ -2421,20 +2459,14 @@ class QueryProjection {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)
-    const authored = plan.collection.kind === 'explicit' ? plan.collection : undefined
-    const limit = spec.limit !== undefined
-      ? spec.limit
-      : authored?.viaLimit !== undefined ? authored.viaLimit : 3
+    const options = this.#collectionOptions(spec, plan)
+    const { limit, offset, orderBy } = options
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
     }
-    const offset = spec.offset !== undefined
-      ? spec.offset
-      : authored?.viaOffset !== undefined ? authored.viaOffset : 0
     if (!Number.isInteger(offset) || offset < 0) {
       throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
     }
-    const orderBy = spec.orderBy ?? authored?.viaOrderBy
     const effective: ProjectedCollectionSpec = {
       ...spec,
       limit,
@@ -3056,20 +3088,6 @@ export function compilePolymorphicQuery(
       `${projection.root.baseAlias}."id" ASC`
   }
   const rawValues = options.rawWhere?.values ?? []
-  const hydrate = projection.build(
-    options.fields,
-    predicate.values.length + rawValues.length + 1,
-    predicate.sql === '' ? undefined : predicate as SqlFragment,
-  )
-  const rootRelation = projection.relation(definition.name)
-  const relationDefinitions = [
-    ...projection.relationDefinitions().map(relation => sqlText(relation)),
-    ...projection.batchDefinitions(),
-  ]
-  const relationSql = relationDefinitions.length === 0
-    ? undefined
-    : sqlConcat(relationDefinitions, ', ')
-
   const leaves = definition.abstract
     ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
     : []
@@ -3087,6 +3105,28 @@ export function compilePolymorphicQuery(
       : sqlFragment`WHERE ${sqlConcat(conditions.map(condition => sqlFragment`(${condition})`), ' AND ')}`
   const limit = options.limit === undefined ? 25 : options.limit
   const pagination = SQL.paginate(limit, options.offset ?? 0)
+  const rootRelation = projection.relation(definition.name)
+  const rootSelection = sqlConcat([
+    sqlText(`SELECT ${quote(projection.root.baseAlias)}.${quote('id')} AS ${quote('id')}`),
+    sqlText(` FROM ${rootRelation} ${quote(projection.root.baseAlias)}`),
+    ...projection.joins,
+    whereSql,
+    sqlText(ordering),
+    pagination,
+  ])
+  projection.setRootSelection(rootSelection)
+  const hydrate = projection.build(
+    options.fields,
+    predicate.values.length + rawValues.length + 1,
+    predicate.sql === '' ? undefined : predicate as SqlFragment,
+  )
+  const relationDefinitions = [
+    ...projection.relationDefinitions().map(relation => sqlText(relation)),
+    ...projection.batchDefinitions(),
+  ]
+  const relationSql = relationDefinitions.length === 0
+    ? undefined
+    : sqlConcat(relationDefinitions, ', ')
   const query = sqlConcat([
     relationSql === undefined ? sqlText('') : sqlConcat([sqlText('WITH '), relationSql], ''),
     sqlFragment`SELECT ${sqlConcat(projection.columns, ', ')}`,

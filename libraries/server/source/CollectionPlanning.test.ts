@@ -159,7 +159,7 @@ describe('collection planning', () => {
     expect(sql).toContain('"__matched"')
     expect(sql).toContain('"__ordinal" > 1')
     expect(sql).toContain('"__ordinal" <= 3')
-    expect(values).toEqual(['One', 25, 0])
+    expect(values).toEqual([25, 0, 'One', 25, 0])
   })
 
   test('does not expand nested resources for matched or total counts', () => {
@@ -205,7 +205,7 @@ describe('collection planning', () => {
     })
     expect(compiled.sql).toContain('"title"')
     expect(compiled.sql).toContain('"enabled"')
-    expect(compiled.values).toEqual([true, 'A', true, 25, 0])
+    expect(compiled.values).toEqual([true, 25, 0, 'A', true, 25, 0])
     expect(countSubqueries(compiled.sql).every(scope => (
       !scope.includes('"Card"') && !scope.includes('"Face"')
     ))).toBe(true)
@@ -299,23 +299,24 @@ describe('chosen collection compilation', () => {
       'WITH "authorized_CollectionRoot" AS NOT MATERIALIZED (SELECT "root"."id" AS "id" FROM "CollectionRoo',
       't" "leaf" JOIN "Entity" "root" ON "root"."id" = "leaf"."id"), "authorized_CollectionItem" AS NOT MAT',
       'ERIALIZED (SELECT "root"."id" AS "id", NULL AS "root.id" FROM "CollectionItem" "leaf" JOIN "Entity" ',
-      '"root" ON "root"."id" = "leaf"."id"), "batch_roots_bg5" AS MATERIALIZED (SELECT "t"."id" AS "id" FRO',
-      'M "authorized_CollectionRoot" "t"), "batch_rows_all_bg5" AS MATERIALIZED (SELECT "cj3"."root.id" AS ',
-      '"__parent_id", "__child".* FROM "RootItem" "cj3" JOIN "authorized_CollectionItem" "ct1" ON "ct1"."id',
-      '" = "cj3"."item.id" JOIN "batch_roots_bg5" "t" ON TRUE JOIN (WITH "authorized_batch_CollectionItem" ',
-      'AS NOT MATERIALIZED (SELECT "root"."entity" AS "entity", "root"."id" AS "id", "leaf"."label" AS "lab',
-      'el", "root"."name" AS "name" FROM "CollectionItem" "leaf" JOIN "Entity" "root" ON "root"."id" = "lea',
-      'f"."id") SELECT b4."id" AS "id", b4."name" AS "name", b4."entity" AS "entity", b4."label" AS "label"',
-      ' FROM "authorized_batch_CollectionItem" "b4"  ) AS "__child" ON "__child"."id" = "ct1"."id" WHERE "c',
-      'j3"."root.id" = "t"."id"), "batch_counts_bg5" AS MATERIALIZED (SELECT "__parent_id", count(*)::int A',
-      'S "__total" FROM "batch_rows_all_bg5" GROUP BY "__parent_id"), "batch_items_bg5" AS MATERIALIZED (SE',
-      'LECT "__parent_id", COALESCE(json_agg(row_to_json("__item") ORDER BY "__item"."__ordinal") FILTER (W',
-      'HERE "__ordinal" > 0), \'[]\'::json) AS "__items", count(*)::int AS "__matched" FROM (SELECT row_numbe',
-      'r() OVER (PARTITION BY "__parent_id" ORDER BY "__child"."id") AS "__ordinal", "__child".* FROM "batc',
-      'h_rows_all_bg5" AS "__child") AS "__item" GROUP BY "__parent_id") SELECT t."id" AS "id", "bc6"."__it',
-      'ems" AS "items", "bc6"."__matched" AS "items__matched", "bn7"."__total" AS "items__total" FROM "auth',
-      'orized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "bc6"."__parent_id" = "t"."id" LEFT ',
-      'JOIN "batch_counts_bg5" "bn7" ON "bn7"."__parent_id" = "t"."id"   LIMIT $1 OFFSET $2',
+      '"root" ON "root"."id" = "leaf"."id"), "batch_roots_bg5" AS MATERIALIZED (SELECT "t"."id" AS "id"  FR',
+      'OM "authorized_CollectionRoot" "t"   LIMIT $1 OFFSET $2), "batch_rows_all_bg5" AS MATERIALIZED (SELE',
+      'CT "cj3"."root.id" AS "__parent_id", "__child".* FROM "RootItem" "cj3" JOIN "authorized_CollectionIt',
+      'em" "ct1" ON "ct1"."id" = "cj3"."item.id" JOIN "batch_roots_bg5" "t" ON TRUE JOIN (WITH "authorized_',
+      'batch_CollectionItem" AS NOT MATERIALIZED (SELECT "root"."entity" AS "entity", "root"."id" AS "id", ',
+      '"leaf"."label" AS "label", "root"."name" AS "name" FROM "CollectionItem" "leaf" JOIN "Entity" "root"',
+      ' ON "root"."id" = "leaf"."id") SELECT b4."id" AS "id", b4."name" AS "name", b4."entity" AS "entity",',
+      ' b4."label" AS "label" FROM "authorized_batch_CollectionItem" "b4"  ) AS "__child" ON "__child"."id"',
+      ' = "ct1"."id" WHERE "cj3"."root.id" = "t"."id"), "batch_counts_bg5" AS MATERIALIZED (SELECT "__paren',
+      't_id", count(*)::int AS "__total" FROM "batch_rows_all_bg5" GROUP BY "__parent_id"), "batch_items_bg',
+      '5" AS MATERIALIZED (SELECT "__parent_id", COALESCE(json_agg(row_to_json("__item") ORDER BY "__item".',
+      '"__ordinal") FILTER (WHERE "__ordinal" > 0), \'[]\'::json) AS "__items", count(*)::int AS "__matched" ',
+      'FROM (SELECT row_number() OVER (PARTITION BY "__parent_id" ORDER BY "__child"."id") AS "__ordinal", ',
+      '"__child".* FROM "batch_rows_all_bg5" AS "__child") AS "__item" GROUP BY "__parent_id") SELECT t."id',
+      '" AS "id", "bc6"."__items" AS "items", "bc6"."__matched" AS "items__matched", "bn7"."__total" AS "it',
+      'ems__total" FROM "authorized_CollectionRoot" "t" LEFT JOIN "batch_items_bg5" "bc6" ON "bc6"."__paren',
+      't_id" = "t"."id" LEFT JOIN "batch_counts_bg5" "bn7" ON "bn7"."__parent_id" = "t"."id"   LIMIT $3 OFF',
+      'SET $4',
     ].join('')
     expect(sql).toMatchIndented(expectedBatch)
 
@@ -325,10 +326,11 @@ describe('chosen collection compilation', () => {
     })
     expect(scoped.sql).toContain(
       '"batch_roots_bg5" AS MATERIALIZED (SELECT "t"."id" AS "id" ' +
-      'FROM "authorized_CollectionRoot" "t" WHERE t."label" IS NOT DISTINCT FROM $1)',
+      ' FROM "authorized_CollectionRoot" "t" WHERE t."label" IS NOT DISTINCT FROM $1 ' +
+      ' LIMIT $2 OFFSET $3)',
     )
-    expect(scoped.sql).toContain('WHERE t."label" IS NOT DISTINCT FROM $2')
-    expect(scoped.values).toEqual(['One', 'One', 25, 0])
+    expect(scoped.sql).toContain('WHERE t."label" IS NOT DISTINCT FROM $4  LIMIT $5 OFFSET $6')
+    expect(scoped.values).toEqual(['One', 25, 0, 'One', 25, 0])
 
     const edge = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
       fields: ['id', 'items{$limit:null}', 'items.label', 'items.quantity'],
