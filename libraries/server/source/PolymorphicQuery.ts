@@ -533,6 +533,8 @@ class QueryProjection {
   readonly #entities: EntityDefinitions
   /** Authorized relation requirements and their CTE definitions. */
   readonly #relations: AuthorizedRelations
+  /** Batched collection CTE definitions emitted after authorized relations. */
+  readonly #batchDefinitions: string[] = []
   /** Next generated table alias number. */
   #alias = 0
   /** Filter-only expression overrides keyed by logical path. */
@@ -624,7 +626,11 @@ class QueryProjection {
       for (const reference of node.references) nodes.push(...reference.nodes)
     }
     for (const node of nodes) {
-      for (const spec of node.projectedSpecs.values()) this.#addProjectedCollection(node, spec)
+      for (const spec of node.projectedSpecs.values()) {
+        if (!this.#canBatchCollection(node, spec) || !this.#addBatchedCollection(node, spec)) {
+          this.#addProjectedCollection(node, spec)
+        }
+      }
     }
     return row => hydrateRoot(row, root)
   }
@@ -683,6 +689,14 @@ class QueryProjection {
    */
   relationDefinitions(): string[] {
     return this.#relations.definitions()
+  }
+
+  /**
+   * Emit batched collection CTE definitions.
+   * @returns Ordered batch CTE definitions.
+   */
+  batchDefinitions(): string[] {
+    return [...this.#batchDefinitions]
   }
 
   /**
@@ -2047,6 +2061,120 @@ class QueryProjection {
   }
 
   /**
+   * Whether one root collection can use the set-oriented batch plan.
+   *
+   * This is intentionally conservative while the compiler develops: it
+   * accepts only unfiltered root collections with direct scalar target
+   * fields, no relationship-owned projection, and no target pagination.
+   * Unsupported shapes continue through the established correlated path.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested target fields.
+   * @returns `true` when the collection has the proven simple batch shape.
+   */
+  #canBatchCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
+    if (node.path.length !== 0 || spec.limit !== null || spec.offset !== undefined) return false
+    if (spec.filters.size !== 0 || spec.edgeFields.size !== 0) return false
+    if ([...spec.fields].some(field => field.includes('.') || field.includes('{'))) return false
+    const plan = this.#collectionPlan(
+      spec.collection,
+      node.context.baseAlias,
+      collectionKey(node.path, spec.collection.name),
+    )
+    return plan.resultType === 'entity'
+      && plan.collection.kind === 'explicit'
+      && plan.relationshipAlias !== undefined
+      && plan.targetAlias !== undefined
+  }
+
+  /**
+   * Add one root collection as a shared relational batch.
+   *
+   * All roots are scoped once, member rows are joined to their owning root,
+   * and the per-parent JSON envelope is assembled once. This removes the
+   * lateral member query and its repeated matched-count query for the simple
+   * shape the planner can prove here.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested target fields.
+   * @returns Whether the batch plan was emitted.
+   */
+  #addBatchedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
+    const key = collectionKey(node.path, spec.collection.name)
+    const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
+    if (plan.collection.kind !== 'explicit'
+      || plan.targetAlias === undefined
+      || plan.relationshipAlias === undefined) return false
+    this.#consume(plan.work)
+    const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
+    const childAlias = this.#nextAlias('b')
+    const child = compilePolymorphicQuery(this.#entities, plan.target, {
+      aliasPrefix: `${childAlias}_`,
+      fields,
+      limit: null,
+      offset: 0,
+      relationPrefix: `${this.#relationPrefix}batch_`,
+      rootAlias: childAlias,
+    })
+    if (child.values.length !== 0 || child.sql.includes('LEFT JOIN LATERAL')) return false
+    const suffix = this.#nextAlias('bg')
+    const rootCte = quote(`batch_roots_${suffix}`)
+    const rowsCte = quote(`batch_rows_${suffix}`)
+    const itemsCte = quote(`batch_items_${suffix}`)
+    const rootAlias = node.context.baseAlias
+    const owner = plan.collection.ownerEndpoint.field
+    const parentId = `${quote(plan.relationshipAlias)}.${quote(`${owner}.id`)}`
+    this.#batchDefinitions.push(
+      `${rootCte} AS MATERIALIZED (` +
+        `SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} ` +
+        `FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)})`,
+      `${rowsCte} AS MATERIALIZED (` +
+        `SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.* ` +
+        `FROM ${plan.relation} ` +
+        `JOIN ${rootCte} ${quote(rootAlias)} ON TRUE ` +
+        `JOIN (${child.sql}) AS ${quote('__child')} ` +
+        `ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} ` +
+        `WHERE ${plan.condition})`,
+      `${itemsCte} AS MATERIALIZED (` +
+        `SELECT ${quote('__parent_id')}, ` +
+        `json_agg(row_to_json(${quote('__item')}) ORDER BY ${quote('__item')}.${quote('id')}) ` +
+        `AS ${quote('__items')}, ` +
+        `count(*)::int AS ${quote('__matched')} ` +
+        `FROM ${rowsCte} AS ${quote('__item')} GROUP BY ${quote('__parent_id')})`,
+    )
+    const alias = columnAlias(node.path, spec.collection.name)
+    const matchedAlias = `${alias}__matched`
+    const joinAlias = this.#nextAlias('bc')
+    this.joins.push(sqlText(
+      `LEFT JOIN ${itemsCte} ${quote(joinAlias)} ` +
+      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
+    ))
+    this.columns.push(sqlText(
+      `${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`,
+    ))
+    this.columns.push(sqlText(
+      `${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
+    ))
+    node.projectedCollections.push({
+      alias,
+      hydrate: row => {
+        const raw = row[alias]
+        const entries = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string' ? JSON.parse(raw) as unknown[] : []
+        const matchedTotal = Number(row[matchedAlias] ?? 0)
+        return {
+          $matched: matchedTotal,
+          $total: matchedTotal,
+          items: entries.map(entry => child.hydrate(entry as Record<string, unknown>)),
+        }
+      },
+      matchedAlias,
+      name: spec.collection.name,
+      totalAlias: matchedAlias,
+    })
+    return true
+  }
+
+  /**
    * Add one projected collection as a correlated child query.
    *
    * Entity-projected and relationship-record collections share the same
@@ -2696,7 +2824,10 @@ export function compilePolymorphicQuery(
   const rawValues = options.rawWhere?.values ?? []
   const hydrate = projection.build(options.fields, predicate.values.length + rawValues.length + 1)
   const rootRelation = projection.relation(definition.name)
-  const relationDefinitions = projection.relationDefinitions()
+  const relationDefinitions = [
+    ...projection.relationDefinitions(),
+    ...projection.batchDefinitions(),
+  ]
 
   const leaves = definition.abstract
     ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
