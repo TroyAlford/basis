@@ -338,6 +338,14 @@ describe('flattened collection compilation', () => {
     ].join(''))
   })
 
+  test('falls back without leaking a discarded flat source', () => {
+    const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
+      fields: ['id', 'printings{$orderBy:title}', 'printings.title'],
+    })
+    expect(sql).not.toContain('flat_scope_')
+    expect(sql).toContain('LEFT JOIN LATERAL')
+  })
+
   test('shares one relationship source across sibling collections', () => {
     const shared = new Graph({
       entities: [
