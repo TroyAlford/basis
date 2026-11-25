@@ -239,6 +239,8 @@ interface CollectionRelationPlan {
   readonly collection: DerivedCollectionDefinition,
   /** Correlated condition against the owning occurrence, including authored predicates. */
   readonly condition: string,
+  /** SQL expression for the owning parent identity. */
+  readonly ownerId?: string,
   /** Alias of the owning occurrence. */
   readonly parentAlias: string,
   /** Authored source predicate, when the collection declares one. */
@@ -1172,6 +1174,7 @@ class QueryProjection {
     const plan: CollectionRelationPlan = {
       collection,
       condition: sql.condition,
+      ownerId: sql.ownerId,
       parentAlias,
       relation: sql.relation,
       resultType: sql.resultType,
@@ -2123,10 +2126,10 @@ class QueryProjection {
         && spec.edgeFields.size === 0
     }
     return plan.resultType === 'entity'
-      && plan.collection.kind === 'explicit'
-      && plan.relationshipAlias !== undefined
+      && plan.ownerId !== undefined
       && plan.targetAlias !== undefined
-      && (spec.edgeFields.size === 0 || this.#edgeProjectionAllowed(plan))
+      && (spec.edgeFields.size === 0
+        || (plan.collection.kind === 'explicit' && this.#edgeProjectionAllowed(plan)))
   }
 
   /**
@@ -2143,7 +2146,8 @@ class QueryProjection {
   ): boolean {
     if (plan.collection.kind !== 'explicit'
       || plan.relationship === undefined
-      || plan.relationshipAlias === undefined) return false
+      || plan.relationshipAlias === undefined
+      || plan.ownerId === undefined) return false
     this.#consume(plan.work)
     const options = this.#collectionOptions(spec, plan)
     const { limit, offset } = options
@@ -2176,8 +2180,7 @@ class QueryProjection {
     const countsCte = quote(`batch_counts_${suffix}`)
     const itemsCte = quote(`batch_items_${suffix}`)
     const rootAlias = node.context.baseAlias
-    const owner = plan.collection.ownerEndpoint.field
-    const parentId = `${quote(plan.relationshipAlias)}.${quote(`${owner}.id`)}`
+    const parentId = plan.ownerId
     const rootWhere = this.#rootPredicate === undefined
       ? undefined
       : sqlConcat([' WHERE ', this.#rootPredicate], '')
@@ -2290,10 +2293,8 @@ class QueryProjection {
   #addBatchedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
-    if (plan.collection.kind !== 'explicit'
-      || plan.relationshipAlias === undefined) return false
     if (plan.resultType === 'record') return this.#addBatchedRecordCollection(node, spec, plan)
-    if (plan.targetAlias === undefined) return false
+    if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
     this.#consume(plan.work)
     const options = this.#collectionOptions(spec, plan)
     const { limit, offset } = options
@@ -2343,8 +2344,7 @@ class QueryProjection {
     const countsCte = quote(`batch_counts_${suffix}`)
     const itemsCte = quote(`batch_items_${suffix}`)
     const rootAlias = node.context.baseAlias
-    const owner = plan.collection.ownerEndpoint.field
-    const parentId = `${quote(plan.relationshipAlias)}.${quote(`${owner}.id`)}`
+    const parentId = plan.ownerId
     const rootWhere = this.#rootPredicate === undefined
       ? undefined
       : sqlConcat([' WHERE ', this.#rootPredicate], '')

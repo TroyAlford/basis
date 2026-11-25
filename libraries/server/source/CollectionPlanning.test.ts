@@ -220,6 +220,14 @@ describe('collection planning', () => {
     expect(exists.sql).not.toContain('faces')
   })
 
+  test('batches an inverse collection without a relationship table', () => {
+    const inverse = compileEntityQuery(graph.definitions, 'Printing', {
+      fields: ['id', 'panels{$limit:null}', 'panels.art.name'],
+    })
+    expect(inverse.sql).toContain('batch_rows_all_')
+    expect(inverse.sql).not.toContain('LEFT JOIN LATERAL')
+  })
+
   test('count and item outputs remain deterministic', () => {
     const options = {
       fields,
