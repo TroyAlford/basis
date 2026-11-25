@@ -25,18 +25,18 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor | statement | rows | direct median | direct range | EXPLAIN | plan | shared hits |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| owner | pre-#364 | 106 | 314.7 ms | 307.7–321.7 | 290.3 ms | 26.7 ms | 20,365 |
-| owner | #364 previous | 106 | 140.4 ms | 138.8–147.7 | 163.6 ms | 25.9 ms | 9,061 |
-| owner | #364 current | 106 | 121.1 ms | 116.1–121.9 | 153.4 ms | 24.5 ms | 7,780 |
-| owner | N7 | 106 | 49.0 ms | 47.5–51.1 | 50.0 ms | 6.7 ms | 1,703 |
-| editor | pre-#364 | 106 | 474.0 ms | 442.0–497.2 | 423.4 ms | 25.6 ms | 39,647 |
-| editor | #364 previous | 106 | 273.9 ms | 257.9–279.7 | 239.2 ms | 23.5 ms | 22,284 |
-| editor | #364 current | 106 | 197.5 ms | 187.6–203.2 | 210.3 ms | 23.4 ms | 18,564 |
-| editor | N7 | 106 | 84.6 ms | 81.2–87.2 | 69.6 ms | 6.0 ms | 4,241 |
-| viewer | pre-#364 | 106 | 424.1 ms | 409.7–428.2 | 393.1 ms | 28.1 ms | 40,879 |
-| viewer | #364 previous | 106 | 247.9 ms | 243.9–260.9 | 265.6 ms | 23.9 ms | 23,123 |
-| viewer | #364 current | 106 | 199.3 ms | 197.7–204.2 | 200.6 ms | 23.1 ms | 19,193 |
-| viewer | N7 | 106 | 75.1 ms | 71.7–76.2 | 73.0 ms | 5.9 ms | 4,444 |
+| owner | pre-#364 | 106 | 309.9 ms | 308.5–333.2 | 284.6 ms | 26.5 ms | 20,365 |
+| owner | #364 previous | 106 | 147.3 ms | 145.2–148.1 | 165.0 ms | 24.6 ms | 9,061 |
+| owner | #364 current | 106 | 109.2 ms | 108.4–110.5 | 113.4 ms | 18.0 ms | 6,446 |
+| owner | N7 | 106 | 49.1 ms | 48.4–53.5 | 51.2 ms | 6.6 ms | 1,703 |
+| editor | pre-#364 | 106 | 456.1 ms | 450.5–483.5 | 446.3 ms | 27.5 ms | 39,647 |
+| editor | #364 previous | 106 | 296.8 ms | 285.2–303.1 | 272.7 ms | 24.3 ms | 22,284 |
+| editor | #364 current | 106 | 214.5 ms | 190.0–223.2 | 189.6 ms | 17.8 ms | 15,917 |
+| editor | N7 | 106 | 92.0 ms | 85.1–94.1 | 71.3 ms | 6.2 ms | 4,241 |
+| viewer | pre-#364 | 106 | 427.7 ms | 417.1–500.1 | 404.5 ms | 26.7 ms | 40,879 |
+| viewer | #364 previous | 106 | 276.5 ms | 272.9–284.6 | 306.3 ms | 23.8 ms | 23,123 |
+| viewer | #364 current | 106 | 192.1 ms | 189.9–198.6 | 209.1 ms | 17.9 ms | 16,546 |
+| viewer | N7 | 106 | 80.8 ms | 79.1–82.4 | 81.5 ms | 6.3 ms | 4,444 |
 
 The changed nested scope reduced shared-buffer work for all three actors and reduced direct latency for owner, editor, and viewer relative to the previous #364 compiler. N7 remains substantially faster; this PR does not claim N7 parity.
 
