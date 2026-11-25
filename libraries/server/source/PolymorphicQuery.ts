@@ -10,7 +10,7 @@ import { arrayItemField, Predicate } from './Predicate'
 import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope, SqlFragment, SQLPredicate } from './SQL'
-import { SQL, sqlConcat, sqlFragment, sqlText } from './SQL'
+import { SQL, sqlConcat, sqlFragment, sqlText, sqlValue } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
 const MAX_REFERENCE_DEPTH = 8
@@ -2077,9 +2077,7 @@ class QueryProjection {
    * @returns `true` when the collection has the proven simple batch shape.
    */
   #canBatchCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
-    if (node.path.length !== 0 || spec.limit !== null || spec.offset !== undefined) return false
-    if (spec.filters.size !== 0 || spec.edgeFields.size !== 0) return false
-    if ([...spec.fields].some(field => field.includes('.') || field.includes('{'))) return false
+    if (node.path.length !== 0 || spec.orderBy !== undefined || spec.edgeFields.size !== 0) return false
     const plan = this.#collectionPlan(
       spec.collection,
       node.context.baseAlias,
@@ -2109,20 +2107,51 @@ class QueryProjection {
       || plan.targetAlias === undefined
       || plan.relationshipAlias === undefined) return false
     this.#consume(plan.work)
+    const limit = spec.limit === undefined ? 3 : spec.limit
+    const offset = spec.offset ?? 0
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
+    if (!Number.isInteger(offset) || offset < 0) return false
     const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
+    const filter = spec.filters.size === 0
+      ? undefined
+      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const childAlias = this.#nextAlias('b')
-    const child = compilePolymorphicQuery(this.#entities, plan.target, {
-      aliasPrefix: `${childAlias}_`,
-      fields,
-      limit: null,
-      offset: 0,
-      relationPrefix: `${this.#relationPrefix}batch_`,
-      rootAlias: childAlias,
-    })
-    if (child.values.length !== 0 || child.sql.includes('LEFT JOIN LATERAL')) return false
+    let childAll: CompiledPolymorphicQuery
+    let childFiltered: CompiledPolymorphicQuery
+    try {
+      childAll = compilePolymorphicQuery(this.#entities, plan.target, {
+        aliasPrefix: `${childAlias}_`,
+        fields,
+        limit: null,
+        offset: 0,
+        relationPrefix: `${this.#relationPrefix}batch_`,
+        rootAlias: childAlias,
+      })
+      if (filter === undefined) {
+        childFiltered = childAll
+      } else {
+        childFiltered = compilePolymorphicQuery(this.#entities, plan.target, {
+          aliasPrefix: `${childAlias}_`,
+          fields,
+          limit: null,
+          offset: 0,
+          relationPrefix: `${this.#relationPrefix}batch_`,
+          rootAlias: childAlias,
+          where: filter,
+        })
+      }
+    } catch {
+      return false
+    }
+    const allSql = compiledFragment(childAll)
+    const filteredSql = filter === undefined ? allSql : compiledFragment(childFiltered)
     const suffix = this.#nextAlias('bg')
+    const itemAlias = quote('__item')
+    const ordinalAlias = quote('__ordinal')
     const rootCte = quote(`batch_roots_${suffix}`)
-    const rowsCte = quote(`batch_rows_${suffix}`)
+    const rowsAllCte = quote(`batch_rows_all_${suffix}`)
+    const rowsFilteredCte = quote(`batch_rows_filtered_${suffix}`)
+    const countsCte = quote(`batch_counts_${suffix}`)
     const itemsCte = quote(`batch_items_${suffix}`)
     const rootAlias = node.context.baseAlias
     const owner = plan.collection.ownerEndpoint.field
@@ -2130,6 +2159,19 @@ class QueryProjection {
     const rootWhere = this.#rootPredicate === undefined
       ? undefined
       : sqlConcat([' WHERE ', this.#rootPredicate], '')
+    const rowsDefinition = (name: string, child: SqlFragment): SqlFragment => sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.* `),
+      sqlText(`FROM ${plan.relation} `),
+      sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
+      sqlConcat([sqlText('JOIN ('), child, sqlText(`) AS ${quote('__child')} `)], ''),
+      sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
+      sqlText(`WHERE ${plan.condition})`),
+    ], '')
+    const page = limit === null
+      ? `${quote('__ordinal')} > ${offset}`
+      : `${quote('__ordinal')} > ${offset} AND ` +
+        `${quote('__ordinal')} <= ${offset + limit}`
     this.#batchDefinitions.push(
       sqlConcat([
         sqlText(`${rootCte} AS MATERIALIZED (`),
@@ -2138,36 +2180,47 @@ class QueryProjection {
         rootWhere,
         sqlText(')'),
       ], ''),
+      rowsDefinition(rowsAllCte, allSql),
+      ...(filter === undefined ? [] : [rowsDefinition(rowsFilteredCte, filteredSql)]),
       sqlConcat([
-        sqlText(`${rowsCte} AS MATERIALIZED (`),
-        sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.* `),
-        sqlText(`FROM ${plan.relation} `),
-        sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
-        sqlText(`JOIN (${child.sql}) AS ${quote('__child')} `),
-        sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
-        sqlText(`WHERE ${plan.condition})`),
+        sqlText(`${countsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
+        sqlText(`FROM ${rowsAllCte} GROUP BY ${quote('__parent_id')})`),
       ], ''),
       sqlConcat([
         sqlText(`${itemsCte} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, `),
-        sqlText(`json_agg(row_to_json(${quote('__item')}) ORDER BY ${quote('__item')}.${quote('id')}) `),
-        sqlText(`AS ${quote('__items')}, `),
+        sqlText(`COALESCE(json_agg(row_to_json(${itemAlias}) ORDER BY ${itemAlias}.${ordinalAlias}) `),
+        sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')}, `),
         sqlText(`count(*)::int AS ${quote('__matched')} `),
-        sqlText(`FROM ${rowsCte} AS ${quote('__item')} GROUP BY ${quote('__parent_id')})`),
+        sqlText('FROM ('),
+        sqlText(`SELECT ${quote('__parent_id')}, `),
+        sqlText('row_number() OVER ('),
+        sqlText(`PARTITION BY ${quote('__parent_id')} ORDER BY ${quote('__child')}.${quote('id')}) `),
+        sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
+        sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte}) AS ${quote('__item')} `),
+        sqlText(`GROUP BY ${quote('__parent_id')})`),
       ], ''),
     )
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
+    const totalAlias = `${alias}__total`
     const joinAlias = this.#nextAlias('bc')
+    const countsAlias = this.#nextAlias('bn')
     this.joins.push(sqlText(
       `LEFT JOIN ${itemsCte} ${quote(joinAlias)} ` +
-      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
+      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')} ` +
+      `LEFT JOIN ${countsCte} ${quote(countsAlias)} ` +
+      `ON ${quote(countsAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
     ))
     this.columns.push(sqlText(
       `${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`,
     ))
     this.columns.push(sqlText(
       `${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
+    ))
+    this.columns.push(sqlText(
+      `${quote(countsAlias)}.${quote('__total')} AS ${quote(totalAlias)}`,
     ))
     node.projectedCollections.push({
       alias,
@@ -2179,13 +2232,13 @@ class QueryProjection {
         const matchedTotal = Number(row[matchedAlias] ?? 0)
         return {
           $matched: matchedTotal,
-          $total: matchedTotal,
-          items: entries.map(entry => child.hydrate(entry as Record<string, unknown>)),
+          $total: Number(row[totalAlias] ?? matchedTotal),
+          items: entries.map(entry => childFiltered.hydrate(entry as Record<string, unknown>)),
         }
       },
       matchedAlias,
       name: spec.collection.name,
-      totalAlias: matchedAlias,
+      totalAlias,
     })
     return true
   }
@@ -3433,6 +3486,20 @@ function hydrateReference(
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
+}
+
+/**
+ * Convert a compiled query back into an ordered SQL fragment.
+ * @param compiled - Compiled query with positional values.
+ * @returns SQL fragment preserving the query's value order.
+ */
+function compiledFragment(compiled: CompiledPolymorphicQuery): SqlFragment {
+  const parts = compiled.sql.split(/(\$\d+)/u)
+  return sqlConcat(parts.map(part => {
+    const match = /^\$(\d+)$/u.exec(part)
+    if (match === null) return sqlText(part)
+    return sqlValue(compiled.values[Number(match[1]) - 1])
+  }), '')
 }
 
 /**
