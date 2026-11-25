@@ -678,7 +678,7 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"visits__matched"')
     expect(compiled.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
     expect(compiled.sql).toContain('"__ordinal" > 1 AND "__ordinal" <= 3')
-    expect(compiled.values).toEqual([25, 0, 25, 0])
+    expect(compiled.values).toEqual([25, 0])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
@@ -704,10 +704,10 @@ describe('SQL.where', () => {
     expect(members.sql).toContain('FROM "authorized_Campaign" "t"')
     expect(members.sql).toMatch(/"Membership" "cj\d+"/)
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
-    expect(members.sql).toMatch(/"cj\d+"\."user\.id"/)
+    expect(members.sql).toMatch(/"__edge_row"\."user\.id"/)
     expect(members.sql).toContain('"members"')
     expect(members.sql).toContain('"__ordinal" > 1 AND "__ordinal" <= 3')
-    expect(members.values).toEqual([25, 0, 25, 0])
+    expect(members.values).toEqual([25, 0])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id', 'articles{$limit:1}'],
@@ -832,7 +832,7 @@ describe('SQL.where', () => {
       fields: ['id', 'pets', 'pets.toys', 'pets.toys.label'],
     })
     expect(compiled.sql).not.toContain('LEFT JOIN LATERAL')
-    expect(compiled.sql).toContain('"batch_roots_')
+    expect(compiled.sql).toContain('"flat_base_')
     expect(compiled.sql).toContain('"toys"')
     expect(compiled.sql).toContain('"pets"')
   })
