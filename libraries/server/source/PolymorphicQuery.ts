@@ -151,6 +151,8 @@ interface ProjectionNode {
   readonly fields: ScalarProjection[],
   /** Whether identity fields have been selected for a reference node. */
   identity?: IdentityProjection,
+  /** Joins required to reach this occurrence from the selected root. */
+  readonly joins: readonly SqlFragment[],
   /** Reference path from the query root. */
   readonly path: readonly string[],
   /** Projected collection output descriptors. */
@@ -541,6 +543,12 @@ class QueryProjection {
   #rootPredicate?: SqlFragment
   /** Complete selected-root query reused by batched collection CTEs. */
   #rootSelection?: SqlFragment
+  /** Shared selected-root CTE used by every batch plan in this scope. */
+  #batchRootSelection?: string
+  /** Parent identity selections keyed by reference path. */
+  readonly #batchParentSelections = new Map<string, string>()
+  /** Next generated batch CTE number. */
+  #batchIndex = 0
   /** Next generated table alias number. */
   #alias = 0
   /** Filter-only expression overrides keyed by logical path. */
@@ -673,6 +681,67 @@ class QueryProjection {
       consume: units => this.#consume(units),
       join: sql => this.joins.push(typeof sql === 'string' ? sqlText(sql) : sql),
     }
+  }
+
+  /**
+   * Build one unique batch CTE name for this compiler scope.
+   * @param kind - Short CTE family name.
+   * @returns Quoted CTE identifier.
+   */
+  #nextBatchCte(kind: string): string {
+    const name = quote(`batch_${kind}_${this.#relationPrefix}${this.#batchIndex}`)
+    this.#batchIndex += 1
+    return name
+  }
+
+  /**
+   * Materialize the selected root identities once for all batch plans.
+   * @returns Quoted selected-root CTE identifier.
+   */
+  #ensureBatchRootSelection(): string {
+    if (this.#batchRootSelection !== undefined) return this.#batchRootSelection
+    const name = this.#nextBatchCte('selected_roots')
+    this.#batchRootSelection = name
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      this.#rootSelection ?? sqlConcat([
+        sqlText(`SELECT ${quote(this.root.baseAlias)}.${quote('id')} AS ${quote('id')} `),
+        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(this.root.baseAlias)}`),
+        this.#rootPredicate === undefined
+          ? undefined
+          : sqlConcat([' WHERE ', this.#rootPredicate], ''),
+      ], ''),
+      sqlText(')'),
+    ], ''))
+    return name
+  }
+
+  /**
+   * Materialize identities reachable to one reference occurrence from the
+   * selected roots. The shared root selection is evaluated once, then this
+   * CTE narrows the parent domain before any nested child is projected.
+   * @param node - Reference occurrence owning the nested collection.
+   * @param roots - Shared selected-root CTE identifier.
+   * @returns Quoted parent identity CTE identifier.
+   */
+  #ensureBatchParentSelection(node: ProjectionNode, roots: string): string {
+    const key = node.path.join('.')
+    const cached = this.#batchParentSelections.get(key)
+    if (cached !== undefined) return cached
+    const name = this.#nextBatchCte('parent')
+    const selectedRoot = quote('__selected_root')
+    const parentId = `${quote(node.context.baseAlias)}.${quote('id')}`
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT DISTINCT ${parentId} AS ${quote('id')} `),
+      sqlText(`FROM ${roots} ${selectedRoot} `),
+      sqlText(`JOIN ${this.relation(this.root.definition.name)} ${quote(this.root.baseAlias)} ` +
+        `ON ${quote(this.root.baseAlias)}.${quote('id')} = ${selectedRoot}.${quote('id')} `),
+      ...node.joins,
+      sqlText(')'),
+    ], ''))
+    this.#batchParentSelections.set(key, name)
+    return name
   }
 
   /**
@@ -2181,9 +2250,6 @@ class QueryProjection {
     const itemsCte = quote(`batch_items_${suffix}`)
     const rootAlias = node.context.baseAlias
     const parentId = plan.ownerId
-    const rootWhere = this.#rootPredicate === undefined
-      ? undefined
-      : sqlConcat([' WHERE ', this.#rootPredicate], '')
     const planPredicate = plan.predicate === undefined
       ? undefined
       : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
@@ -2208,14 +2274,11 @@ class QueryProjection {
       ? `${quote('__ordinal')} > ${offset}`
       : `${quote('__ordinal')} > ${offset} AND ` +
         `${quote('__ordinal')} <= ${offset + limit}`
+    const rootIds = this.#ensureBatchRootSelection()
     this.#batchDefinitions.push(
       sqlConcat([
         sqlText(`${rootCte} AS MATERIALIZED (`),
-        this.#rootSelection ?? sqlConcat([
-          sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
-          sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
-          rootWhere,
-        ], ''),
+        sqlText(`SELECT ${quote('id')} FROM ${rootIds}`),
         sqlText(')'),
       ], ''),
       rowsDefinition(rowsAllCte, false),
@@ -2362,23 +2425,12 @@ class QueryProjection {
     const itemsCte = quote(`batch_items_${suffix}`)
     const rootAlias = node.context.baseAlias
     const parentId = plan.ownerId
-    const rootWhere = this.#rootPredicate === undefined
-      ? undefined
-      : sqlConcat([' WHERE ', this.#rootPredicate], '')
     const nested = node.path.length !== 0
-    let rootSelection: SqlFragment
-    if (nested) {
-      rootSelection = sqlConcat([
-        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
-        sqlText(`FROM ${this.relation(node.context.definition.name)} ${quote(rootAlias)}`),
-      ], '')
-    } else {
-      rootSelection = this.#rootSelection ?? sqlConcat([
-        sqlText(`SELECT ${quote(rootAlias)}.${quote('id')} AS ${quote('id')} `),
-        sqlText(`FROM ${this.relation(this.root.definition.name)} ${quote(rootAlias)}`),
-        rootWhere,
-      ], '')
-    }
+    const rootIds = this.#ensureBatchRootSelection()
+    const parentIds = nested ? this.#ensureBatchParentSelection(node, rootIds) : undefined
+    const rootSelection = sqlConcat([
+      sqlText(`SELECT ${quote('id')} FROM ${parentIds ?? rootIds}`),
+    ], '')
     const collectionPredicate = plan.predicate === undefined
       ? undefined
       : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
@@ -3005,6 +3057,7 @@ class QueryProjection {
       context,
       fieldNames: new Set(),
       fields: [],
+      joins: [...this.joins],
       path,
       projectedCollections: [],
       projectedSpecs: new Map(),
