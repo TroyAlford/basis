@@ -222,6 +222,28 @@ describe('Graph', () => {
     expect(schema.functions.some(fn => fn.name === 'basis.matches')).toBe(false)
     expect(schema.functions.some(fn => fn.name === 'policy_field')).toBe(false)
   })
+  test('shares one role subquery across predicates for the same role', () => {
+    const shared = new Graph({
+      entities: [{
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'Article',
+        security: {
+          [Action.Read]: [
+            { role: 'editor', where: 'title = "first"' },
+            { role: 'editor', where: 'title = "second"' },
+          ],
+        },
+      }],
+      roles: { editor: { name: 'Editor' } },
+    })
+    const schema = shared.physicalSchema('basis_app', true)
+    const read = schema.policies.find(policy => (
+      policy.table === 'Article' && policy.command === 'SELECT'
+    ))
+    expect(read?.sql.match(/basis\.has_role/gu)).toHaveLength(1)
+    expect(read?.sql).toMatch(/AND \(.* OR .*\)/u)
+  })
+
   test('compiles role grants as statement-scoped scalar subqueries', () => {
     const schema = graph.physicalSchema('basis_app', true)
     const update = schema.policies.find(policy => (
