@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { Color } from '../../../utilities/functions/Color'
 import * as Basis from '../../index'
+import { styleEntries } from '../../utilities/style'
 import { DARK_THEME, DEFAULT_THEME, LIGHT_THEME, themeStyles } from './Theme'
 
 /**
@@ -173,6 +175,13 @@ describe('Theme presets', () => {
     expect(darkStart).toBeGreaterThan(-1)
     expect(dark).toContain('--basis-color-primary: #ff0000ff;')
     expect(dark).toContain('--basis-color-surface: #11151aff;')
+  })
+
+  test('registers theme variables while rendering for SSR', () => {
+    renderToStaticMarkup(<Basis.Theme color={{ primary: '#123456' }} />)
+
+    const entry = styleEntries().find(([id]) => id === 'basis:theme:default')
+    expect(entry?.[1]).toContain('--basis-color-primary: #123456ff;')
   })
 
   test('keeps the existing light token values under a named light theme', () => {
