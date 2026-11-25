@@ -12,6 +12,7 @@ import type { Identity } from '../../oauth'
 import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
+import { styleEntries } from '../../react/utilities/style'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { assertBasisServerCompatible, HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
@@ -562,6 +563,17 @@ export class Server<
   }
 
   /**
+   * Render registered component stylesheets into the document head so the first
+   * paint uses the same styles as the hydrated client.
+   * @returns One style element per registered stylesheet.
+   */
+  #styleTags(): string {
+    return styleEntries().map(([id, css]) => (
+      `<style id="${id.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" data-injected-by="style-utility">${css}</style>`
+    )).join('')
+  }
+
+  /**
    * Handles a UI request.
    *
    * When an {@link Server.identity} capability is configured, the request is
@@ -608,7 +620,7 @@ export class Server<
         }))
         const html = fallback
           .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
-          .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
+          .replace('</head>', `${this.#styleTags()}${runtimeScript}${bootstrapScript}</head>`)
         return this.#withContextResponse(new Response(html, {
           headers: { 'Content-Type': 'text/html' },
         }), resolved)
@@ -633,7 +645,9 @@ export class Server<
           element: element => { element.setInnerContent(title) },
         })
         .on('head', {
-          element: element => { element.append(`${favicon}${runtimeScript}${bootstrapScript}`, { html: true }) },
+          element: element => {
+            element.append(`${this.#styleTags()}${favicon}${runtimeScript}${bootstrapScript}`, { html: true })
+          },
         })
         .on('#root', {
           element: element => { element.setInnerContent(application, { html: true }) },
