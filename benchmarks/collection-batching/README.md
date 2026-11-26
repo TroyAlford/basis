@@ -25,20 +25,20 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor | statement | rows | direct median | direct range | EXPLAIN | plan | shared hits |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| owner | pre-#364 | 106 | 320.6 ms | 314.7–324.8 | 289.8 ms | 27.0 ms | 20,365 |
-| owner | #364 previous | 106 | 154.3 ms | 151.5–157.7 | 165.4 ms | 25.1 ms | 9,061 |
-| owner | flat current | 106 | 73.4 ms | 69.6–79.1 | 70.4 ms | 8.6 ms | 2,768 |
-| owner | N7 | 106 | 58.5 ms | 57.2–60.4 | 58.6 ms | 6.8 ms | 1,703 |
-| editor | pre-#364 | 106 | 485.8 ms | 459.2–487.7 | 480.7 ms | 26.5 ms | 39,647 |
-| editor | #364 previous | 106 | 318.1 ms | 291.4–357.4 | 280.1 ms | 24.4 ms | 22,284 |
-| editor | flat current | 106 | 124.2 ms | 117.7–128.6 | 128.6 ms | 8.4 ms | 5,937 |
-| editor | N7 | 106 | 115.0 ms | 113.7–123.3 | 97.5 ms | 6.4 ms | 4,241 |
-| viewer | pre-#364 | 106 | 471.1 ms | 452.6–483.7 | 445.7 ms | 28.2 ms | 40,879 |
-| viewer | #364 previous | 106 | 290.9 ms | 288.3–302.7 | 316.7 ms | 24.7 ms | 23,123 |
-| viewer | flat current | 106 | 129.6 ms | 128.2–141.8 | 132.9 ms | 8.4 ms | 6,135 |
-| viewer | N7 | 106 | 109.5 ms | 105.3–110.6 | 107.3 ms | 6.3 ms | 4,444 |
+| owner | pre-#364 | 106 | 305.0 ms | 303.7–309.1 | 288.3 ms | 26.5 ms | 20,365 |
+| owner | #364 previous | 106 | 150.3 ms | 148.9–151.4 | 166.0 ms | 25.4 ms | 9,061 |
+| owner | flat current | 106 | 72.5 ms | 70.4–73.2 | 73.4 ms | 8.3 ms | 2,768 |
+| owner | N7 | 106 | 56.4 ms | 56.0–59.6 | 59.9 ms | 6.9 ms | 1,703 |
+| editor | pre-#364 | 106 | 463.1 ms | 446.4–484.3 | 434.3 ms | 26.2 ms | 39,647 |
+| editor | #364 previous | 106 | 312.0 ms | 306.4–320.7 | 283.9 ms | 23.8 ms | 22,284 |
+| editor | flat current | 106 | 127.2 ms | 121.9–130.3 | 127.3 ms | 8.1 ms | 5,937 |
+| editor | N7 | 106 | 113.5 ms | 110.4–120.9 | 95.6 ms | 6.0 ms | 4,241 |
+| viewer | pre-#364 | 106 | 432.0 ms | 425.4–464.8 | 404.0 ms | 26.4 ms | 40,879 |
+| viewer | #364 previous | 106 | 294.0 ms | 285.7–298.0 | 311.1 ms | 23.7 ms | 23,123 |
+| viewer | flat current | 106 | 127.1 ms | 120.6–188.7 | 125.6 ms | 7.8 ms | 6,135 |
+| viewer | N7 | 106 | 110.7 ms | 105.8–123.4 | 105.5 ms | 6.1 ms | 4,444 |
 
-The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The small remaining gap is the price of that scaling-safe choice.
+The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The remaining gap is the price of that scaling-safe choice.
 
 All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. The current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 76.1 ms (owner), 150.0 ms (editor), and 130.9 ms (viewer); subtracting the direct SQL medians gives roughly 2.7 ms, 25.8 ms, and 1.3 ms of mapping/hydration work.
 
@@ -50,16 +50,18 @@ This PR also groups predicates by role inside one policy expression, so identica
 
 ## Policy A/B
 
+These policy measurements were captured with the flattened compiler at `db116d4`; they are current for this commit, not historical pre-flat data.
+
 The grouped-policy variant is the only policy change in this PR: predicates for the same role are factored under one role check. It was applied to the disposable fixture schema by replacing the installed policies with the current Graph policy SQL; the table structures and data were unchanged. The canonical and grouped runs used the same actor, fixture, statements, warm-up, and five direct repetitions.
 
 | actor | statement | canonical median | grouped median | canonical EXPLAIN | grouped EXPLAIN |
 | --- | --- | ---: | ---: | ---: | ---: |
-| owner | #364 current | 207.5 ms | 29.0 ms | 178.9 ms | 33.4 ms |
-| owner | N7 | 48.9 ms | 10.4 ms | 52.1 ms | 11.1 ms |
-| editor | #364 current | 281.7 ms | 114.8 ms | 254.1 ms | 130.1 ms |
-| editor | N7 | 96.3 ms | 36.8 ms | 89.2 ms | 37.1 ms |
-| viewer | #364 current | 260.2 ms | 111.3 ms | 299.0 ms | 128.1 ms |
-| viewer | N7 | 85.6 ms | 37.5 ms | 87.4 ms | 40.4 ms |
+| owner | #364 current | 83.2 ms | 24.0 ms | 83.3 ms | 24.4 ms |
+| owner | N7 | 64.8 ms | 12.3 ms | 65.3 ms | 11.3 ms |
+| editor | #364 current | 153.3 ms | 67.6 ms | 139.4 ms | 66.7 ms |
+| editor | N7 | 121.8 ms | 48.9 ms | 115.3 ms | 53.7 ms |
+| viewer | #364 current | 134.0 ms | 70.3 ms | 144.1 ms | 70.9 ms |
+| viewer | N7 | 109.8 ms | 50.2 ms | 113.2 ms | 49.5 ms |
 
 A hydrated comparison across owner, editor, viewer, anonymous, and nonmember actors returned identical requested fields and nested collections before and after the policy replacement; allowed actors had 106 rows, anonymous and nonmember had 0, and the old and new policy sets both contained 120 policy objects. `policy-verification.json` records the check. The grouped variant preserves the existing `basis.has_role` `SECURITY DEFINER` function, actor-setting contract, and fail-closed behavior. It does not add a session cache, does not disable RLS, and does not change privilege boundaries. The result is a measured policy-compilation improvement, not the experimental inline membership/R configuration.
 

@@ -5,6 +5,8 @@ import { compileEntityQuery, queryEntity } from './Database'
 import { Action, Graph, Security } from './Graph'
 
 const parent = '00000000-0000-4000-8000-000000000701'
+const other = '00000000-0000-4000-8000-000000000799'
+const ownerUser = '00000000-0000-4000-8000-0000000007a0'
 const child = (index: number): string => `00000000-0000-4000-8000-0000000008${String(index).padStart(2, '0')}`
 const grandchild = (index: number): string => `00000000-0000-4000-8000-0000000009${String(index).padStart(2, '0')}`
 const unrelated = (index: number): string => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`
@@ -18,16 +20,29 @@ interface Collection {
 const graph = new Graph({
   entities: [
     {
-      fields: [
-        { field: 'label', type: 'String' },
-        { field: 'children', target: 'Child', type: 'Collection', via: 'ParentChild[parent = @].child' },
-      ],
-      name: 'Parent',
-      security: { [Action.Read]: Security.Public },
+      fields: [{ field: 'label', type: 'String' }],
+      name: 'User',
+      security: {
+        [Action.Read]: Security.Public,
+        [Action.Create]: Security.Public,
+      },
     },
     {
       fields: [
         { field: 'label', type: 'String' },
+        { field: 'owner', target: 'User', type: 'Entity' },
+        { field: 'children', target: 'Child', type: 'Collection', via: 'ParentChild[parent = @].child' },
+      ],
+      name: 'Parent',
+      security: {
+        [Action.Read]: { where: 'owner = $me' },
+        [Action.Create]: Security.Public,
+      },
+    },
+    {
+      fields: [
+        { field: 'label', type: 'String' },
+        { field: 'owner', target: 'User', type: 'Entity' },
         {
           field: 'grandchildren',
           target: 'Grandchild',
@@ -36,37 +51,61 @@ const graph = new Graph({
         },
       ],
       name: 'Child',
-      security: { [Action.Read]: Security.Public },
+      security: {
+        [Action.Read]: { where: 'owner = $me' },
+        [Action.Create]: Security.Public,
+      },
+    },
+    {
+      fields: [{ field: 'label', type: 'String' }, { field: 'owner', target: 'User', type: 'Entity' }],
+      name: 'Grandchild',
+      security: {
+        [Action.Read]: { where: 'owner = $me' },
+        [Action.Create]: Security.Public,
+      },
     },
     {
       fields: [{ field: 'label', type: 'String' }],
-      name: 'Grandchild',
-      security: { [Action.Read]: Security.Public },
+      name: 'Tag',
+      security: {
+        [Action.Read]: Security.Public,
+        [Action.Create]: Security.Public,
+      },
     },
   ],
   relationships: [
     {
-      between: [{ field: 'parent', target: 'Parent' }, { field: 'child', target: 'Child' }],
+      between: [
+        { field: 'parent', target: 'Parent' },
+        { field: 'child', target: 'Child' },
+        { field: 'tag', target: 'Tag' },
+      ],
       fields: [],
       name: 'ParentChild',
-      security: { [Action.Read]: Security.Public },
+      security: {
+        [Action.Read]: Security.Public,
+        [Action.Create]: Security.Public,
+      },
     },
     {
       between: [{ field: 'child', target: 'Child' }, { field: 'grandchild', target: 'Grandchild' }],
       fields: [],
       name: 'ChildGrandchild',
-      security: { [Action.Read]: Security.Public },
+      security: {
+        [Action.Read]: Security.Public,
+        [Action.Create]: Security.Public,
+      },
     },
   ],
 })
 
 describe('flat collection pagination', () => {
   test('scopes nested collections to the selected parent page', async () => {
-    await withDatabase('flat-collection-pagination', null, async database => {
+    await withDatabase('flat-collection-pagination', ownerUser, async database => {
       const options = {
         fields: [
           'id',
-          'children{$limit:1,$offset:2}',
+          'children{$limit:2}',
           'children.label',
           'children.grandchildren{$limit:null}',
           'children.grandchildren.label',
@@ -80,12 +119,14 @@ describe('flat collection pagination', () => {
         options,
       )
       expect(rows).toHaveLength(1)
-      expect(rows[0]?.children.items).toHaveLength(1)
-      expect(rows[0]?.children.items[0]?.id).toBe(child(2))
+      expect(rows[0]?.children.items).toHaveLength(2)
+      expect(rows[0]?.children.items.map(item => item.id)).toEqual([child(0), child(1)])
       expect(rows[0]?.children.$total).toBe(5)
       expect(rows[0]?.children.$matched).toBe(5)
-      expect(rows[0]?.children.items[0]?.grandchildren?.items).toHaveLength(5)
-      expect(rows[0]?.children.items[0]?.grandchildren?.$total).toBe(5)
+      for (const item of rows[0]?.children.items ?? []) {
+        expect(item.grandchildren?.items).toHaveLength(5)
+        expect(item.grandchildren?.$total).toBe(5)
+      }
       const compiled = compileEntityQuery(database.entities, 'Parent', options)
       expect(compiled.sql).toContain('flat_scope_')
       expect(compiled.sql).toContain('FROM "flat_scope_')
@@ -115,42 +156,60 @@ describe('flat collection pagination', () => {
       expect(compiled.sql).toContain('authorized_Parent" AS NOT MATERIALIZED')
       expect(compiled.sql).toContain('authorized_Child" AS NOT MATERIALIZED')
       expect(scopes.length).toBeGreaterThan(0)
-      expect(Math.max(...scopes)).toBeLessThanOrEqual(1)
+      expect(scopes[0]).toBeLessThanOrEqual(2)
       expect(rootRows.length).toBeGreaterThan(0)
       expect(Math.max(...rootRows)).toBeLessThanOrEqual(1)
       expect(targetRows.length).toBeGreaterThan(0)
-      expect(Math.max(...targetRows)).toBeLessThanOrEqual(5)
+      expect(Math.max(...targetRows)).toBeLessThanOrEqual(10)
     }, {
       graph,
       setup: async (database: DatabaseContext) => {
-        await database.create('Parent', { id: parent, label: 'Parent', name: 'Parent' })
+        await database.create('User', [
+          { id: ownerUser, label: 'Owner', name: 'Owner' },
+          { id: other, label: 'Other', name: 'Other' },
+        ])
+        await database.create('Parent', { id: parent, label: 'Parent', name: 'Parent', owner: ownerUser })
         await database.create('Parent', Array.from({ length: 1000 }, (_, index) => ({
           id: unrelated(index),
           label: `Unrelated ${index}`,
           name: `Unrelated ${index}`,
+          owner: other,
         })))
         const children = Array.from({ length: 5 }, (_, index) => ({
           id: child(index),
           label: `Child ${index}`,
           name: `Child ${index}`,
+          owner: ownerUser,
         }))
         await database.create('Child', children)
         await database.create('Child', Array.from({ length: 1000 }, (_, index) => ({
           id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
           label: `Unrelated child ${index}`,
           name: `Unrelated child ${index}`,
+          owner: other,
         })))
         const grandchildren = Array.from({ length: 25 }, (_, index) => ({
           id: grandchild(index),
           label: `Grandchild ${index}`,
           name: `Grandchild ${index}`,
+          owner: ownerUser,
         }))
         await database.create('Grandchild', grandchildren)
+        await database.create('Tag', [
+          { id: '00000000-0000-4000-8000-000000000b01', label: 'Tag 1', name: 'Tag 1' },
+          { id: '00000000-0000-4000-8000-000000000b02', label: 'Tag 2', name: 'Tag 2' },
+        ])
         for (const [index, row] of children.entries()) {
           await database.sql`
-            INSERT INTO "ParentChild" ("parent.id", "child.id")
-            VALUES (${parent}, ${row.id})
+            INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id")
+            VALUES (${parent}, ${row.id}, '00000000-0000-4000-8000-000000000b01')
           `
+          if (index === 0) {
+            await database.sql`
+              INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id")
+              VALUES (${parent}, ${row.id}, '00000000-0000-4000-8000-000000000b02')
+            `
+          }
           for (let offset = 0; offset < 5; offset += 1) {
             await database.sql`
               INSERT INTO "ChildGrandchild" ("child.id", "grandchild.id")

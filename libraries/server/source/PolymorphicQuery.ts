@@ -810,7 +810,14 @@ class QueryProjection {
       throw new Error(`Collection "${plan.collection.name}" has no relationship source`)
     }
     const sourceSql = typeof parentSource === 'string' ? parentSource : parentSource.sql
-    const key = `${sourceSql}\u0000${relationship.name}\u0000${plan.predicate?.sql ?? ''}`
+    const collection = plan.collection
+    const endpoint = collection.kind === 'relationship'
+      ? `relationship:${collection.endpoint}`
+      : collection.kind === 'explicit'
+        ? `explicit:${collection.ownerEndpoint.field}->${collection.targetEndpoint?.field ?? 'record'}`
+        : `inverse:${collection.reference.name}`
+    const key = `${sourceSql}\u0000${relationship.name}\u0000${endpoint}\u0000` +
+      `${plan.predicate?.sql ?? ''}`
     const cached = this.#shared.sources.get(key)
     if (cached !== undefined) return cached
     const name = this.#nextBatchCte('source')
@@ -2650,10 +2657,10 @@ class QueryProjection {
     } catch {
       return false
     }
-    this.#relations.materialize([this.root.definition.name, plan.target.name])
     const workStart = this.#work
     const relationsSnapshot = this.#relations.snapshot()
     const sourcesSnapshot = new Map(this.#shared.sources)
+    this.#relations.materialize([this.root.definition.name, plan.target.name])
     this.#consume(plan.work)
     const roots = this.#ensureBatchRootSelection()
     const parentSource = node.path.length === 0
@@ -2745,23 +2752,33 @@ class QueryProjection {
       ], ''))
     }
     const scopeCte = quote(`flat_scope_${suffix}`)
+    const scopeIdsCte = quote(`flat_scope_ids_${suffix}`)
     const scopeNeeded = filterPredicate !== undefined || limit !== null || offset > 0
     if (scopeNeeded) {
+      const ordinal = `${scopeIdsCte}.${quote('__ordinal')}`
       const scopePage = limit === null
-        ? `${quote('__ordinal')} > ${offset}`
-        : `${quote('__ordinal')} > ${offset} AND ` +
-          `${quote('__ordinal')} <= ${offset + limit}`
+        ? `${ordinal} > ${offset}`
+        : `${ordinal} > ${offset} AND ${ordinal} <= ${offset + limit}`
+      const scopeSource = filterPredicate === undefined ? baseCte : flagsCte
       this.#batchDefinitions.push(sqlConcat([
-        sqlText(`${scopeCte} AS MATERIALIZED (`),
-        sqlText('SELECT * FROM ('),
-        sqlText(`SELECT ${baseCte}.*, row_number() OVER (` +
-          `PARTITION BY ${baseCte}.${quote('__parent_id')} ` +
-          `ORDER BY ${baseCte}.${quote('__item_id')}) AS ${quote('__ordinal')} `),
-        sqlText(`FROM ${baseCte} `),
+        sqlText(`${scopeIdsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, ${quote('__item_id')}, ` +
+          `row_number() OVER (PARTITION BY ${quote('__parent_id')} ` +
+          `ORDER BY ${quote('__item_id')}) AS ${quote('__ordinal')} `),
+        sqlText(`FROM (SELECT DISTINCT ${quote('__parent_id')}, ${quote('__item_id')} `),
+        sqlText(`FROM ${scopeSource} `),
         filterPredicate === undefined
           ? undefined
           : sqlText(`WHERE ${quote('__batch_filter')} IS TRUE `),
-        sqlText(`) AS ${quote('__scope')} WHERE ${scopePage})`),
+        sqlText(`) AS ${quote('__identity')})`),
+      ], ''), sqlConcat([
+        sqlText(`${scopeCte} AS MATERIALIZED (`),
+        sqlText(`SELECT DISTINCT ON (${baseCte}.${quote('__parent_id')}, ` +
+          `${baseCte}.${quote('__item_id')}) ${baseCte}.*, ${scopeIdsCte}.${quote('__ordinal')} `),
+        sqlText(`FROM ${baseCte} JOIN ${scopeIdsCte} ON ` +
+          `${scopeIdsCte}.${quote('__parent_id')} = ${baseCte}.${quote('__parent_id')} ` +
+          `AND ${scopeIdsCte}.${quote('__item_id')} = ${baseCte}.${quote('__item_id')} `),
+        sqlText(`WHERE ${scopePage})`),
       ], ''))
     }
 
