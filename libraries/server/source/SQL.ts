@@ -92,7 +92,7 @@ export interface CollectionScopeVariant {
 }
 
 /** One literal SQL text piece or structural parameter slot. */
-type SqlPiece = string | { readonly value: unknown }
+type SqlPiece = string | { readonly shared?: boolean, readonly value: unknown }
 
 /** One parameterized SQL fragment. */
 export interface SqlFragment {
@@ -111,13 +111,21 @@ export interface SqlFragment {
  */
 function compilePieces(pieces: readonly SqlPiece[]): { sql: string, values: readonly unknown[] } {
   const values: unknown[] = []
+  const sharedIndexes = new Map<object, number>()
   let sql = ''
   for (const piece of pieces) {
-    if (typeof piece === 'string') sql += piece
-    else {
-      values.push(piece.value)
-      sql += `$${values.length}`
+    if (typeof piece === 'string') {
+      sql += piece
+      continue
     }
+    const shared = piece.shared === true
+    let index = shared ? sharedIndexes.get(piece) : undefined
+    if (index === undefined) {
+      values.push(piece.value)
+      index = values.length
+      if (shared) sharedIndexes.set(piece, index)
+    }
+    sql += `$${index}`
   }
   return { sql, values }
 }
@@ -150,6 +158,18 @@ export function sqlText(text: string): SqlFragment {
  */
 export function sqlValue(value: unknown): SqlFragment {
   return fragmentOf([{ value }])
+}
+
+/**
+ * One reusable bound value slot.
+ *
+ * Reusing the returned fragment in more than one SQL location keeps one
+ * placeholder and one ordered value, so related predicates cannot drift.
+ * @param value - Bound value.
+ * @returns One shared parameter fragment.
+ */
+export function sqlParameter(value: unknown): SqlFragment {
+  return fragmentOf([{ shared: true, value }])
 }
 
 /**

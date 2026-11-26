@@ -259,7 +259,8 @@ printing_decks AS MATERIALIZED (
 ),
 deck_counts AS (
   SELECT printing_id,
-         count(*) FILTER (WHERE deck_id IS NOT DISTINCT FROM $6)::int AS total
+         count(*) FILTER (WHERE deck_id IS NOT DISTINCT FROM $6)::int AS matched,
+         count(*)::int AS total
   FROM printing_decks
   GROUP BY printing_id
 ),
@@ -348,7 +349,7 @@ SELECT
   COALESCE(panels.items, '[]'::json) AS "panels",
   COALESCE(panels.matched, 0) AS "panels__matched",
   COALESCE(decks.items, '[]'::json) AS "decks",
-  COALESCE(deck_counts.total, 0) AS "decks__matched",
+  COALESCE(deck_counts.matched, 0) AS "decks__matched",
   COALESCE(deck_counts.total, 0) AS "decks__total",
   COALESCE(deck_entries.items, '[]'::json) AS "deckEntries",
   COALESCE(deck_entry_counts.matched, 0) AS "deckEntries__matched",

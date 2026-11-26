@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { DatabaseContext } from '../testing/DatabaseFixture'
 import { compileEntityQuery, queryEntity } from './Database'
 import { Action, Graph, Security } from './Graph'
-import { compilePolymorphicQueryWithRejection } from './PolymorphicQuery'
+import { compilePolymorphicQuery, compilePolymorphicQueryWithRejection } from './PolymorphicQuery'
 
 const parent = '00000000-0000-4000-8000-000000000701'
 const other = '00000000-0000-4000-8000-000000000799'
@@ -150,6 +150,29 @@ describe('flat collection pagination', () => {
       for (const item of offsetRows[0]?.children.items ?? []) {
         expect(item.grandchildren?.items).toHaveLength(5)
       }
+      const boundOffsetOptions = {
+        fields: [
+          'id',
+          'children{$limit:1,$offset:3}',
+          'children.label',
+          'children.grandchildren{$limit:null}',
+          'children.grandchildren.label',
+        ],
+        where: { id: parent },
+      }
+      const definition = database.entities.entity('Parent')
+      if (definition === undefined) throw new Error('Parent definition missing')
+      const boundOffset = compilePolymorphicQuery(database.entities, definition, boundOffsetOptions)
+      const boundValues = [...boundOffset.values]
+      const offsetPosition = boundValues.indexOf(3)
+      expect(offsetPosition).toBeGreaterThan(-1)
+      boundValues[offsetPosition] = 1
+      const boundRows = await database.sql.unsafe<Record<string, unknown>[]>(boundOffset.sql, boundValues)
+      const boundRow = boundOffset.hydrate(boundRows[0] as Record<string, unknown>) as {
+        children: { items: { grandchildren?: Collection, id: string }[] },
+      }
+      expect(boundRow.children.items.map(item => item.id)).toEqual([child(1)])
+      expect(boundRow.children.items[0]?.grandchildren?.items[0]?.id).toBe(grandchild(5))
       const compiled = compileEntityQuery(database.entities, 'Parent', options)
       expect(compiled.sql).toContain('flat_scope_')
       expect(compiled.sql).toContain('FROM "flat_scope_')

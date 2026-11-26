@@ -733,13 +733,13 @@ describe('SQL.where', () => {
       fields: ['id', 'members', 'members.name'],
     })
     expect(defaults.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(defaults.sql).toContain('"__ordinal" <= 3')
+    expect(defaults.sql).toContain('BETWEEN 1 AND')
     expect(defaults.sql).toContain('__matched')
 
     const capped = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:50}', 'members.name'],
     })
-    expect(capped.sql).toContain('"__ordinal" <= 50')
+    expect(capped.sql).toContain('BETWEEN 1 AND')
 
     const filtered = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[name != 'Ada']{$limit:null}", 'members.name'],

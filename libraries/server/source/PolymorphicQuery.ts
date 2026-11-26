@@ -10,7 +10,7 @@ import { arrayItemField, Predicate } from './Predicate'
 import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope, SqlFragment, SQLPredicate } from './SQL'
-import { SQL, sqlConcat, sqlFragment, sqlText, sqlValue } from './SQL'
+import { SQL, sqlConcat, sqlFragment, sqlParameter, sqlText, sqlValue } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
 const MAX_REFERENCE_DEPTH = 8
@@ -2775,11 +2775,21 @@ class QueryProjection {
     const scopeCte = quote(`flat_scope_${suffix}`)
     const scopeIdsCte = quote(`flat_scope_ids_${suffix}`)
     const scopeNeeded = filterPredicate !== undefined || limit !== null || offset > 0
+    const pageOffset = offset > 0 || limit !== null ? sqlParameter(offset) : undefined
+    const pageLimit = limit === null ? undefined : sqlParameter(limit)
     if (scopeNeeded) {
       const ordinal = `${scopeIdsCte}.${quote('__ordinal')}`
-      const scopePage = limit === null
-        ? `${ordinal} > ${offset}`
-        : `${ordinal} > ${offset} AND ${ordinal} <= ${offset + limit}`
+      let scopePage: SqlFragment
+      if (limit === null) {
+        scopePage = pageOffset === undefined
+          ? sqlText(`${ordinal} > 0`)
+          : sqlConcat([sqlText(`${ordinal} > `), pageOffset])
+      } else {
+        scopePage = sqlConcat([
+          sqlText(`${ordinal} - `), pageOffset as SqlFragment,
+          sqlText(' BETWEEN 1 AND '), pageLimit as SqlFragment,
+        ])
+      }
       const scopeSource = filterPredicate === undefined ? baseCte : flagsCte
       this.#batchDefinitions.push(sqlConcat([
         sqlText(`${scopeIdsCte} AS MATERIALIZED (`),
@@ -2799,7 +2809,7 @@ class QueryProjection {
         sqlText(`FROM ${baseCte} JOIN ${scopeIdsCte} ON ` +
           `${scopeIdsCte}.${quote('__parent_id')} = ${baseCte}.${quote('__parent_id')} ` +
           `AND ${scopeIdsCte}.${quote('__item_id')} = ${baseCte}.${quote('__item_id')} `),
-        sqlText(`WHERE ${scopePage})`),
+        sqlText('WHERE '), scopePage, sqlText(')'),
       ], ''))
     }
 
@@ -2870,6 +2880,8 @@ class QueryProjection {
       limit,
       matchedFilterPresent: filterMatched !== undefined,
       offset,
+      pageLimit,
+      pageOffset,
       rowsCte,
       rowsFilteredCte,
       rowsMatchedCte: quote(`flat_rows_matched_${suffix}`),
@@ -2992,6 +3004,8 @@ class QueryProjection {
    * @param options.limit - Page size.
    * @param options.matchedFilterPresent - Whether a matched-count filter was compiled.
    * @param options.offset - Page offset.
+   * @param options.pageLimit - Optional shared bound limit slot.
+   * @param options.pageOffset - Optional shared bound offset slot.
    * @param options.rowsCte - Deduplicated member-row CTE name.
    * @param options.rowsFilteredCte - Filtered member-row CTE name.
    * @param options.rowsMatchedCte - Filtered matched-count row CTE name.
@@ -3008,6 +3022,8 @@ class QueryProjection {
     readonly limit: number | null,
     readonly matchedFilterPresent?: boolean,
     readonly offset: number,
+    readonly pageLimit?: SqlFragment,
+    readonly pageOffset?: SqlFragment,
     readonly rowsCte: string,
     readonly rowsFilteredCte: string,
     readonly rowsMatchedCte?: string,
@@ -3021,17 +3037,21 @@ class QueryProjection {
       limit,
       matchedFilterPresent,
       offset,
+      pageLimit,
+      pageOffset,
       rowsCte,
     } = options
+    const offsetSlot = pageOffset ?? sqlValue(offset)
+    const limitSlot = pageLimit ?? (limit === null ? undefined : sqlValue(limit))
     let page: SqlFragment
     if (limit === null && offset === 0) {
       page = sqlText(`${quote('__ordinal')} > 0`)
     } else if (limit === null) {
-      page = sqlConcat([sqlText(quote('__ordinal')), sqlText(' > '), sqlValue(offset)], '')
+      page = sqlConcat([sqlText(quote('__ordinal')), sqlText(' > '), offsetSlot], '')
     } else {
       page = sqlConcat([
-        sqlText(`${quote('__ordinal')} - `), sqlValue(offset),
-        sqlText(' BETWEEN 1 AND '), sqlValue(limit),
+        sqlText(`${quote('__ordinal')} - `), offsetSlot,
+        sqlText(' BETWEEN 1 AND '), limitSlot as SqlFragment,
       ], '')
     }
     const ordered = itemOrder ?? `${quote('__child')}.${quote('__item_id')}`
@@ -3075,7 +3095,8 @@ class QueryProjection {
         sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
           `COALESCE(${quote('__item_group')}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
           `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
-        sqlText(`FROM ${countsCte} AS ${quote('__parents')} `),
+        sqlText(`FROM (SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
+          `SELECT ${quote('__parent_id')} FROM ${quote('__matched')}) AS ${quote('__parents')} `),
         sqlText(`LEFT JOIN ${quote('__item_group')} ON ${quote('__item_group')}.${quote('__parent_id')} ` +
           `= ${quote('__parents')}.${quote('__parent_id')} `),
         sqlText(`LEFT JOIN ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +
