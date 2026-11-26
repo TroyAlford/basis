@@ -25,18 +25,18 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor  | statement     | rows | params | direct median | direct range |  EXPLAIN |    plan | shared hits |
 | ------ | ------------- | ---: | -----: | ------------: | -----------: | -------: | ------: | ----------: |
-| owner  | pre-#364      |  106 |     11 |      324.1 ms |  310.4–328.9 | 307.6 ms | 28.1 ms |      20,365 |
-| owner  | #364 previous |  106 |      7 |      152.7 ms |  150.4–157.2 | 165.5 ms | 25.0 ms |       9,061 |
-| owner  | flat current  |  106 |     11 |       71.4 ms |    70.4–74.2 |  78.0 ms |  9.9 ms |       2,768 |
-| owner  | N7            |  106 |     11 |       59.2 ms |    58.5–60.1 |  61.2 ms |  7.2 ms |       1,703 |
-| editor | pre-#364      |  106 |     11 |      498.9 ms |  480.6–531.2 | 464.8 ms | 25.6 ms |      39,647 |
-| editor | #364 previous |  106 |      7 |      310.0 ms |  292.6–320.3 | 280.6 ms | 24.3 ms |      22,284 |
-| editor | flat current  |  106 |     11 |      132.3 ms |  127.0–142.7 | 133.7 ms |  9.5 ms |       5,937 |
-| editor | N7            |  106 |     11 |      115.6 ms |  112.3–119.3 |  94.9 ms |  6.2 ms |       4,241 |
-| viewer | pre-#364      |  106 |     11 |      446.2 ms |  429.6–457.2 | 432.0 ms | 26.4 ms |      40,879 |
-| viewer | #364 previous |  106 |      7 |      287.4 ms |  281.1–289.5 | 309.6 ms | 24.3 ms |      23,123 |
-| viewer | flat current  |  106 |     11 |      128.9 ms |  126.0–131.3 | 134.3 ms |  9.1 ms |       6,135 |
-| viewer | N7            |  106 |     11 |      108.3 ms |  102.6–113.9 | 106.8 ms |  6.1 ms |       4,444 |
+| owner  | pre-#364      |  106 |     11 |      313.7 ms |  306.0–339.6 | 277.8 ms | 26.1 ms |      20,365 |
+| owner  | #364 previous |  106 |      7 |      161.7 ms |  150.7–169.4 | 170.4 ms | 24.2 ms |       9,061 |
+| owner  | flat current  |  106 |     11 |       75.8 ms |    75.6–77.0 |  86.4 ms |  9.0 ms |       2,768 |
+| owner  | N7            |  106 |     11 |       61.8 ms |    57.0–66.4 |  61.3 ms |  6.5 ms |       1,703 |
+| editor | pre-#364      |  106 |     11 |      456.3 ms |  450.0–486.1 | 421.9 ms | 26.1 ms |      39,647 |
+| editor | #364 previous |  106 |      7 |      319.3 ms |  309.6–329.4 | 300.0 ms | 24.1 ms |      22,284 |
+| editor | flat current  |  106 |     11 |      131.9 ms |  124.7–136.2 | 137.5 ms |  9.2 ms |       5,937 |
+| editor | N7            |  106 |     11 |      118.0 ms |  115.7–118.8 |  97.3 ms |  5.9 ms |       4,241 |
+| viewer | pre-#364      |  106 |     11 |      436.2 ms |  412.8–453.0 | 401.9 ms | 26.1 ms |      40,879 |
+| viewer | #364 previous |  106 |      7 |      296.4 ms |  280.2–363.1 | 313.7 ms | 23.2 ms |      23,123 |
+| viewer | flat current  |  106 |     11 |      130.9 ms |  129.9–134.7 | 138.5 ms |  8.9 ms |       6,135 |
+| viewer | N7            |  106 |     11 |      107.8 ms |  102.9–117.1 | 123.1 ms |  7.3 ms |       4,444 |
 
 The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The remaining gap is the price of that scaling-safe choice.
 
@@ -50,7 +50,11 @@ This PR also groups predicates by role inside one policy expression, so identica
 
 ## Parameter contract
 
-Both the original and generated statements bind eleven independent inputs. The placeholder order differs because the flattened compiler emits the selected-root CTE first; `parameter-contract.json` records both ordered value arrays and the complete semantic position mapping so a caller can translate between them without collapsing any input. The generated page bindings are offset and the calculated upper ordinal in the item aggregate; the original used limit and offset. The values and mapping are kept as review artifacts rather than silently reusing one filter for both item and matched-count domains.
+Both the original and generated statements bind eleven independent inputs. The placeholder order differs because the flattened compiler emits the selected-root CTE first; `parameter-contract.json` records both ordered value arrays and the complete semantic position mapping so a caller can translate between them without collapsing any input. The generated page bindings are the direct offset and limit values in the item aggregate; the original used limit and offset. The mapping is therefore a pure permutation, not an arithmetic translation. The values and mapping are kept as review artifacts rather than silently reusing one filter for both item and matched-count domains.
+
+## Count-domain reconciliation
+
+Basis `$total` is the authorized population before query-time filtering. The uploaded MTG statement’s filtered `decks__total` is therefore an MTG query-specific SQL behavior, not a generic compiler rule; the compiler applies the Graph contract uniformly to every collection. The benchmark fixture has one visible deck, so the N7 and generated rows/counts remain equal for this workload even though `n7.sql` preserves that original artifact detail.
 
 ## Policy A/B
 

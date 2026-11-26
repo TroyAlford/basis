@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { DatabaseContext } from '../testing/DatabaseFixture'
 import { compileEntityQuery, queryEntity } from './Database'
 import { Action, Graph, Security } from './Graph'
+import { compilePolymorphicQueryWithRejection } from './PolymorphicQuery'
 
 const parent = '00000000-0000-4000-8000-000000000701'
 const other = '00000000-0000-4000-8000-000000000799'
@@ -32,6 +33,7 @@ const graph = new Graph({
         { field: 'label', type: 'String' },
         { field: 'owner', target: 'User', type: 'Entity' },
         { field: 'children', target: 'Child', type: 'Collection', via: 'ParentChild[parent = @].child' },
+        { field: 'tags', target: 'Tag', type: 'Collection', via: 'ParentChild[parent = @].tag' },
       ],
       name: 'Parent',
       security: {
@@ -258,6 +260,73 @@ describe('flat collection pagination', () => {
             `
           }
         }
+      },
+    })
+  })
+
+  test('executes fallback and the surviving sibling after a nested rejection', async () => {
+    await withDatabase('flat-rollback-execution', ownerUser, async database => {
+      const definition = database.entities.entity('Parent')
+      if (definition === undefined) throw new Error('Parent definition missing')
+      const compiled = compilePolymorphicQueryWithRejection(
+        database.entities,
+        definition,
+        {
+          fields: [
+            'id',
+            'children{$limit:null}',
+            'children.label',
+            'children.grandchildren{$limit:null}',
+            'children.grandchildren.label',
+            'tags{$limit:null}',
+            'tags.label',
+          ],
+        },
+        (_path, collection) => collection === 'grandchildren',
+      )
+      const rows = await database.sql.unsafe<Record<string, unknown>[]>(compiled.sql, compiled.values)
+      const row = compiled.hydrate(rows[0] as Record<string, unknown>) as {
+        children: { items: { grandchildren?: { items: { label: string }[] }, id: string, label: string }[] },
+        tags: { items: { label: string }[] },
+      }
+      expect(row.children.items.map(item => item.id)).toEqual([child(0), child(1)])
+      expect(row.children.items.map(item => item.label)).toEqual(['Child 0', 'Child 1'])
+      for (const item of row.children.items) {
+        expect(item.grandchildren?.items.map(grandchildRow => grandchildRow.label))
+          .toEqual(['Grandchild 0', 'Grandchild 1'])
+      }
+      expect(row.tags.items.map(tag => tag.label)).toEqual(['Tag 1', 'Tag 2'])
+    }, {
+      graph,
+      setup: async (database: DatabaseContext) => {
+        await database.create('User', { id: ownerUser, label: 'Owner', name: 'Owner' })
+        await database.create('Parent', { id: parent, label: 'Parent', name: 'Parent', owner: ownerUser })
+        await database.create('Child', [
+          { id: child(0), label: 'Child 0', name: 'Child 0', owner: ownerUser },
+          { id: child(1), label: 'Child 1', name: 'Child 1', owner: ownerUser },
+        ])
+        await database.create('Grandchild', [
+          { id: grandchild(0), label: 'Grandchild 0', name: 'Grandchild 0', owner: ownerUser },
+          { id: grandchild(1), label: 'Grandchild 1', name: 'Grandchild 1', owner: ownerUser },
+        ])
+        await database.create('Tag', [
+          { id: '00000000-0000-4000-8000-000000000b01', label: 'Tag 1', name: 'Tag 1' },
+          { id: '00000000-0000-4000-8000-000000000b02', label: 'Tag 2', name: 'Tag 2' },
+        ])
+        await database.sql`
+          INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id")
+          VALUES
+            (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b01'),
+            (${parent}, ${child(1)}, '00000000-0000-4000-8000-000000000b02')
+        `
+        await database.sql`
+          INSERT INTO "ChildGrandchild" ("child.id", "grandchild.id")
+          VALUES
+            (${child(0)}, ${grandchild(0)}),
+            (${child(0)}, ${grandchild(1)}),
+            (${child(1)}, ${grandchild(0)}),
+            (${child(1)}, ${grandchild(1)})
+        `
       },
     })
   })

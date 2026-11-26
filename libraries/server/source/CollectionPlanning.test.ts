@@ -160,9 +160,8 @@ describe('collection planning', () => {
     expect(sql).toContain('flat_counts_')
     expect(sql).toContain('"__total"')
     expect(sql).toContain('"__matched"')
-    expect(sql).toContain('"__ordinal" > 1')
-    expect(sql).toContain('"__ordinal" <= 3')
-    expect(values).toEqual([25, 0, 'One', 'One', 1, 3])
+    expect(sql).toContain('BETWEEN 1 AND')
+    expect(values).toEqual([25, 0, 'One', 'One', 1, 2])
   })
 
   test('batches nested counts without expanding nested resources', () => {

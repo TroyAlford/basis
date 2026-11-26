@@ -2863,20 +2863,9 @@ class QueryProjection {
       ...child.joins,
       sqlText(')'),
     ], ''))
-    /*
-     * The uploaded original and corrected N7 bind an explicit entity
-     * target-identity filter into both matched and total. Relationship-record
-     * totals stay unfiltered, and actor-scoped filters retain the historical
-     * parent-domain total used by the canonical Graph tests.
-     */
-    const filteredTotal = filterPredicate !== undefined
-      && plan.collection.kind === 'explicit'
-      && /\."id" IS NOT DISTINCT FROM/u.test(filterPredicate.sql)
-      && !filterPredicate.sql.includes('nullif(current_setting')
     this.#batchDefinitions.push(...this.#flatAggregateDefinitions({
       countsCte,
       filterPresent: filterPredicate !== undefined,
-      filteredTotal,
       itemsCte,
       limit,
       matchedFilterPresent: filterMatched !== undefined,
@@ -2999,7 +2988,6 @@ class QueryProjection {
    * @param options - CTE names and paging scope for one collection.
    * @param options.countsCte - Total-count CTE name.
    * @param options.filterPresent - Whether a member filter was compiled.
-   * @param options.filteredTotal - Whether total uses the matched filter domain.
    * @param options.itemsCte - JSON item CTE name.
    * @param options.limit - Page size.
    * @param options.matchedFilterPresent - Whether a matched-count filter was compiled.
@@ -3014,7 +3002,6 @@ class QueryProjection {
   #flatAggregateDefinitions(options: {
     readonly countsCte: string,
     readonly filterPresent: boolean,
-    readonly filteredTotal?: boolean,
     readonly itemBuilder?: string,
     readonly itemOrder?: string,
     readonly itemsCte: string,
@@ -3027,7 +3014,6 @@ class QueryProjection {
   }): SqlFragment[] {
     const {
       countsCte,
-      filteredTotal,
       filterPresent,
       itemBuilder,
       itemOrder,
@@ -3044,8 +3030,8 @@ class QueryProjection {
       page = sqlConcat([sqlText(quote('__ordinal')), sqlText(' > '), sqlValue(offset)], '')
     } else {
       page = sqlConcat([
-        sqlText(quote('__ordinal')), sqlText(' > '), sqlValue(offset),
-        sqlText(' AND '), sqlText(quote('__ordinal')), sqlText(' <= '), sqlValue(offset + limit),
+        sqlText(`${quote('__ordinal')} - `), sqlValue(offset),
+        sqlText(' BETWEEN 1 AND '), sqlValue(limit),
       ], '')
     }
     const ordered = itemOrder ?? `${quote('__child')}.${quote('__item_id')}`
@@ -3066,8 +3052,7 @@ class QueryProjection {
       sqlConcat([
         sqlText(`${countsCte} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
-        sqlText(`FROM ${filteredTotal === true ? matchedRows : rowsCte} ` +
-          `GROUP BY ${quote('__parent_id')})`),
+        sqlText(`FROM ${rowsCte} GROUP BY ${quote('__parent_id')})`),
       ], ''),
       sqlConcat([
         sqlText(`${itemsCte} AS MATERIALIZED (`),
@@ -3090,10 +3075,7 @@ class QueryProjection {
         sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
           `COALESCE(${quote('__item_group')}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
           `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
-        sqlText(`FROM ${filteredTotal === true
-          ? `(SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
-            `SELECT ${quote('__parent_id')} FROM ${quote('__matched')})`
-          : countsCte} AS ${quote('__parents')} `),
+        sqlText(`FROM ${countsCte} AS ${quote('__parents')} `),
         sqlText(`LEFT JOIN ${quote('__item_group')} ON ${quote('__item_group')}.${quote('__parent_id')} ` +
           `= ${quote('__parents')}.${quote('__parent_id')} `),
         sqlText(`LEFT JOIN ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +

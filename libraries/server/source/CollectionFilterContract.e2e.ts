@@ -65,7 +65,20 @@ describe('flat collection filter contract', () => {
       limit: null,
       where: `id = '${printing}'`,
     })
-    expect(compiled.values).toHaveLength(11)
+    expect(compiled.values).toEqual([
+      printing,
+      deckA,
+      deckA,
+      7,
+      2,
+      41,
+      41,
+      11,
+      3,
+      17,
+      4,
+    ])
+    expect(compiled.sql).toMatch(/"__ordinal" - \$\d+ BETWEEN 1 AND \$\d+/u)
     const values = [...compiled.values]
     const replace = (from: unknown, first: unknown, second: unknown): void => {
       const positions: number[] = []
@@ -123,21 +136,21 @@ describe('flat collection filter contract', () => {
       }
       expect(independent.decks.items.map(item => item.label)).toEqual(['A'])
       expect(independent.decks.$matched).toBe(1)
-      expect(independent.decks.$total).toBe(1)
+      expect(independent.decks.$total).toBe(2)
       expect(independent.entries.items.map(item => item.quantity)).toEqual([41])
       expect(independent.entries.$matched).toBe(1)
       expect(independent.entries.$total).toBe(2)
       const emptyItems = await run('00000000-0000-4000-8000-000000000c99', deckB, 99, 42) as typeof independent
       expect(emptyItems.decks.items).toEqual([])
       expect(emptyItems.decks.$matched).toBe(1)
-      expect(emptyItems.decks.$total).toBe(1)
+      expect(emptyItems.decks.$total).toBe(2)
       expect(emptyItems.entries.items).toEqual([])
       expect(emptyItems.entries.$matched).toBe(1)
       expect(emptyItems.entries.$total).toBe(2)
       const reverse = await run(deckB, '00000000-0000-4000-8000-000000000c99', 42, 99) as typeof independent
       expect(reverse.decks.items.map(item => item.label)).toEqual(['B'])
       expect(reverse.decks.$matched).toBe(0)
-      expect(reverse.decks.$total).toBe(0)
+      expect(reverse.decks.$total).toBe(2)
       expect(reverse.entries.items.map(item => item.quantity)).toEqual([42])
       expect(reverse.entries.$matched).toBe(0)
       expect(reverse.entries.$total).toBe(2)
