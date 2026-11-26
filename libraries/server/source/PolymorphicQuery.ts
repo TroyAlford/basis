@@ -2767,7 +2767,7 @@ class QueryProjection {
       && plan.ownerId !== undefined
       && plan.targetAlias !== undefined
       && (filterPredicate !== undefined || plan.collection.kind === 'inverse')
-    if (filterPredicate !== undefined && !selectedPath) {
+    if (filterPredicate !== undefined) {
       this.#batchDefinitions.push(sqlConcat([
         sqlText(`${flagsCte} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, ${quote('__item_id')}, `),
@@ -2788,18 +2788,21 @@ class QueryProjection {
       this.#batchDefinitions.push(sqlConcat([
         sqlText(`${uniqueBaseCte} AS MATERIALIZED (`),
         sqlText(`SELECT DISTINCT ON (${quote('__parent_id')}, ${quote('__item_id')}) * `),
-        sqlText(`FROM ${baseCte} ORDER BY ${quote('__parent_id')}, ${quote('__item_id')}`),
-        filterPredicate === undefined
-          ? undefined
-          : sqlText(`, ${quote('__batch_filter_matched')} DESC, ${quote('__batch_filter')} DESC`),
-        sqlText(')'),
+        sqlText(`FROM ${baseCte} ORDER BY ${quote('__parent_id')}, ${quote('__item_id')})`),
       ], ''))
-      const selectedSource = sqlConcat([
-        sqlText(`SELECT * FROM ${uniqueBaseCte}`),
-        filterPredicate === undefined
-          ? undefined
-          : sqlText(` WHERE ${quote('__batch_filter')} IS TRUE`),
-      ])
+      let selectedSource: SqlFragment
+      if (filterPredicate === undefined) {
+        selectedSource = sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte}`)])
+      } else {
+        selectedSource = sqlConcat([
+          sqlText(`SELECT u.*, f.${quote('__batch_filter')} AS ${quote('__batch_filter_agg')}, ` +
+            `f.${quote('__batch_filter_matched')} AS ${quote('__batch_filter_matched_agg')} `),
+          sqlText(`FROM ${uniqueBaseCte} u JOIN ${flagsCte} f ` +
+            `ON f.${quote('__parent_id')} = u.${quote('__parent_id')} ` +
+            `AND f.${quote('__item_id')} = u.${quote('__item_id')} `),
+          sqlText(`WHERE f.${quote('__batch_filter')} IS TRUE`),
+        ])
+      }
       let selectedQuery: SqlFragment
       if (limit === null && offset === 0) {
         selectedQuery = selectedSource
@@ -2826,7 +2829,10 @@ class QueryProjection {
         sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], ''),
         ...(filterPredicate === undefined ? [] : [sqlConcat([
           sqlText(`${matchedSourceCte} AS MATERIALIZED (`),
-          sqlText(`SELECT * FROM ${uniqueBaseCte} WHERE ${quote('__batch_filter_matched')} IS TRUE`),
+          sqlText(`SELECT u.* FROM ${uniqueBaseCte} u JOIN ${flagsCte} f ` +
+            `ON f.${quote('__parent_id')} = u.${quote('__parent_id')} ` +
+            `AND f.${quote('__item_id')} = u.${quote('__item_id')} ` +
+            `WHERE f.${quote('__batch_filter_matched')} IS TRUE`),
           sqlText(')'),
         ], '')]),
       )

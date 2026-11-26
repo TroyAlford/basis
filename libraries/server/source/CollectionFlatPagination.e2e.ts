@@ -1,5 +1,5 @@
 import { withDatabase } from 'basis/testing'
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import type { DatabaseContext } from '../testing/DatabaseFixture'
 import { compileEntityQuery, queryEntity } from './Database'
 import { Action, Graph, Security } from './Graph'
@@ -11,6 +11,8 @@ const ownerUser = '00000000-0000-4000-8000-0000000007a0'
 const child = (index: number): string => `00000000-0000-4000-8000-0000000008${String(index).padStart(2, '0')}`
 const grandchild = (index: number): string => `00000000-0000-4000-8000-0000000009${String(index).padStart(2, '0')}`
 const unrelated = (index: number): string => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`
+
+setDefaultTimeout(60_000)
 
 interface Collection {
   readonly $matched: number,
@@ -82,7 +84,7 @@ const graph = new Graph({
         { field: 'child', target: 'Child' },
         { field: 'tag', target: 'Tag' },
       ],
-      fields: [],
+      fields: [{ field: 'rank', nullable: true, type: 'Number' }],
       name: 'ParentChild',
       security: {
         [Action.Read]: Security.Public,
@@ -349,6 +351,55 @@ describe('flat collection pagination', () => {
             (${child(0)}, ${grandchild(1)}),
             (${child(1)}, ${grandchild(0)}),
             (${child(1)}, ${grandchild(1)})
+        `
+      },
+    })
+  })
+
+  test('keeps independent item and matched edge filters for one target', async () => {
+    await withDatabase('flat-edge-filter', ownerUser, async database => {
+      const definition = database.entities.entity('Parent')
+      if (definition === undefined) throw new Error('Parent definition missing')
+      const compiled = compilePolymorphicQuery(database.entities, definition, {
+        fields: ['id', 'children[rank = 1]{$limit:null}', 'children.label'],
+        where: { id: parent },
+      })
+      const rank = 1
+      const positions: number[] = []
+      compiled.values.forEach((value, index) => { if (value === rank) positions.push(index) })
+      expect(positions).toHaveLength(2)
+      const run = async (itemRank: number, matchedRank: number): Promise<Record<string, unknown>> => {
+        const values = [...compiled.values]
+        values[positions[0] as number] = itemRank
+        values[positions[1] as number] = matchedRank
+        const rows = await database.sql.unsafe<Record<string, unknown>[]>(compiled.sql, values)
+        return compiled.hydrate(rows[0] as Record<string, unknown>)
+      }
+      const item = await run(1, 2) as {
+        children: { $matched: number, $total: number, items: { id: string }[] },
+      }
+      expect(item.children.items.map(entry => entry.id)).toEqual([child(0)])
+      expect(item.children.$matched).toBe(1)
+      expect(item.children.$total).toBe(1)
+      const reverse = await run(2, 1) as typeof item
+      expect(reverse.children.items.map(entry => entry.id)).toEqual([child(0)])
+      expect(reverse.children.$matched).toBe(1)
+      expect(reverse.children.$total).toBe(1)
+    }, {
+      graph,
+      setup: async (database: DatabaseContext) => {
+        await database.create('User', { id: ownerUser, label: 'Owner', name: 'Owner' })
+        await database.create('Parent', { id: parent, label: 'Parent', name: 'Parent', owner: ownerUser })
+        await database.create('Child', { id: child(0), label: 'Child', name: 'Child', owner: ownerUser })
+        await database.create('Tag', [
+          { id: '00000000-0000-4000-8000-000000000b01', label: 'Tag 1', name: 'Tag 1' },
+          { id: '00000000-0000-4000-8000-000000000b02', label: 'Tag 2', name: 'Tag 2' },
+        ])
+        await database.sql`
+          INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id", "rank")
+          VALUES
+            (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b01', 1),
+            (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b02', 2)
         `
       },
     })
