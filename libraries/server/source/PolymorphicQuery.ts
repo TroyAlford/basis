@@ -3454,7 +3454,9 @@ class QueryProjection {
       itemsCte,
       limit,
       matchedFilterPresent: filterPredicate !== undefined,
-      matchedRowsSource: selectedPath && filterPredicate !== undefined ? matchedSourceCte : undefined,
+      matchedRowsSource: selectedPath
+        ? filterPredicate === undefined ? uniqueBaseCte : matchedSourceCte
+        : undefined,
       offset,
       pageLimit,
       pageOffset,
