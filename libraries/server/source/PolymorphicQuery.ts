@@ -2857,6 +2857,12 @@ class QueryProjection {
       ...child.joins,
       sqlText(')'),
     ], ''))
+    /*
+     * The uploaded original and corrected N7 bind an explicit entity
+     * target-identity filter into both matched and total. Relationship-record
+     * totals stay unfiltered, and actor-scoped filters retain the historical
+     * parent-domain total used by the canonical Graph tests.
+     */
     const filteredTotal = filterPredicate !== undefined
       && plan.collection.kind === 'explicit'
       && /\."id" IS NOT DISTINCT FROM/u.test(filterPredicate.sql)
