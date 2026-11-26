@@ -1,5 +1,5 @@
 {
-  "basis": "7fd258433045f348ed1c942e72297ee8c657d8e2",
+  "basis": "238e4af1db7166cab3a463556165142a7c783444",
   "consumer": "TroyAlford-AI/mtg-proxifier#a5afe51",
   "compilerAdapter": "basis/testing compileEntityQuery",
   "fixture": {
@@ -14,7 +14,7 @@
     "viewer": { "mismatches": 0, "rows": 106 }
   },
   "commands": [
-    "BASIS_N7_COMPILER=1 BASIS_N7_EXPECTED_SHA=7fd258433045f348ed1c942e72297ee8c657d8e2 bun test ./src/server/collectionN7.differential.integration.ts",
+    "BASIS_N7_COMPILER=1 BASIS_N7_EXPECTED_SHA=238e4af1db7166cab3a463556165142a7c783444 bun test ./src/server/collectionN7.differential.integration.ts",
     "BASIS_N7_COMPILER=1 bun test ./src/server/collectionN7.integration.ts"
   ],
   "assertions": {
