@@ -174,6 +174,26 @@ describe('flat collection pagination', () => {
         for (const childNode of node.Plans ?? []) walk(childNode)
       }
       walk(plan)
+      const scans: { relation: string, rows: number, type: string }[] = []
+      const scanWalk = (node: PlanNode): void => {
+        if (typeof node['Relation Name'] === 'string' && typeof node['Node Type'] === 'string') {
+          scans.push({
+            relation: node['Relation Name'],
+            rows: Number(node['Actual Rows'] ?? 0),
+            type: node['Node Type'],
+          })
+        }
+        for (const childNode of node.Plans ?? []) scanWalk(childNode)
+      }
+      scanWalk(plan)
+      expect(plan['Shared Hit Blocks']).toBeLessThan(200)
+      const parentScan = scans.find(scan => scan.relation === 'Parent')
+      const childScan = scans.find(scan => scan.relation === 'Child')
+      const grandchildScan = scans.find(scan => scan.relation === 'Grandchild')
+      expect(parentScan?.type).toBe('Index Scan')
+      expect(parentScan?.rows).toBeLessThanOrEqual(1)
+      expect(childScan?.rows).toBeLessThanOrEqual(2)
+      expect(grandchildScan?.rows).toBeLessThanOrEqual(10)
       expect(compiled.sql).toContain('authorized_Parent" AS NOT MATERIALIZED')
       expect(compiled.sql).toContain('authorized_Child" AS NOT MATERIALIZED')
       expect(scopes.length).toBeGreaterThan(0)

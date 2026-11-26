@@ -677,8 +677,8 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"visits"')
     expect(compiled.sql).toContain('"visits__matched"')
     expect(compiled.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(compiled.sql).toContain('"__ordinal" > 1 AND "__ordinal" <= 3')
-    expect(compiled.values).toEqual([25, 0])
+    expect(compiled.sql).toContain('"__ordinal" > $3 AND "__ordinal" <= $4')
+    expect(compiled.values).toEqual([25, 0, 1, 3])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
@@ -706,8 +706,8 @@ describe('SQL.where', () => {
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
     expect(members.sql).toMatch(/"__edge_row"\."user\.id"/)
     expect(members.sql).toContain('"members"')
-    expect(members.sql).toContain('"__ordinal" > 1 AND "__ordinal" <= 3')
-    expect(members.values).toEqual([25, 0])
+    expect(members.sql).toContain('"__ordinal" > $3 AND "__ordinal" <= $4')
+    expect(members.values).toEqual([25, 0, 1, 3])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id', 'articles{$limit:1}'],

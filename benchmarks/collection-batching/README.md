@@ -23,20 +23,20 @@ All statements returned 106 root rows for every actor. The planner estimated one
 
 Direct times are the median of five interleaved runs; ranges are min–max.
 
-| actor | statement | rows | direct median | direct range | EXPLAIN | plan | shared hits |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| owner | pre-#364 | 106 | 311.7 ms | 307.8–315.6 | 285.3 ms | 26.2 ms | 20,365 |
-| owner | #364 previous | 106 | 152.3 ms | 151.7–153.5 | 165.4 ms | 24.8 ms | 9,061 |
-| owner | flat current | 106 | 73.0 ms | 71.7–76.8 | 73.5 ms | 8.7 ms | 2,768 |
-| owner | N7 | 106 | 58.5 ms | 56.8–58.9 | 60.2 ms | 7.0 ms | 1,703 |
-| editor | pre-#364 | 106 | 486.6 ms | 480.7–493.2 | 453.2 ms | 26.8 ms | 39,647 |
-| editor | #364 previous | 106 | 322.1 ms | 308.7–344.8 | 285.8 ms | 25.2 ms | 22,284 |
-| editor | flat current | 106 | 129.8 ms | 119.5–136.6 | 129.8 ms | 8.5 ms | 5,937 |
-| editor | N7 | 106 | 115.7 ms | 110.1–117.3 | 100.9 ms | 6.4 ms | 4,241 |
-| viewer | pre-#364 | 106 | 429.1 ms | 420.7–432.7 | 416.4 ms | 26.9 ms | 40,879 |
-| viewer | #364 previous | 106 | 288.0 ms | 282.5–292.2 | 307.9 ms | 24.0 ms | 23,123 |
-| viewer | flat current | 106 | 122.1 ms | 119.7–130.7 | 124.3 ms | 8.5 ms | 6,135 |
-| viewer | N7 | 106 | 103.8 ms | 102.2–106.4 | 115.2 ms | 6.2 ms | 4,444 |
+| actor | statement | rows | params | direct median | direct range | EXPLAIN | plan | shared hits |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| owner | pre-#364 | 106 | 11 | 309.5 ms | 303.7–315.9 | 293.0 ms | 25.3 ms | 20,365 |
+| owner | #364 previous | 106 | 7 | 154.9 ms | 150.8–157.3 | 168.4 ms | 24.8 ms | 9,061 |
+| owner | flat current | 106 | 11 | 73.4 ms | 72.3–77.4 | 78.2 ms | 8.6 ms | 2,768 |
+| owner | N7 | 106 | 11 | 59.1 ms | 57.7–60.3 | 59.6 ms | 6.3 ms | 1,703 |
+| editor | pre-#364 | 106 | 11 | 467.3 ms | 449.9–480.6 | 418.7 ms | 26.0 ms | 39,647 |
+| editor | #364 previous | 106 | 7 | 316.9 ms | 300.3–330.5 | 287.9 ms | 24.3 ms | 22,284 |
+| editor | flat current | 106 | 11 | 131.9 ms | 125.3–137.9 | 130.6 ms | 8.8 ms | 5,937 |
+| editor | N7 | 106 | 11 | 113.4 ms | 110.1–116.6 | 95.0 ms | 6.0 ms | 4,241 |
+| viewer | pre-#364 | 106 | 11 | 428.3 ms | 423.5–437.7 | 422.1 ms | 27.0 ms | 40,879 |
+| viewer | #364 previous | 106 | 7 | 291.7 ms | 286.7–299.3 | 320.2 ms | 24.1 ms | 23,123 |
+| viewer | flat current | 106 | 11 | 137.1 ms | 125.3–138.6 | 135.7 ms | 8.9 ms | 6,135 |
+| viewer | N7 | 106 | 11 | 108.9 ms | 103.6–111.0 | 110.9 ms | 6.2 ms | 4,444 |
 
 The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The remaining gap is the price of that scaling-safe choice.
 
@@ -50,7 +50,7 @@ This PR also groups predicates by role inside one policy expression, so identica
 
 ## Policy A/B
 
-These policy measurements were refreshed against the current flattened compiler and are not pre-flat historical data.
+Policy A/B measurements are pinned to commit `db116d4`; the later query-contract and pagination work changes no policy SQL.
 
 The grouped-policy variant is the only policy change in this PR: predicates for the same role are factored under one role check. It was applied to the disposable fixture schema by replacing the installed policies with the current Graph policy SQL; the table structures and data were unchanged. The canonical and grouped runs used the same actor, fixture, statements, warm-up, and five direct repetitions.
 

@@ -161,7 +161,7 @@ describe('collection planning', () => {
     expect(sql).toContain('"__matched"')
     expect(sql).toContain('"__ordinal" > 1')
     expect(sql).toContain('"__ordinal" <= 3')
-    expect(values).toEqual([25, 0, 'One'])
+    expect(values).toEqual([25, 0, 'One', 'One', 1, 3])
   })
 
   test('batches nested counts without expanding nested resources', () => {
@@ -208,7 +208,7 @@ describe('collection planning', () => {
     })
     expect(compiled.sql).toContain('"title"')
     expect(compiled.sql).toContain('"enabled"')
-    expect(compiled.values).toEqual([true, 25, 0, 'A'])
+    expect(compiled.values).toEqual([true, 25, 0, 'A', 'A'])
     expect(countSubqueries(compiled.sql).every(scope => (
       !scope.includes('"Card"') && !scope.includes('"Face"')
     ))).toBe(true)
@@ -284,7 +284,7 @@ describe('flattened collection compilation', () => {
     const { sql, values } = compileEntityQuery(graph.definitions, 'Deck', {
       fields: ['id', 'printings{$limit:1}', 'printings.card.faces{$limit:1}', 'printings.card.faces.name'],
     })
-    expect(values).toEqual([25, 0])
+    expect(values).toEqual([25, 0, 0, 1, 0, 1])
     const expected = readFileSync(new URL('./FlatCollection.expected.sql', import.meta.url), 'utf8')
     expect(sql.replace(/\), "/gu, '),\n"')).toMatchIndented(expected)
   })
@@ -351,7 +351,7 @@ describe('flattened collection compilation', () => {
     expect(sql).not.toContain('authorized_nested_')
     expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_flags_\w+" AS MATERIALIZED/gu)).toBe(1)
-    expect(count(sql, /"flat_rows_(?!filtered_)\w+" AS MATERIALIZED/gu)).toBe(3)
+    expect(count(sql, /"flat_rows_(?!filtered_|matched_)\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_items_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"authorized_Card" AS MATERIALIZED/gu)).toBe(1)
