@@ -176,8 +176,8 @@ describe('flat collection pagination', () => {
       expect(boundRow.children.items.map(item => item.id)).toEqual([child(1)])
       expect(boundRow.children.items[0]?.grandchildren?.items[0]?.id).toBe(grandchild(5))
       const compiled = compileEntityQuery(database.entities, 'Parent', options)
-      expect(compiled.sql).toContain('flat_scope_')
-      expect(compiled.sql).toContain('FROM "flat_scope_')
+      expect(compiled.sql).toContain('flat_selected_')
+      expect(compiled.sql).toContain('FROM "flat_selected_')
       const explained = await database.sql.unsafe<Record<string, unknown>[]>(
         `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${compiled.sql}`,
         compiled.values,
@@ -194,7 +194,7 @@ describe('flat collection pagination', () => {
       const targetRows: number[] = []
       const walk = (node: PlanNode): void => {
         if (typeof node['CTE Name'] === 'string') {
-          if (node['CTE Name'].startsWith('flat_scope_')) scopes.push(Number(node['Actual Rows'] ?? 0))
+          if (node['CTE Name'].startsWith('flat_selected_')) scopes.push(Number(node['Actual Rows'] ?? 0))
           if (node['CTE Name'].startsWith('batch_selected_rows_')) rootRows.push(Number(node['Actual Rows'] ?? 0))
           if (node['CTE Name'].startsWith('flat_targets_')) targetRows.push(Number(node['Actual Rows'] ?? 0))
         }

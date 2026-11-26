@@ -78,7 +78,8 @@ describe('flat collection filter contract', () => {
       17,
       4,
     ])
-    expect(compiled.sql).toMatch(/"__ordinal" - \$\d+ BETWEEN 1 AND \$\d+/u)
+    expect(compiled.sql).toContain('__selected_ordinal')
+    expect(compiled.sql).toContain('BETWEEN 1 AND')
     const values = [...compiled.values]
     const replace = (from: unknown, first: unknown, second: unknown): void => {
       const positions: number[] = []

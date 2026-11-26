@@ -126,9 +126,9 @@ describe('collection planning', () => {
     const filtered = compileEntityQuery(graph.definitions, 'Deck', {
       fields: ['id', 'printings[title = \'One\']{$limit:null}', 'printings.card.name'],
     })
-    expect(filtered.sql).toContain('flat_rows_')
     expect(filtered.sql).toContain('flat_selected_')
-    expect(filtered.sql).toContain('flat_matched_')
+    expect(filtered.sql).toContain('__batch_filter_matched_agg')
+    expect(filtered.sql).toContain('"__counts" AS MATERIALIZED')
     expect(filtered.sql).not.toMatch(/SELECT count\(\*\)::int FROM \(/)
   })
 
@@ -156,7 +156,7 @@ describe('collection planning', () => {
       ],
     })
     expect(sql).toContain('flat_selected_')
-    expect(sql).toContain('flat_counts_')
+    expect(sql).toContain('"__counts" AS MATERIALIZED')
     expect(sql).toContain('"__total"')
     expect(sql).toContain('"__matched"')
     expect(sql).toContain('BETWEEN 1 AND')
@@ -175,7 +175,7 @@ describe('collection planning', () => {
       ],
     })
     expect(countSubqueries(sql)).toEqual([])
-    expect(sql.match(/flat_counts_/gu)?.length).toBeGreaterThan(1)
+    expect(sql.match(/"__item_group" AS MATERIALIZED/gu)?.length).toBeGreaterThan(1)
     expect(sql).toContain('batch_selected_roots_')
     expect(sql.match(/flat_base_/gu)?.length).toBeGreaterThan(2)
     expect(sql).toMatch(/batch_parent_/u)
@@ -374,8 +374,8 @@ describe('flattened collection compilation', () => {
     expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_selected_\w+" AS MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"flat_unique_\w+" AS MATERIALIZED/gu)).toBe(1)
-    expect(count(sql, /"flat_rows_(?!filtered_|matched_)\w+" AS MATERIALIZED/gu)).toBe(3)
-    expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_rows_\w+" AS MATERIALIZED/gu)).toBe(0)
+    expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(0)
     expect(count(sql, /"flat_items_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"reachable_Card_\d+" AS MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"authorized_Card" AS NOT MATERIALIZED/gu)).toBe(0)
@@ -478,9 +478,9 @@ describe('chosen collection compilation', () => {
     expect(sql).toMatch(/"flat_targets_\w+" AS MATERIALIZED/u)
     expect(sql).toMatch(/"flat_base_\w+" AS MATERIALIZED/u)
     expect(sql).toMatch(/"ct\d+"\."id" AS "__item_id"/u)
-    expect(sql).toMatch(/"flat_rows_\w+" AS MATERIALIZED \(SELECT DISTINCT ON \(/u)
+    expect(sql).toMatch(/"flat_items_\w+" AS MATERIALIZED \(WITH/u)
+    expect(sql).toContain('SELECT DISTINCT ON (')
     expect(sql).not.toMatch(/"flat_counts_\w+" AS MATERIALIZED/u)
-    expect(sql).toMatch(/"flat_items_\w+" AS MATERIALIZED/u)
     expect(sql).toContain('count(*)::int AS "__total", count(*)::int AS "__matched"')
     expect(sql).not.toContain('authorized_batch_')
 

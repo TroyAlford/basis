@@ -706,7 +706,7 @@ describe('SQL.where', () => {
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
     expect(members.sql).toMatch(/"__edge_row"\."user\.id"/)
     expect(members.sql).toContain('"members"')
-    expect(members.sql).toContain('"__ordinal" - $3 BETWEEN 1 AND $4')
+    expect(members.sql).toContain('"__selected_ordinal" -  $3  BETWEEN 1 AND  $4')
     expect(members.values).toEqual([25, 0, 1, 2])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
