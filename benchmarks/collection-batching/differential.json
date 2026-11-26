@@ -1,6 +1,6 @@
 {
   "basis": "238e4af1db7166cab3a463556165142a7c783444",
-  "consumer": "TroyAlford-AI/mtg-proxifier#a5afe51",
+  "consumer": "TroyAlford-AI/mtg-proxifier#2b7de76",
   "compilerAdapter": "basis/testing compileEntityQuery",
   "fixture": {
     "deckEntriesOffset": 1,
