@@ -127,6 +127,9 @@ describe('Server', () => {
     expect(html).toContain('id="basis-runtime"')
     expect(html).toContain('id="basis-bootstrap"')
     expect(html).toContain('id="root"')
+    expect(html).toContain('<style id="basis:fixture"')
+    expect(html).toContain('<\\/style><script>not markup</script>')
+    expect(html).not.toContain('</style><script>not markup</script>')
     expect(html).toContain('Basis managed server')
     expect(html).toContain('<title>Basis &lt;fixture&gt;</title>')
 

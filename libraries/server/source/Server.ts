@@ -12,6 +12,7 @@ import type { Identity } from '../../oauth'
 import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
+import { styleEntries } from '../../react/utilities/style'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { assertBasisServerCompatible, HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
@@ -562,6 +563,20 @@ export class Server<
   }
 
   /**
+   * Render registered component stylesheets into the document head so the first
+   * paint uses the same styles as the hydrated client.
+   * @param entries - The request's captured stylesheet registry entries.
+   * @returns One style element per captured stylesheet.
+   */
+  #styleTags(entries: readonly (readonly [string, string])[]): string {
+    return entries.map(([id, css]) => {
+      const escapedId = id.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      const safeCss = css.replace(/<\/style/gi, '<\\/style')
+      return `<style id="${escapedId}" data-injected-by="style-utility">${safeCss}</style>`
+    }).join('')
+  }
+
+  /**
    * Handles a UI request.
    *
    * When an {@link Server.identity} capability is configured, the request is
@@ -586,6 +601,7 @@ export class Server<
         ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
         : null
       const application = rendered ? renderToString(rendered) : ''
+      const styleSnapshot = styleEntries()
       const title = head.title || this.#title
       const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
       const runtimeScript = [
@@ -608,7 +624,7 @@ export class Server<
         }))
         const html = fallback
           .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
-          .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
+          .replace('</head>', `${this.#styleTags(styleSnapshot)}${runtimeScript}${bootstrapScript}</head>`)
         return this.#withContextResponse(new Response(html, {
           headers: { 'Content-Type': 'text/html' },
         }), resolved)
@@ -633,7 +649,12 @@ export class Server<
           element: element => { element.setInnerContent(title) },
         })
         .on('head', {
-          element: element => { element.append(`${favicon}${runtimeScript}${bootstrapScript}`, { html: true }) },
+          element: element => {
+            element.append(
+              `${this.#styleTags(styleSnapshot)}${favicon}${runtimeScript}${bootstrapScript}`,
+              { html: true },
+            )
+          },
         })
         .on('#root', {
           element: element => { element.setInnerContent(application, { html: true }) },
