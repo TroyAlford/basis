@@ -581,6 +581,12 @@ interface ProjectionShared {
   cte: number,
   /** Ordered collection CTE definitions for the complete statement. */
   readonly definitions: SqlFragment[],
+  /**
+   * Test-only post-mutation rejection hook. Production compilation leaves this
+   * undefined; the rollback regression injects it to exercise the nested-flat
+   * failure branch without changing a public query option.
+   */
+  readonly rejectNestedProjection?: (path: readonly string[], collection: string) => boolean,
   /** Authorized relations and their shared CTE requirements. */
   readonly relations: AuthorizedRelations,
   /** Shared relationship-edge sources keyed by parent/source identity. */
@@ -674,6 +680,7 @@ class QueryProjection {
    * @param shared - Statement-wide scope shared with nested flat projections.
    * @param rootBase - Materialized identity rows for a nested item projection.
    * @param context - Root occurrence for a nested item projection.
+   * @param rejectNestedProjection - Test-only nested-flat rejection hook.
    */
   constructor(
     entities: EntityDefinitions,
@@ -685,6 +692,7 @@ class QueryProjection {
     shared?: ProjectionShared,
     rootBase?: string,
     context?: EntityContext,
+    rejectNestedProjection?: (path: readonly string[], collection: string) => boolean,
   ) {
     this.#entities = entities
     this.#shared = shared ?? {
@@ -692,6 +700,7 @@ class QueryProjection {
       cte: 0,
       definitions: [],
       relations: new AuthorizedRelations(entities, relationPrefix),
+      ...(rejectNestedProjection === undefined ? {} : { rejectNestedProjection }),
       sources: new Map(),
     }
     this.#relations = this.#shared.relations
@@ -2802,6 +2811,9 @@ class QueryProjection {
     )
     let hydrateItem: (row: Record<string, unknown>) => Record<string, unknown>
     try {
+      if (this.#shared.rejectNestedProjection?.(node.path, spec.collection.name) === true) {
+        throw new Error('Nested flat projection rejected for rollback coverage')
+      }
       hydrateItem = child.build(fields, 0, undefined)
     } catch {
       /*
@@ -2845,9 +2857,14 @@ class QueryProjection {
       ...child.joins,
       sqlText(')'),
     ], ''))
+    const filteredTotal = filterPredicate !== undefined
+      && plan.collection.kind === 'explicit'
+      && /\."id" IS NOT DISTINCT FROM/u.test(filterPredicate.sql)
+      && !filterPredicate.sql.includes('nullif(current_setting')
     this.#batchDefinitions.push(...this.#flatAggregateDefinitions({
       countsCte,
       filterPresent: filterPredicate !== undefined,
+      filteredTotal,
       itemsCte,
       limit,
       matchedFilterPresent: filterMatched !== undefined,
@@ -2970,6 +2987,7 @@ class QueryProjection {
    * @param options - CTE names and paging scope for one collection.
    * @param options.countsCte - Total-count CTE name.
    * @param options.filterPresent - Whether a member filter was compiled.
+   * @param options.filteredTotal - Whether total uses the matched filter domain.
    * @param options.itemsCte - JSON item CTE name.
    * @param options.limit - Page size.
    * @param options.matchedFilterPresent - Whether a matched-count filter was compiled.
@@ -2984,6 +3002,7 @@ class QueryProjection {
   #flatAggregateDefinitions(options: {
     readonly countsCte: string,
     readonly filterPresent: boolean,
+    readonly filteredTotal?: boolean,
     readonly itemBuilder?: string,
     readonly itemOrder?: string,
     readonly itemsCte: string,
@@ -2996,6 +3015,7 @@ class QueryProjection {
   }): SqlFragment[] {
     const {
       countsCte,
+      filteredTotal,
       filterPresent,
       itemBuilder,
       itemOrder,
@@ -3034,14 +3054,12 @@ class QueryProjection {
       sqlConcat([
         sqlText(`${countsCte} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
-        sqlText(`FROM ${rowsCte} GROUP BY ${quote('__parent_id')})`),
+        sqlText(`FROM ${filteredTotal === true ? matchedRows : rowsCte} ` +
+          `GROUP BY ${quote('__parent_id')})`),
       ], ''),
       sqlConcat([
         sqlText(`${itemsCte} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote('__items')}.${quote('__parent_id')}, ` +
-          `${quote('__items')}.${quote('__items')}, ` +
-          `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
-        sqlText('FROM ('),
+        sqlText(`WITH ${quote('__item_group')} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, `),
         sqlText(`COALESCE(json_agg(${built} ORDER BY ${quote('__item')}.${quote('__ordinal')}) `),
         sqlText('FILTER (WHERE '),
@@ -3054,11 +3072,18 @@ class QueryProjection {
         sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
         sqlText(`FROM ${itemRows} AS ${quote('__child')}) `),
         sqlText(`AS ${quote('__item')} GROUP BY ${quote('__parent_id')}) `),
-        sqlText(`AS ${quote('__items')} LEFT JOIN (`),
+        sqlText(`, ${quote('__matched')} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__matched')} `),
         sqlText(`FROM ${matchedRows} GROUP BY ${quote('__parent_id')}) `),
-        sqlText(`AS ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +
-          `= ${quote('__items')}.${quote('__parent_id')})`),
+        sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
+          `COALESCE(${quote('__item_group')}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
+          `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
+        sqlText(`FROM (SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
+          `SELECT ${quote('__parent_id')} FROM ${quote('__matched')}) AS ${quote('__parents')} `),
+        sqlText(`LEFT JOIN ${quote('__item_group')} ON ${quote('__item_group')}.${quote('__parent_id')} ` +
+          `= ${quote('__parents')}.${quote('__parent_id')} `),
+        sqlText(`LEFT JOIN ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +
+          `= ${quote('__parents')}.${quote('__parent_id')})`),
       ], ''),
     ]
   }
@@ -3912,6 +3937,24 @@ export function compilePolymorphicQuery(
   definition: EntityDefinition,
   options: PolymorphicQueryOptions,
 ): CompiledPolymorphicQuery {
+  return compilePolymorphicQueryWithRejection(entities, definition, options)
+}
+
+/**
+ * Compile one entity query with an internal nested-flat rejection hook.
+ * @param entities - Canonical entity definitions.
+ * @param definition - Concrete entity or abstract ancestor being queried.
+ * @param options - Query options.
+ * @param rejectNestedProjection - Test-only post-mutation rejection hook.
+ * @returns The complete SQL, ordered bindings, and row hydrator.
+ * @internal
+ */
+export function compilePolymorphicQueryWithRejection(
+  entities: EntityDefinitions,
+  definition: EntityDefinition,
+  options: PolymorphicQueryOptions,
+  rejectNestedProjection?: (path: readonly string[], collection: string) => boolean,
+): CompiledPolymorphicQuery {
   const projection = new QueryProjection(
     entities,
     definition,
@@ -3919,6 +3962,10 @@ export function compilePolymorphicQuery(
     options.rootAlias,
     options.aliasPrefix,
     options.relationPrefix,
+    undefined,
+    undefined,
+    undefined,
+    rejectNestedProjection,
   )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }

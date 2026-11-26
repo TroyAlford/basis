@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { compileEntityQuery } from './Database'
 import { Graph } from './Graph'
+import { compilePolymorphicQueryWithRejection } from './PolymorphicQuery'
 
 const graph = new Graph({
   entities: [
@@ -295,6 +296,29 @@ describe('flattened collection compilation', () => {
     })
     expect(sql).not.toContain('flat_scope_')
     expect(sql).toContain('LEFT JOIN LATERAL')
+  })
+
+  test('restores shared state after a post-mutation nested flat rejection', () => {
+    const definition = graph.definitions.entity('Deck')
+    if (definition === undefined) throw new Error('Deck definition missing')
+    const compiled = compilePolymorphicQueryWithRejection(
+      graph.definitions,
+      definition,
+      {
+        fields: [
+          'id',
+          'printings{$limit:null}',
+          'printings.card.faces{$limit:null}',
+          'printings.card.faces.name',
+          'printings.panels.art.name',
+        ],
+      },
+      (_path, collection) => collection === 'faces',
+    )
+    expect(compiled.sql).toContain('"batch_items_fi5_')
+    expect(compiled.sql).toContain('"flat_items_fi5_')
+    expect(compiled.sql).toContain('authorized_Face')
+    expect(compiled.sql).toContain('authorized_Art')
   })
 
   test('shares one relationship source across sibling collections', () => {
