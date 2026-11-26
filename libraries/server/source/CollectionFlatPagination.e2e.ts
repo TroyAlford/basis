@@ -127,6 +127,27 @@ describe('flat collection pagination', () => {
         expect(item.grandchildren?.items).toHaveLength(5)
         expect(item.grandchildren?.$total).toBe(5)
       }
+      const offsetOptions = {
+        fields: [
+          'id',
+          'children{$limit:2,$offset:2}',
+          'children.label',
+          'children.grandchildren{$limit:null}',
+          'children.grandchildren.label',
+        ],
+        where: { id: parent },
+      }
+      const offsetRows = await queryEntity<{ readonly children: Collection, readonly id: string }>(
+        database.sql,
+        database.entities,
+        'Parent',
+        offsetOptions,
+      )
+      expect(offsetRows[0]?.children.items.map(item => item.id)).toEqual([child(2), child(3)])
+      expect(offsetRows[0]?.children.$total).toBe(5)
+      for (const item of offsetRows[0]?.children.items ?? []) {
+        expect(item.grandchildren?.items).toHaveLength(5)
+      }
       const compiled = compileEntityQuery(database.entities, 'Parent', options)
       expect(compiled.sql).toContain('flat_scope_')
       expect(compiled.sql).toContain('FROM "flat_scope_')
@@ -173,7 +194,7 @@ describe('flat collection pagination', () => {
           id: unrelated(index),
           label: `Unrelated ${index}`,
           name: `Unrelated ${index}`,
-          owner: other,
+          owner: ownerUser,
         })))
         const children = Array.from({ length: 5 }, (_, index) => ({
           id: child(index),
@@ -186,7 +207,7 @@ describe('flat collection pagination', () => {
           id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
           label: `Unrelated child ${index}`,
           name: `Unrelated child ${index}`,
-          owner: other,
+          owner: ownerUser,
         })))
         const grandchildren = Array.from({ length: 25 }, (_, index) => ({
           id: grandchild(index),
