@@ -50,7 +50,7 @@ This PR also groups predicates by role inside one policy expression, so identica
 
 ## Policy A/B
 
-These policy measurements were captured with the flattened compiler at `db116d4`; they are current for this commit, not historical pre-flat data.
+These policy measurements were refreshed against the current flattened compiler and are not pre-flat historical data.
 
 The grouped-policy variant is the only policy change in this PR: predicates for the same role are factored under one role check. It was applied to the disposable fixture schema by replacing the installed policies with the current Graph policy SQL; the table structures and data were unchanged. The canonical and grouped runs used the same actor, fixture, statements, warm-up, and five direct repetitions.
 
