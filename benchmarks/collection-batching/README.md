@@ -25,22 +25,22 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor  | statement     | rows | params | direct median | direct range |  EXPLAIN |    plan | shared hits |
 | ------ | ------------- | ---: | -----: | ------------: | -----------: | -------: | ------: | ----------: |
-| owner | pre-#364 | 106 | 11 | 632.4 ms | 622.5–673.8 | 622.3 ms | 28.4 ms | 20,365 |
-| owner | #364 previous | 106 | 7 | 28.8 ms | 27.5–32.4 | 35.6 ms | 26.9 ms | 9,061 |
-| owner | flat current | 106 | 11 | 17.9 ms | 16.5–18.7 | 20.3 ms | 12.3 ms | 2,768 |
-| owner | N7 | 106 | 11 | 11.8 ms | 11.1–12.3 | 12.8 ms | 10.2 ms | 1,703 |
-| editor | pre-#364 | 106 | 11 | 744.4 ms | 731.5–776.0 | 695.0 ms | 28.4 ms | 39,647 |
-| editor | #364 previous | 106 | 7 | 160.1 ms | 151.3–164.0 | 155.2 ms | 25.1 ms | 22,284 |
-| editor | flat current | 106 | 11 | 68.3 ms | 62.2–73.0 | 66.1 ms | 9.4 ms | 5,937 |
-| editor | N7 | 106 | 11 | 59.7 ms | 58.1–61.6 | 46.3 ms | 6.4 ms | 4,241 |
-| viewer | pre-#364 | 106 | 11 | 803.8 ms | 803.1–816.2 | 756.9 ms | 27.4 ms | 40,879 |
-| viewer | #364 previous | 106 | 7 | 137.1 ms | 133.7–147.4 | 138.6 ms | 26.0 ms | 23,123 |
-| viewer | flat current | 106 | 11 | 61.8 ms | 60.1–64.0 | 66.2 ms | 9.0 ms | 6,135 |
-| viewer | N7 | 106 | 11 | 49.9 ms | 45.4–55.2 | 46.7 ms | 6.5 ms | 4,444 |
+| owner | pre-#364 | 106 | 11 | 614.5 ms | 609.6–628.6 | 592.7 ms | 29.4 ms | 12,977 |
+| owner | #364 previous | 106 | 7 | 29.1 ms | 28.1–29.9 | 34.4 ms | 26.9 ms | 5,300 |
+| owner | flat current | 106 | 11 | 20.1 ms | 19.4–21.1 | 26.5 ms | 8.7 ms | 1,712 |
+| owner | N7 | 106 | 11 | 12.3 ms | 10.0–12.6 | 11.1 ms | 7.4 ms | 853 |
+| editor | pre-#364 | 106 | 11 | 737.5 ms | 722.7–762.9 | 692.6 ms | 30.1 ms | 36,167 |
+| editor | #364 previous | 106 | 7 | 162.9 ms | 161.7–166.0 | 162.9 ms | 26.9 ms | 20,365 |
+| editor | flat current | 106 | 11 | 62.3 ms | 57.8–65.5 | 66.5 ms | 7.9 ms | 5,416 |
+| editor | N7 | 106 | 11 | 58.1 ms | 55.6–62.3 | 49.8 ms | 6.9 ms | 3,712 |
+| viewer | pre-#364 | 106 | 11 | 803.7 ms | 785.4–884.7 | 815.8 ms | 29.0 ms | 37,401 |
+| viewer | #364 previous | 106 | 7 | 140.4 ms | 138.1–144.3 | 135.4 ms | 26.5 ms | 21,204 |
+| viewer | flat current | 106 | 11 | 58.6 ms | 57.7–61.0 | 64.9 ms | 8.2 ms | 5,614 |
+| viewer | N7 | 106 | 11 | 47.4 ms | 45.8–51.0 | 47.9 ms | 6.7 ms | 3,915 |
 
-The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The remaining gap is the price of that scaling-safe choice.
+Projected references now materialize only the reachable identities selected by their parent rows: root references share the selected-root set, and each nested reference source gets its own restricted CTE. That removes the broad `authorized_CustomCard`/`OfficialCard`/`Workspace`/`CardEdition`/`Art` scans from the previous head and reduces shared-buffer work for every actor. The remaining owner/editor/viewer gap to N7 is concentrated in the per-collection `flat_base → rows → items` stages and the root-selection predicate; the plan JSON records those nodes. It is not claimed as an N7-equivalent amount of work until the multi-deck differential and the selected-reachability scaling test both pass.
 
-All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. The current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 76.1 ms (owner), 150.0 ms (editor), and 130.9 ms (viewer); subtracting the direct SQL medians gives roughly 2.7 ms, 25.8 ms, and 1.3 ms of mapping/hydration work.
+All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. At this revision the current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 25.8 ms (owner), 74.3 ms (editor), and 65.7 ms (viewer). Subtracting the direct medians gives roughly 5.7 ms, 12.0 ms, and 7.1 ms of mapping/hydration work. These totals and the direct medians come from the same run and fixture.
 
 ## Policy observation
 
@@ -54,9 +54,13 @@ Both the original and generated statements bind eleven independent inputs. The p
 
 ## Count-domain reconciliation
 
-Basis `$total` is the authorized population before query-time filtering. The uploaded MTG statement’s filtered `decks__total` was a reference defect, not a generic compiler rule; the compiler applies the Graph contract uniformly to every collection, and the checked-in N7 reference now projects a filtered matched count separately from an unfiltered total. This makes the multiple-deck case observable and equivalent.
+Basis `$total` is the authorized population before query-time filtering. The uploaded MTG statement’s filtered `decks__total` was a reference defect, not a generic compiler rule; the compiler applies the Graph contract uniformly to every collection, and the checked-in N7 reference now projects a filtered matched count separately from an unfiltered total.
+
+The multi-deck differential runs the consumer query against two visible decks for owner, editor, viewer, and a denied outsider. It keeps independent item and matched filters, uses a nonzero deck-entry offset, and compares raw and hydrated rows, `decks__matched`/`decks__total`, `deckEntries__matched`/`deckEntries__total`, and edge quantities with corrected N7. It is the acceptance check for the distinguishing case; the one-deck 106-root fixture alone cannot exercise it.
 
 ## Policy A/B
+
+The A/B table below is historical evidence pinned to compiler `db116d4`; it is not a measurement of the current query. The later query-contract, pagination, and reachability work changed the SQL, so use the results table above for current performance.
 
 Policy A/B measurements are pinned to commit `db116d4`; the later query-contract and pagination work changes no policy SQL.
 

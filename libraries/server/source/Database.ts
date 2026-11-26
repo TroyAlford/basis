@@ -103,6 +103,8 @@ export interface QueryOptions {
 
 /** A compiled entity query and its ordered parameter values. */
 export interface CompiledEntityQuery {
+  /** Convert one flat SQL row into the requested nested projection. */
+  readonly hydrate: (row: Record<string, unknown>) => Record<string, unknown>,
   /** Complete SQL statement. */
   readonly sql: string,
   /** Values bound to `$1`, `$2`, … in order. */
@@ -114,7 +116,7 @@ interface PreparedEntityQuery {
   /** Convert one flat SQL row into the requested nested projection. */
   readonly hydrate: (row: Record<string, unknown>) => Record<string, unknown>,
   /** Complete SQL statement and ordered bindings. */
-  readonly query: CompiledEntityQuery,
+  readonly query: Omit<CompiledEntityQuery, 'hydrate'>,
 }
 
 /**
@@ -130,7 +132,10 @@ export function compileEntityQuery(
   entity: string,
   options: QueryOptions,
 ): CompiledEntityQuery {
-  return prepareEntityQuery(entities, entity, options).query
+  const prepared = prepareEntityQuery(entities, entity, options)
+  const compiled = { ...prepared.query } as CompiledEntityQuery
+  Object.defineProperty(compiled, 'hydrate', { enumerable: false, value: prepared.hydrate })
+  return compiled
 }
 
 /**

@@ -96,6 +96,21 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 
 `registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
 
+## Compiling query SQL in tests
+
+`compileEntityQuery(entities, entity, options)` returns the same compiled query that `database.query` executes, including `sql`, ordered `values`, and the row `hydrate` function. Use it when a test must assert generated SQL or replay the compiled statement directly against PostgreSQL; `database.entities` is the canonical definition set to pass. It is a compiler adapter for tests, not a second query API.
+
+```ts
+import { compileEntityQuery } from 'basis/testing'
+
+const compiled = compileEntityQuery(database.entities, 'ConsumerNote', {
+  fields: ['id', 'label'],
+  where: { id: noteId },
+})
+expect(compiled.sql).toContain('WHERE')
+const rows = await database.sql.unsafe(compiled.sql, compiled.values)
+```
+
 ## Consumer database fixtures
 
 `withDatabase` is the only consumer database fixture exported by `basis/testing`. It acquires the single run-scoped PostgreSQL fixture — the same lifecycle model as `useApplication` — and runs one test transaction that always rolls back. Use it for ordinary data tests, custom Graphs, actor-scoped RLS, owner-run setup, savepoints, and expected failures. The public options are `graph` and `setup`; committed writes, owner-proof selection, fresh schemas, and internal entity definitions are not part of the consumer type and cannot be selected through `withDatabase`. Owner setup runs inside the same rollback transaction, and the public callback context does not expose privileged owner switching.

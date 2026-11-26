@@ -316,7 +316,7 @@ describe('flattened collection compilation', () => {
     expect(compiled.sql).toContain('"batch_items_fi5_')
     expect(compiled.sql).toContain('"flat_items_fi5_')
     expect(compiled.sql).toContain('authorized_Face')
-    expect(compiled.sql).toContain('authorized_Art')
+    expect(compiled.sql).toMatch(/"reachable_Art_\d+" AS MATERIALIZED/u)
   })
 
   test('shares one relationship source across sibling collections', () => {
@@ -372,13 +372,74 @@ describe('flattened collection compilation', () => {
     expect(sql).not.toContain('authorized_batch_')
     expect(sql).not.toContain('authorized_nested_')
     expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(3)
-    expect(count(sql, /"flat_selected_\w+" AS MATERIALIZED/gu)).toBe(3)
+    expect(count(sql, /"flat_selected_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_unique_\w+" AS MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"flat_rows_(?!filtered_|matched_)\w+" AS MATERIALIZED/gu)).toBe(3)
-    expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(3)
+    expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"flat_items_\w+" AS MATERIALIZED/gu)).toBe(3)
-    expect(count(sql, /"authorized_Card" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"reachable_Card_\d+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"authorized_Card" AS NOT MATERIALIZED/gu)).toBe(0)
     expect(count(sql, /"authorized_Panel" AS NOT MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"authorized_Face" AS NOT MATERIALIZED/gu)).toBe(1)
+  })
+})
+
+describe('reachable reference identities', () => {
+  const reachability = new Graph({
+    entities: [
+      {
+        fields: [
+          { field: 'owner', target: 'Member', type: 'Entity' },
+          { field: 'items', target: 'ReachItem', type: 'Collection', via: 'ReachEdge[root = @].item' },
+        ],
+        name: 'ReachRoot',
+      },
+      {
+        fields: [
+          { field: 'owner', target: 'Member', type: 'Entity' },
+          { field: 'label', type: 'String' },
+        ],
+        name: 'ReachItem',
+      },
+      { fields: [{ field: 'label', type: 'String' }], name: 'Member' },
+    ],
+    relationships: [{
+      between: [
+        { field: 'root', target: 'ReachRoot' },
+        { field: 'item', target: 'ReachItem' },
+      ],
+      fields: [{ field: 'quantity', type: 'Number' }],
+      name: 'ReachEdge',
+    }],
+  })
+
+  test('restricts a root reference by the selected root identities', () => {
+    const { sql } = compileEntityQuery(reachability.definitions, 'ReachRoot', {
+      fields: ['id', 'owner.name', 'items{$limit:null}', 'items.label'],
+    })
+    expect(sql).toContain('"authorized_Member" AS MATERIALIZED')
+    expect(sql).toContain(
+      'WHERE "leaf"."id" IN (SELECT "owner.id" FROM "batch_selected_rows_0"',
+    )
+  })
+
+  test('gives each nested reference source its own reachable identity input', () => {
+    const { sql } = compileEntityQuery(reachability.definitions, 'ReachRoot', {
+      fields: [
+        'id',
+        'owner.name',
+        'items{$limit:null}',
+        'items.label',
+        'items.owner.name',
+      ],
+    })
+    expect(sql).toMatch(
+      /"authorized_Member" AS MATERIALIZED \(.*FROM "batch_selected_rows_0"/u,
+    )
+    expect(sql).toMatch(
+      /"reachable_Member_\d+" AS MATERIALIZED \(.*FROM "flat_base_\w+"/u,
+    )
+    expect(count(sql, /"reachable_Member_\d+" AS MATERIALIZED/gu)).toBe(1)
   })
 })
 
@@ -418,8 +479,9 @@ describe('chosen collection compilation', () => {
     expect(sql).toMatch(/"flat_base_\w+" AS MATERIALIZED/u)
     expect(sql).toMatch(/"ct\d+"\."id" AS "__item_id"/u)
     expect(sql).toMatch(/"flat_rows_\w+" AS MATERIALIZED \(SELECT DISTINCT ON \(/u)
-    expect(sql).toMatch(/"flat_counts_\w+" AS MATERIALIZED/u)
+    expect(sql).not.toMatch(/"flat_counts_\w+" AS MATERIALIZED/u)
     expect(sql).toMatch(/"flat_items_\w+" AS MATERIALIZED/u)
+    expect(sql).toContain('count(*)::int AS "__total", count(*)::int AS "__matched"')
     expect(sql).not.toContain('authorized_batch_')
 
     const scoped = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
