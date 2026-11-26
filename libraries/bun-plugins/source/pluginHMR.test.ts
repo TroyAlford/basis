@@ -15,12 +15,22 @@ describe('transformProductionModule', () => {
 
     expect(result?.contents).toContain('import { register as __basisHMRRegister } from "basis/react/hmr"')
     expect(result?.contents).toContain('__basisHMRRegister("Button.tsx:Button", Button)')
+    expect(result?.contents).toContain('if (!Object.hasOwn(Button, "displayName"))')
     expect(result?.contents).toContain('Button.displayName = "Button"')
     expect(result?.contents).toContain('import.meta.hot.accept()')
     expect(result?.contents).toContain('react/jsx-runtime')
     expect(result?.contents).not.toContain('jsxDEV')
     expect(result?.contents).not.toContain('react-refresh')
     expect(result?.loader).toBe('js')
+  })
+
+  test('pins the source name even when the base component already has a displayName', () => {
+    const Button = Object.create({ displayName: 'Component' })
+
+    const statement = 'if (!Object.hasOwn(Button, "displayName")) Button.displayName = "Button";'
+    new Function('Button', statement)(Button)
+
+    expect(Button.displayName).toBe('Button')
   })
 
   test('marks a class with runtime-private members as unstable', () => {

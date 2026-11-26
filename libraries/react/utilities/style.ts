@@ -6,7 +6,20 @@
  * want to ensure styles are only injected once per component/module.
  */
 
-const injected = new Map<string, string>()
+const STYLE_REGISTRY = Symbol.for('basis:style-registry')
+
+interface StyleRegistryHost {
+  [STYLE_REGISTRY]?: Map<string, string>,
+}
+
+/*
+ * The SSR application is a separate bundle from the server that renders it.
+ * Share one registry through the runtime global so server-side rendering can
+ * emit the styles registered by that bundle.
+ */
+const registryHost = globalThis as typeof globalThis & StyleRegistryHost
+const injected = registryHost[STYLE_REGISTRY] ?? new Map<string, string>()
+registryHost[STYLE_REGISTRY] = injected
 
 /**
  * Creates or updates a style tag with the given ID and CSS content
@@ -66,6 +79,17 @@ export function style(id: string, cssString: string): void {
   }
 
   styleElement.textContent = cssString
+}
+
+/**
+ * Every stylesheet registered through {@link style}, in registration order.
+ *
+ * Kept in memory so styles can be extracted even when no document exists (SSR)
+ * or the document is reset between tests.
+ * @returns The registered id/CSS pairs.
+ */
+export function styleEntries(): [string, string][] {
+  return [...injected.entries()]
 }
 
 /**

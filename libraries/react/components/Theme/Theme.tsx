@@ -268,7 +268,10 @@ export class Theme extends Component<Props> {
     style(`basis:theme:${themeName}`, themeStyles(this.props))
   }
 
-  override render = (): React.ReactNode => null
+  override render = (): React.ReactNode => {
+    this.injectStyles()
+    return null
+  }
 }
 
 // Derived from the defaults so a new theme category is picked up automatically.

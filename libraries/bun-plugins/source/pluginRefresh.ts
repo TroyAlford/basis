@@ -89,7 +89,7 @@ export function transformModule(
      * stable on both sides, so pin it as displayName when the component has none.
      */
     lines.push(...names.map(name => (
-      `  if (${name}.displayName == null) ${name}.displayName = ${JSON.stringify(name)};`
+      `  if (!Object.hasOwn(${name}, "displayName")) ${name}.displayName = ${JSON.stringify(name)};`
     )))
     lines.push('}')
   }
