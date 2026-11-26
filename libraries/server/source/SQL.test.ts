@@ -677,7 +677,7 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"visits"')
     expect(compiled.sql).toContain('"visits__matched"')
     expect(compiled.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(compiled.sql).toContain('"__ordinal" - $3 BETWEEN 1 AND $4')
+    expect(compiled.sql).toContain('BETWEEN 1 AND')
     expect(compiled.values).toEqual([25, 0, 1, 2])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],

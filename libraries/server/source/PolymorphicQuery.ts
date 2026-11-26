@@ -2763,7 +2763,11 @@ class QueryProjection {
       ], '')
     }
     this.#batchDefinitions.push(baseDefinition)
-    if (filterPredicate !== undefined) {
+    const selectedPath = plan.resultType === 'entity'
+      && plan.ownerId !== undefined
+      && plan.targetAlias !== undefined
+      && (filterPredicate !== undefined || plan.collection.kind === 'inverse')
+    if (filterPredicate !== undefined && !selectedPath) {
       this.#batchDefinitions.push(sqlConcat([
         sqlText(`${flagsCte} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, ${quote('__item_id')}, `),
@@ -2772,11 +2776,61 @@ class QueryProjection {
         sqlText(`FROM ${baseCte} GROUP BY ${quote('__parent_id')}, ${quote('__item_id')})`),
       ], ''))
     }
+    const selectedCte = quote(`flat_selected_${suffix}`)
+    const uniqueBaseCte = quote(`flat_unique_${suffix}`)
+    const matchedSourceCte = quote(`flat_matched_${suffix}`)
     const scopeCte = quote(`flat_scope_${suffix}`)
     const scopeIdsCte = quote(`flat_scope_ids_${suffix}`)
-    const scopeNeeded = filterPredicate !== undefined || limit !== null || offset > 0
+    const scopeNeeded = !selectedPath && (filterPredicate !== undefined || limit !== null || offset > 0)
     const pageOffset = offset > 0 || limit !== null ? sqlParameter(offset) : undefined
     const pageLimit = limit === null ? undefined : sqlParameter(limit)
+    if (selectedPath) {
+      this.#batchDefinitions.push(sqlConcat([
+        sqlText(`${uniqueBaseCte} AS MATERIALIZED (`),
+        sqlText(`SELECT DISTINCT ON (${quote('__parent_id')}, ${quote('__item_id')}) * `),
+        sqlText(`FROM ${baseCte} ORDER BY ${quote('__parent_id')}, ${quote('__item_id')}`),
+        filterPredicate === undefined
+          ? undefined
+          : sqlText(`, ${quote('__batch_filter_matched')} DESC, ${quote('__batch_filter')} DESC`),
+        sqlText(')'),
+      ], ''))
+      const selectedSource = sqlConcat([
+        sqlText(`SELECT * FROM ${uniqueBaseCte}`),
+        filterPredicate === undefined
+          ? undefined
+          : sqlText(` WHERE ${quote('__batch_filter')} IS TRUE`),
+      ])
+      let selectedQuery: SqlFragment
+      if (limit === null && offset === 0) {
+        selectedQuery = selectedSource
+      } else {
+        let selectedPage: SqlFragment
+        if (limit === null) {
+          selectedPage = sqlConcat([sqlText(`${quote('__selected_ordinal')} > `), pageOffset as SqlFragment])
+        } else {
+          selectedPage = sqlConcat([
+            sqlText(`${quote('__selected_ordinal')} - `), pageOffset as SqlFragment,
+            sqlText(' BETWEEN 1 AND '), pageLimit as SqlFragment,
+          ])
+        }
+        selectedQuery = sqlConcat([
+          sqlText(`SELECT * FROM (SELECT ${quote('__selected_source')}.*, `),
+          sqlText(`row_number() OVER (PARTITION BY ${quote('__parent_id')} ` +
+            `ORDER BY ${quote('__item_id')}) AS ${quote('__selected_ordinal')} `),
+          sqlText(`FROM (${selectedSource.sql}) AS ${quote('__selected_source')}) ` +
+            `AS ${quote('__selected')} WHERE `),
+          selectedPage,
+        ])
+      }
+      this.#batchDefinitions.push(
+        sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], ''),
+        ...(filterPredicate === undefined ? [] : [sqlConcat([
+          sqlText(`${matchedSourceCte} AS MATERIALIZED (`),
+          sqlText(`SELECT * FROM ${uniqueBaseCte} WHERE ${quote('__batch_filter_matched')} IS TRUE`),
+          sqlText(')'),
+        ], '')]),
+      )
+    }
     if (scopeNeeded) {
       const ordinal = `${scopeIdsCte}.${quote('__ordinal')}`
       let scopePage: SqlFragment
@@ -2822,7 +2876,7 @@ class QueryProjection {
       `${childRoot}_`,
       `${this.#relationPrefix}flat_`,
       this.#shared,
-      scopeNeeded ? scopeCte : baseCte,
+      selectedPath ? selectedCte : scopeNeeded ? scopeCte : baseCte,
       targetContext(this.#entities, plan.target, childRoot, childRoot),
     )
     let hydrateItem: (row: Record<string, unknown>) => Record<string, unknown>
@@ -2849,14 +2903,14 @@ class QueryProjection {
     const rowColumns = sqlConcat([
       sqlText(`${quote(childRoot)}.${quote('__parent_id')}, ${quote(childRoot)}.${quote('__item_id')}, `),
       sqlConcat(child.columns, ', '),
-      filterPredicate === undefined
+      filterPredicate === undefined || selectedPath
         ? undefined
         : sqlText(`, ${flagsCte}.${quote('__batch_filter')}, ` +
           `${flagsCte}.${quote('__batch_filter_matched')}`),
       edge === undefined ? undefined : sqlText(`, ${quote(childRoot)}.${quote('__edge')}`),
     ], '')
     let flagJoin: SqlFragment | undefined
-    if (filterPredicate !== undefined) {
+    if (filterPredicate !== undefined && !selectedPath) {
       flagJoin = sqlConcat([
         sqlText(`JOIN ${flagsCte} ON ` +
           `${flagsCte}.${quote('__parent_id')} = ${quote(childRoot)}.${quote('__parent_id')} ` +
@@ -2865,23 +2919,30 @@ class QueryProjection {
     }
     this.#batchDefinitions.push(sqlConcat([
       sqlText(`${rowsCte} AS MATERIALIZED (`),
-      sqlText(`SELECT DISTINCT ON (${quote(childRoot)}.${quote('__parent_id')}, ` +
-        `${quote(childRoot)}.${quote('__item_id')}) `),
+      selectedPath
+        ? sqlText('SELECT ')
+        : sqlText(`SELECT DISTINCT ON (${quote(childRoot)}.${quote('__parent_id')}, ` +
+          `${quote(childRoot)}.${quote('__item_id')}) `),
       rowColumns,
-      sqlText(` FROM ${baseCte} ${quote(childRoot)} `),
+      sqlText(` FROM ${selectedPath ? selectedCte : baseCte} ${quote(childRoot)} `),
       flagJoin,
       ...child.joins,
       sqlText(')'),
     ], ''))
     this.#batchDefinitions.push(...this.#flatAggregateDefinitions({
       countsCte,
-      filterPresent: filterPredicate !== undefined,
+      countsRowsCte: selectedPath ? uniqueBaseCte : undefined,
+      filterPresent: !selectedPath && filterPredicate !== undefined,
       itemsCte,
       limit,
-      matchedFilterPresent: filterMatched !== undefined,
+      matchedFilterPresent: selectedPath ? true : filterPredicate !== undefined,
+      matchedRowsSource: selectedPath
+        ? filterPredicate === undefined ? uniqueBaseCte : matchedSourceCte
+        : undefined,
       offset,
       pageLimit,
       pageOffset,
+      prePaged: selectedPath,
       rowsCte,
       rowsFilteredCte,
       rowsMatchedCte: quote(`flat_rows_matched_${suffix}`),
@@ -2978,16 +3039,64 @@ class QueryProjection {
       .map(name => `${quoteLiteral(name)}, ${quote('__item')}.${quote(name)}`)
       .join(', ')
     const itemOrder = identity.map(name => `${quote('__child')}.${quote(name)}`).join(', ')
+    let rowsSource = baseCte
+    let matchedSource: string | undefined
+    let selectedPath = false
+    if (filterPredicate !== undefined) {
+      selectedPath = true
+      const selectedCte = quote(`flat_selected_${suffix}`)
+      matchedSource = quote(`flat_matched_${suffix}`)
+      const selectedSource = sqlConcat([
+        sqlText(`SELECT * FROM ${baseCte} WHERE ${quote('__batch_filter')} IS TRUE`),
+      ])
+      const offsetSlot = sqlValue(offset)
+      const limitSlot = limit === null ? undefined : sqlValue(limit)
+      let selectedQuery: SqlFragment
+      if (limit === null && offset === 0) {
+        selectedQuery = selectedSource
+      } else {
+        let selectedPage: SqlFragment
+        if (limit === null) {
+          selectedPage = sqlConcat([sqlText(`${quote('__selected_ordinal')} > `), offsetSlot])
+        } else {
+          selectedPage = sqlConcat([
+            sqlText(`${quote('__selected_ordinal')} - `), offsetSlot,
+            sqlText(' BETWEEN 1 AND '), limitSlot as SqlFragment,
+          ])
+        }
+        selectedQuery = sqlConcat([
+          sqlText(`SELECT * FROM (SELECT ${quote('__selected_source')}.*, `),
+          sqlText(`row_number() OVER (PARTITION BY ${quote('__parent_id')} ` +
+            `ORDER BY ${itemOrder.replaceAll(quote('__child'), quote('__selected_source'))}) ` +
+            `AS ${quote('__selected_ordinal')} `),
+          sqlText(`FROM (${selectedSource.sql}) AS ${quote('__selected_source')}) ` +
+            `AS ${quote('__selected')} WHERE `),
+          selectedPage,
+        ])
+      }
+      this.#batchDefinitions.push(
+        sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], ''),
+        sqlConcat([
+          sqlText(`${matchedSource} AS MATERIALIZED (`),
+          sqlText(`SELECT * FROM ${baseCte} WHERE ${quote('__batch_filter_matched')} IS TRUE`),
+          sqlText(')'),
+        ], ''),
+      )
+      rowsSource = selectedCte
+    }
     this.#batchDefinitions.push(...this.#flatAggregateDefinitions({
       countsCte,
-      filterPresent: filterPredicate !== undefined,
+      countsRowsCte: baseCte,
+      filterPresent: false,
       itemBuilder: `json_build_object(${itemFields})`,
       itemOrder,
       itemsCte,
       limit,
-      matchedFilterPresent: matchedPredicate !== undefined,
+      matchedFilterPresent: selectedPath,
+      matchedRowsSource: matchedSource,
       offset,
-      rowsCte: baseCte,
+      prePaged: selectedPath,
+      rowsCte: rowsSource,
       rowsFilteredCte,
       rowsMatchedCte: quote(`flat_rows_matched_${suffix}`),
     }))
@@ -2999,13 +3108,16 @@ class QueryProjection {
    * Emit the shared filtered-rows, counts, and items CTEs for a flat collection.
    * @param options - CTE names and paging scope for one collection.
    * @param options.countsCte - Total-count CTE name.
+   * @param options.countsRowsCte - Optional source rows for the total count.
    * @param options.filterPresent - Whether a member filter was compiled.
    * @param options.itemsCte - JSON item CTE name.
    * @param options.limit - Page size.
    * @param options.matchedFilterPresent - Whether a matched-count filter was compiled.
+   * @param options.matchedRowsSource - Optional precomputed matched-row CTE.
    * @param options.offset - Page offset.
    * @param options.pageLimit - Optional shared bound limit slot.
    * @param options.pageOffset - Optional shared bound offset slot.
+   * @param options.prePaged - Whether rows are already filtered and paged.
    * @param options.rowsCte - Deduplicated member-row CTE name.
    * @param options.rowsFilteredCte - Filtered member-row CTE name.
    * @param options.rowsMatchedCte - Filtered matched-count row CTE name.
@@ -3015,36 +3127,44 @@ class QueryProjection {
    */
   #flatAggregateDefinitions(options: {
     readonly countsCte: string,
+    readonly countsRowsCte?: string,
     readonly filterPresent: boolean,
     readonly itemBuilder?: string,
     readonly itemOrder?: string,
     readonly itemsCte: string,
     readonly limit: number | null,
     readonly matchedFilterPresent?: boolean,
+    readonly matchedRowsSource?: string,
     readonly offset: number,
     readonly pageLimit?: SqlFragment,
     readonly pageOffset?: SqlFragment,
+    readonly prePaged?: boolean,
     readonly rowsCte: string,
     readonly rowsFilteredCte: string,
     readonly rowsMatchedCte?: string,
   }): SqlFragment[] {
     const {
       countsCte,
+      countsRowsCte,
       filterPresent,
       itemBuilder,
       itemOrder,
       itemsCte,
       limit,
       matchedFilterPresent,
+      matchedRowsSource,
       offset,
       pageLimit,
       pageOffset,
+      prePaged,
       rowsCte,
     } = options
     const offsetSlot = pageOffset ?? sqlValue(offset)
     const limitSlot = pageLimit ?? (limit === null ? undefined : sqlValue(limit))
     let page: SqlFragment
-    if (limit === null && offset === 0) {
+    if (prePaged === true) {
+      page = sqlText(`${quote('__ordinal')} > 0`)
+    } else if (limit === null && offset === 0) {
       page = sqlText(`${quote('__ordinal')} > 0`)
     } else if (limit === null) {
       page = sqlConcat([sqlText(quote('__ordinal')), sqlText(' > '), offsetSlot], '')
@@ -3057,27 +3177,21 @@ class QueryProjection {
     const ordered = itemOrder ?? `${quote('__child')}.${quote('__item_id')}`
     const built = itemBuilder ?? `row_to_json(${quote('__item')})`
     const itemRows = filterPresent ? options.rowsFilteredCte : rowsCte
-    const matchedRows = matchedFilterPresent && options.rowsMatchedCte !== undefined
-      ? options.rowsMatchedCte
-      : itemRows
-    return [
-      ...(filterPresent ? [sqlConcat([
-        sqlText(`${options.rowsFilteredCte} AS MATERIALIZED (`),
-        sqlText(`SELECT * FROM ${rowsCte} WHERE ${quote('__batch_filter')} IS TRUE)`),
-      ], '')] : []),
-      ...(matchedFilterPresent && options.rowsMatchedCte !== undefined ? [sqlConcat([
-        sqlText(`${options.rowsMatchedCte} AS MATERIALIZED (`),
-        sqlText(`SELECT * FROM ${rowsCte} WHERE ${quote('__batch_filter_matched')} IS TRUE)`),
-      ], '')] : []),
-      sqlConcat([
-        sqlText(`${countsCte} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
-        sqlText(`FROM ${rowsCte} GROUP BY ${quote('__parent_id')})`),
-      ], ''),
-      sqlConcat([
-        sqlText(`${itemsCte} AS MATERIALIZED (`),
-        sqlText(`WITH ${quote('__item_group')} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote('__parent_id')}, `),
+    const matchedRows = matchedRowsSource ?? (
+      matchedFilterPresent && options.rowsMatchedCte !== undefined
+        ? options.rowsMatchedCte
+        : itemRows
+    )
+    const prePagedOrder = ordered.replaceAll(quote('__child'), quote('__item'))
+    let itemGroup: SqlFragment
+    if (prePaged === true) {
+      itemGroup = sqlConcat([
+        sqlText(`COALESCE(json_agg(${built} ORDER BY ${prePagedOrder}) `),
+        sqlText(`, '[]'::json) AS ${quote('__items')} `),
+        sqlText(`FROM ${itemRows} AS ${quote('__item')} GROUP BY ${quote('__parent_id')}) `),
+      ])
+    } else {
+      itemGroup = sqlConcat([
         sqlText(`COALESCE(json_agg(${built} ORDER BY ${quote('__item')}.${quote('__ordinal')}) `),
         sqlText('FILTER (WHERE '),
         page,
@@ -3089,6 +3203,27 @@ class QueryProjection {
         sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
         sqlText(`FROM ${itemRows} AS ${quote('__child')}) `),
         sqlText(`AS ${quote('__item')} GROUP BY ${quote('__parent_id')}) `),
+      ])
+    }
+    return [
+      ...(filterPresent ? [sqlConcat([
+        sqlText(`${options.rowsFilteredCte} AS MATERIALIZED (`),
+        sqlText(`SELECT * FROM ${rowsCte} WHERE ${quote('__batch_filter')} IS TRUE)`),
+      ], '')] : []),
+      ...(matchedRowsSource === undefined && matchedFilterPresent && options.rowsMatchedCte !== undefined ? [sqlConcat([
+        sqlText(`${options.rowsMatchedCte} AS MATERIALIZED (`),
+        sqlText(`SELECT * FROM ${rowsCte} WHERE ${quote('__batch_filter_matched')} IS TRUE)`),
+      ], '')] : []),
+      sqlConcat([
+        sqlText(`${countsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
+        sqlText(`FROM ${countsRowsCte ?? rowsCte} GROUP BY ${quote('__parent_id')})`),
+      ], ''),
+      sqlConcat([
+        sqlText(`${itemsCte} AS MATERIALIZED (`),
+        sqlText(`WITH ${quote('__item_group')} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, `),
+        itemGroup,
         sqlText(`, ${quote('__matched')} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__matched')} `),
         sqlText(`FROM ${matchedRows} GROUP BY ${quote('__parent_id')}) `),

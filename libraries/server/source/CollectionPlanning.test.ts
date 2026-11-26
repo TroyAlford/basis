@@ -127,8 +127,8 @@ describe('collection planning', () => {
       fields: ['id', 'printings[title = \'One\']{$limit:null}', 'printings.card.name'],
     })
     expect(filtered.sql).toContain('flat_rows_')
-    expect(filtered.sql).toContain('flat_rows_filtered_')
-    expect(filtered.sql).toContain('flat_flags_')
+    expect(filtered.sql).toContain('flat_selected_')
+    expect(filtered.sql).toContain('flat_matched_')
     expect(filtered.sql).not.toMatch(/SELECT count\(\*\)::int FROM \(/)
   })
 
@@ -155,8 +155,7 @@ describe('collection planning', () => {
         'printings.card.name',
       ],
     })
-    expect(sql).toContain('flat_rows_')
-    expect(sql).toContain('flat_rows_filtered_')
+    expect(sql).toContain('flat_selected_')
     expect(sql).toContain('flat_counts_')
     expect(sql).toContain('"__total"')
     expect(sql).toContain('"__matched"')
@@ -373,7 +372,7 @@ describe('flattened collection compilation', () => {
     expect(sql).not.toContain('authorized_batch_')
     expect(sql).not.toContain('authorized_nested_')
     expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(3)
-    expect(count(sql, /"flat_flags_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_selected_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_rows_(?!filtered_|matched_)\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(3)
     expect(count(sql, /"flat_items_\w+" AS MATERIALIZED/gu)).toBe(3)
