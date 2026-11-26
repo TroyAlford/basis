@@ -565,12 +565,15 @@ export class Server<
   /**
    * Render registered component stylesheets into the document head so the first
    * paint uses the same styles as the hydrated client.
-   * @returns One style element per registered stylesheet.
+   * @param entries - The request's captured stylesheet registry entries.
+   * @returns One style element per captured stylesheet.
    */
-  #styleTags(): string {
-    return styleEntries().map(([id, css]) => (
-      `<style id="${id.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" data-injected-by="style-utility">${css}</style>`
-    )).join('')
+  #styleTags(entries: readonly (readonly [string, string])[]): string {
+    return entries.map(([id, css]) => {
+      const escapedId = id.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      const safeCss = css.replace(/<\/style/gi, '<\\/style')
+      return `<style id="${escapedId}" data-injected-by="style-utility">${safeCss}</style>`
+    }).join('')
   }
 
   /**
@@ -598,6 +601,7 @@ export class Server<
         ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
         : null
       const application = rendered ? renderToString(rendered) : ''
+      const styleSnapshot = styleEntries()
       const title = head.title || this.#title
       const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
       const runtimeScript = [
@@ -620,7 +624,7 @@ export class Server<
         }))
         const html = fallback
           .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
-          .replace('</head>', `${this.#styleTags()}${runtimeScript}${bootstrapScript}</head>`)
+          .replace('</head>', `${this.#styleTags(styleSnapshot)}${runtimeScript}${bootstrapScript}</head>`)
         return this.#withContextResponse(new Response(html, {
           headers: { 'Content-Type': 'text/html' },
         }), resolved)
@@ -646,7 +650,10 @@ export class Server<
         })
         .on('head', {
           element: element => {
-            element.append(`${this.#styleTags()}${favicon}${runtimeScript}${bootstrapScript}`, { html: true })
+            element.append(
+              `${this.#styleTags(styleSnapshot)}${favicon}${runtimeScript}${bootstrapScript}`,
+              { html: true },
+            )
           },
         })
         .on('#root', {
