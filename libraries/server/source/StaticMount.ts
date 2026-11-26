@@ -32,15 +32,43 @@ export function containsInternalStateSegment(value: string): boolean {
 }
 
 /**
- * Resolve a static file only when its effective target is outside `.basis`.
+ * The internal-state directory for one served root.
+ *
+ * A root that *is* `.basis` is entirely internal. Otherwise only its own
+ * `.basis` child is private; a `.basis` further up the absolute path is just a
+ * parent directory (for example a checkout's `./.basis/tmp/<app>` fixture).
+ * @param root - The directory whose contents a request can reach.
+ * @returns The directory that must never be served.
+ */
+export function internalStateRoot(root: string): string {
+  return path.basename(root).toLowerCase() === '.basis' ? root : path.join(root, '.basis')
+}
+
+/**
+ * Whether one path is a root or lives below it.
+ * @param candidate - Candidate path, lexical or resolved.
+ * @param root - Root path.
+ * @returns `true` when the candidate is the root or a descendant.
+ */
+export function isWithinPath(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+}
+
+/**
+ * Resolve a static file only when its effective target is outside the app's
+ * own `.basis` state.
  *
  * Symlinks are followed before the decision, so a public alias cannot reach
- * Basis-owned internal state.
+ * Basis-owned internal state. An installation that itself lives under a
+ * `.basis` temp parent remains servable; only its own `.basis` is private.
  * @param filePath - The lexical file path below an asset or mount root.
+ * @param internalRoot - The served app's own `.basis` directory.
  * @returns The servable file, or null when missing or internal.
  */
 export async function publicStaticFile(
   filePath: string,
+  internalRoot: string,
 ): Promise<ReturnType<typeof Bun.file> | null> {
   let target: string
   try {
@@ -48,7 +76,7 @@ export async function publicStaticFile(
   } catch {
     return null
   }
-  if (containsInternalStateSegment(target)) return null
+  if (isWithinPath(target, internalRoot)) return null
 
   const file = Bun.file(target)
   return await file.exists() ? file : null
@@ -122,10 +150,11 @@ export async function serveMount(mount: StaticMount, requestPath: string): Promi
   }
 
   const filePath = path.join(mount.folder, relative)
-  if (!filePath.startsWith(`${mount.folder}${path.sep}`)) return notFound()
-  if (containsInternalStateSegment(mount.folder) || containsInternalStateSegment(filePath)) return notFound()
+  if (!isWithinPath(filePath, mount.folder)) return notFound()
+  const internalRoot = internalStateRoot(mount.folder)
+  if (isWithinPath(filePath, internalRoot)) return notFound()
 
-  const file = await publicStaticFile(filePath)
+  const file = await publicStaticFile(filePath, internalRoot)
   if (!file) return notFound()
 
   return new Response(file, { headers: { 'content-type': file.type } })

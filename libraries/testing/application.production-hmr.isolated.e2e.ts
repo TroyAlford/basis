@@ -19,7 +19,7 @@ afterAll(() => {
  * @returns The fixture directory.
  */
 function fixture(): string {
-  const directory = tempDirectory('basis-production-hmr-')
+  const directory = tempDirectory('basis-production-hmr-isolated-')
   created.push(directory)
   symlinkSync(join(repoRoot, 'node_modules'), join(directory, 'node_modules'), 'dir')
   /*

@@ -67,7 +67,7 @@ Basis resolves the verified identity first, then runs the loader and the SSR ren
 
 ## Static files
 
-A standard `<root>/assets` directory is served automatically. `assets(folder)` overrides that root, and `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. All three reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
+A standard `<root>/assets` directory is served automatically. `assets(folder)` overrides that root, and `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. All three reject missing files, traversal, and the served root's own Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content. A `.basis` directory above the served root is just a parent; an application installed under a `.basis` temp tree remains servable.
 
 ## Vendor assets
 
@@ -116,7 +116,7 @@ server.socket('room/:id', {
 })
 ```
 
-`mount` rejects traversal and Basis-owned `.basis` state, including symlink targets. SSE buffers are bounded, so a client that stops reading drops frames rather than growing memory without limit.
+`mount` rejects traversal and the mount's own `.basis` state, including symlink targets. SSE buffers are bounded, so a client that stops reading drops frames rather than growing memory without limit.
 
 ## Logging and runtime context
 

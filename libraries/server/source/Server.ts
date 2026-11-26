@@ -12,6 +12,7 @@ import type { Identity } from '../../oauth'
 import type { HeadCollector } from '../../react/components/Head/Head'
 import { HeadProvider } from '../../react/components/Head/Head'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
+import { styleEntries } from '../../react/utilities/style'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { assertBasisServerCompatible, HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
@@ -39,7 +40,7 @@ import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import { internalStateRoot, isInternalStatePath, isWithinPath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
 import type { VendorBuild } from './Vendor'
 import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
 
@@ -464,10 +465,10 @@ export class Server<
     if (relative.length === 0) return Server.NotFound
 
     const filePath = path.join(root, relative)
+    const internalRoot = internalStateRoot(root)
     if (
-      containsInternalStateSegment(root)
-      || containsInternalStateSegment(filePath)
-      || (vendor && !filePath.startsWith(`${root}${path.sep}`))
+      !isWithinPath(filePath, root)
+      || isWithinPath(filePath, internalRoot)
     ) {
       return Server.NotFound
     }
@@ -475,7 +476,7 @@ export class Server<
     const active = vendor ? this.#activeVendorAsset(filePath) : null
     if (active) return this.#serveVendor(uri, active, null, request, Bun.file(filePath).type)
 
-    const asset = await publicStaticFile(filePath)
+    const asset = await publicStaticFile(filePath, internalRoot)
     if (!asset) return Server.NotFound
 
     if (vendor) return this.#serveVendor(uri, null, asset, request, asset.type)
@@ -562,6 +563,20 @@ export class Server<
   }
 
   /**
+   * Render registered component stylesheets into the document head so the first
+   * paint uses the same styles as the hydrated client.
+   * @param entries - The request's captured stylesheet registry entries.
+   * @returns One style element per captured stylesheet.
+   */
+  #styleTags(entries: readonly (readonly [string, string])[]): string {
+    return entries.map(([id, css]) => {
+      const escapedId = id.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      const safeCss = css.replace(/<\/style/gi, '<\\/style')
+      return `<style id="${escapedId}" data-injected-by="style-utility">${safeCss}</style>`
+    }).join('')
+  }
+
+  /**
    * Handles a UI request.
    *
    * When an {@link Server.identity} capability is configured, the request is
@@ -586,6 +601,7 @@ export class Server<
         ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
         : null
       const application = rendered ? renderToString(rendered) : ''
+      const styleSnapshot = styleEntries()
       const title = head.title || this.#title
       const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
       const runtimeScript = [
@@ -608,7 +624,7 @@ export class Server<
         }))
         const html = fallback
           .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
-          .replace('</head>', `${runtimeScript}${bootstrapScript}</head>`)
+          .replace('</head>', `${this.#styleTags(styleSnapshot)}${runtimeScript}${bootstrapScript}</head>`)
         return this.#withContextResponse(new Response(html, {
           headers: { 'Content-Type': 'text/html' },
         }), resolved)
@@ -633,7 +649,12 @@ export class Server<
           element: element => { element.setInnerContent(title) },
         })
         .on('head', {
-          element: element => { element.append(`${favicon}${runtimeScript}${bootstrapScript}`, { html: true }) },
+          element: element => {
+            element.append(
+              `${this.#styleTags(styleSnapshot)}${favicon}${runtimeScript}${bootstrapScript}`,
+              { html: true },
+            )
+          },
         })
         .on('#root', {
           element: element => { element.setInnerContent(application, { html: true }) },
@@ -860,7 +881,16 @@ export class Server<
     const { watch } = await import('chokidar')
     const watcher = watch(this.#root, {
       ignoreInitial: true,
-      ignored: [/(^|[/\\])(?:node_modules|\.basis)([/\\]|$)/],
+      ignored: [
+        /*
+         * Dot entries are ignored by basename; a dotted ancestor (a checkout under
+         * a hidden directory, or an app under .basis/tmp) must stay watchable.
+         */
+        /(^|[/\\])\.[^/\\]+$/,
+        /(^|[/\\])node_modules([/\\]|$)/,
+        // The server's own generated artifacts would otherwise trigger rebuild loops.
+        /(^|[/\\])\.basis[/\\](?:hydrate|ssr)([/\\]|$)/,
+      ],
     })
     this.#watcher = watcher
     watcher.on('all', (_event, filename) => {
@@ -1399,8 +1429,12 @@ export class Server<
     watcherReady: Promise<void>,
     vendorReady: Promise<ReadonlySet<string>>,
   ): void {
-    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(response => {
-      if (!response.ok) throw new Error(`development build failed (${response.status})`)
+    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(async response => {
+      if (response.ok) return
+      const detail = (await response.text()).trim()
+      throw new Error(
+        `development build failed (${response.status})${detail ? `: ${detail.slice(0, 1_000)}` : ''}`,
+      )
     })
     const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()
     this.#ready = this.#trackReady(
