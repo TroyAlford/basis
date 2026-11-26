@@ -3084,8 +3084,10 @@ class QueryProjection {
         sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
           `COALESCE(${quote('__item_group')}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
           `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
-        sqlText(`FROM (SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
-          `SELECT ${quote('__parent_id')} FROM ${quote('__matched')}) AS ${quote('__parents')} `),
+        sqlText(`FROM ${filteredTotal === true
+          ? `(SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
+            `SELECT ${quote('__parent_id')} FROM ${quote('__matched')})`
+          : countsCte} AS ${quote('__parents')} `),
         sqlText(`LEFT JOIN ${quote('__item_group')} ON ${quote('__item_group')}.${quote('__parent_id')} ` +
           `= ${quote('__parents')}.${quote('__parent_id')} `),
         sqlText(`LEFT JOIN ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +

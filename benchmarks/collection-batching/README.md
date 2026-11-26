@@ -25,18 +25,18 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor  | statement     | rows | params | direct median | direct range |  EXPLAIN |    plan | shared hits |
 | ------ | ------------- | ---: | -----: | ------------: | -----------: | -------: | ------: | ----------: |
-| owner  | pre-#364      |  106 |     11 |      312.4 ms |  304.4–318.5 | 285.7 ms | 26.0 ms |      20,365 |
-| owner  | #364 previous |  106 |      7 |      147.9 ms |  145.3–149.7 | 167.8 ms | 24.8 ms |       9,061 |
-| owner  | flat current  |  106 |     11 |       72.0 ms |    71.2–73.1 |  69.1 ms |  9.5 ms |       2,768 |
-| owner  | N7            |  106 |     11 |       57.6 ms |    56.4–58.4 |  59.9 ms |  6.4 ms |       1,703 |
-| editor | pre-#364      |  106 |     11 |      470.8 ms |  454.1–482.8 | 426.9 ms | 25.5 ms |      39,647 |
-| editor | #364 previous |  106 |      7 |      315.7 ms |  306.1–321.3 | 291.6 ms | 23.9 ms |      22,284 |
-| editor | flat current  |  106 |     11 |      133.3 ms |  125.1–138.9 | 114.5 ms |  9.3 ms |       5,937 |
-| editor | N7            |  106 |     11 |      114.4 ms |  113.4–119.6 |  92.2 ms |  6.0 ms |       4,241 |
-| viewer | pre-#364      |  106 |     11 |      432.3 ms |  421.6–493.7 | 411.3 ms | 24.5 ms |      40,879 |
-| viewer | #364 previous |  106 |      7 |      295.7 ms |  289.5–313.6 | 304.4 ms | 23.1 ms |      23,123 |
-| viewer | flat current  |  106 |     11 |      125.3 ms |  121.8–141.0 | 127.0 ms |  9.2 ms |       6,135 |
-| viewer | N7            |  106 |     11 |      104.1 ms |  103.5–119.0 | 101.9 ms |  5.9 ms |       4,444 |
+| owner  | pre-#364      |  106 |     11 |      316.9 ms |  310.4–329.9 | 291.3 ms | 26.7 ms |      20,365 |
+| owner  | #364 previous |  106 |      7 |      152.7 ms |  151.5–155.7 | 170.9 ms | 25.1 ms |       9,061 |
+| owner  | flat current  |  106 |     11 |       73.3 ms |    71.6–78.5 |  81.1 ms |  9.7 ms |       2,768 |
+| owner  | N7            |  106 |     11 |       58.6 ms |    57.1–60.9 |  61.4 ms |  7.1 ms |       1,703 |
+| editor | pre-#364      |  106 |     11 |      482.5 ms |  468.5–502.2 | 475.3 ms | 28.2 ms |      39,647 |
+| editor | #364 previous |  106 |      7 |      319.6 ms |  297.7–329.0 | 284.3 ms | 24.8 ms |      22,284 |
+| editor | flat current  |  106 |     11 |      128.3 ms |  126.2–131.9 | 139.0 ms |  9.9 ms |       5,937 |
+| editor | N7            |  106 |     11 |      110.9 ms |  110.6–115.2 |  96.7 ms |  6.3 ms |       4,241 |
+| viewer | pre-#364      |  106 |     11 |      463.2 ms |  443.2–501.5 | 410.5 ms | 26.5 ms |      40,879 |
+| viewer | #364 previous |  106 |      7 |      297.4 ms |  291.0–303.2 | 312.5 ms | 24.1 ms |      23,123 |
+| viewer | flat current  |  106 |     11 |      131.2 ms |  127.4–134.7 | 132.3 ms |  9.4 ms |       6,135 |
+| viewer | N7            |  106 |     11 |      105.2 ms |  104.6–106.8 | 109.2 ms |  6.2 ms |       4,444 |
 
 The flattened plan is materially faster than pre-#364 and close to N7, while leaving selected roots and target relations inline so authorization work can narrow before broad scans. The remaining gap is the price of that scaling-safe choice.
 
