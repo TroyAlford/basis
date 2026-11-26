@@ -2588,9 +2588,15 @@ class QueryProjection {
       `LEFT JOIN ${countsCte} ${quote(countsAlias)} ` +
       `ON ${quote(countsAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
     ))
-    this.columns.push(sqlText(`${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`))
-    this.columns.push(sqlText(`${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`))
-    this.columns.push(sqlText(`${quote(countsAlias)}.${quote('__total')} AS ${quote(totalAlias)}`))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__items')}, '[]'::json) AS ${quote(alias)}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__matched')}, 0) AS ${quote(matchedAlias)}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(countsAlias)}.${quote('__total')}, 0) AS ${quote(totalAlias)}`,
+    ))
     node.projectedCollections.push({
       alias,
       hydrate: row => {
@@ -3126,9 +3132,15 @@ class QueryProjection {
       `LEFT JOIN ${plan.countsCte} ${quote(countsAlias)} ` +
       `ON ${quote(countsAlias)}.${quote('__parent_id')} = ${ownerAlias}.${quote('id')}`,
     ))
-    this.columns.push(sqlText(`${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`))
-    this.columns.push(sqlText(`${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`))
-    this.columns.push(sqlText(`${quote(countsAlias)}.${quote('__total')} AS ${quote(totalAlias)}`))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__items')}, '[]'::json) AS ${quote(alias)}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__matched')}, 0) AS ${quote(matchedAlias)}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(countsAlias)}.${quote('__total')}, 0) AS ${quote(totalAlias)}`,
+    ))
     node.projectedCollections.push({
       alias,
       hydrate: row => {
