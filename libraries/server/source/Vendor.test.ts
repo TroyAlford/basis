@@ -385,7 +385,7 @@ export class Application extends Component {
         cwd: root,
         entry: './serve.ts',
         env: { VENDOR_PHASE: 'first' },
-        readyPath: '/',
+        readyPath: '/api/health',
       })
       try {
         expect(await Bun.fetch(first.url).then(response => response.text())).toContain('one')
@@ -486,7 +486,7 @@ export class Application extends Component {
         cwd: root,
         entry: './serve.ts',
         env: { VENDOR_PHASE: 'second' },
-        readyPath: '/',
+        readyPath: '/api/health',
       })
       try {
         expect(await Bun.fetch(second.url).then(response => response.text())).toContain('two')
