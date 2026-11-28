@@ -1047,8 +1047,6 @@ class QueryProjection {
   readonly #batchDefinitions: SqlFragment[]
   /** Root predicate used to scope batched collection roots. */
   #rootPredicate?: SqlFragment
-  /** Complete selected-root query reused by batched collection CTEs. */
-  #rootSelection?: SqlFragment
   /** Shared selected-root CTE used by every batch plan in this scope. */
   #batchRootSelection?: string
   /** Parent identity selections keyed by reference path. */
@@ -1405,16 +1403,6 @@ class QueryProjection {
     const rows = this.#ensureRootRows()
     const name = this.#nextBatchCte('selected_roots')
     this.#batchRootSelection = name
-    const config = this.#rootConfig
-    if (config === undefined && this.#rootSelection !== undefined) {
-      this.#batchDefinitions.push(sqlConcat([
-        sqlText(`${name} AS MATERIALIZED (`),
-        this.#rootSelection,
-        sqlText(')'),
-      ], ''))
-      this.#markAvailable(name)
-      return name
-    }
     this.#batchDefinitions.push(sqlConcat([
       sqlText(`${name} AS MATERIALIZED (`),
       sqlText(`SELECT ${quote(this.root.baseAlias)}.${quote('id')} AS ${quote('id')} `),
@@ -1534,24 +1522,19 @@ class QueryProjection {
   }
 
   /**
-   * Store the complete selected-root query for batched collection CTEs.
-   * @param selection - Root identity query including filters, ordering and pagination.
+   * Store the selected-root joins, predicate, ordering and pagination.
    * @param config - Root joins, predicate, ordering and pagination reused by the shared row base.
    * @param config.joins - Root predicate joins absorbed by the shared row base.
    * @param config.ordering - Root ordering SQL.
    * @param config.pagination - Root limit/offset SQL.
    * @param config.where - Root predicate including filters and raw correlation.
    */
-  setRootSelection(
-    selection: SqlFragment,
-    config?: {
-      readonly joins: readonly SqlFragment[],
-      readonly ordering: string,
-      readonly pagination: SqlFragment,
-      readonly where: SqlFragment,
-    },
-  ): void {
-    this.#rootSelection = selection
+  setRootSelection(config: {
+    readonly joins: readonly SqlFragment[],
+    readonly ordering: string,
+    readonly pagination: SqlFragment,
+    readonly where: SqlFragment,
+  }): void {
     this.#rootConfig = config
   }
 
@@ -3262,13 +3245,10 @@ class QueryProjection {
     this.#flushReachable()
     const selectedCte = quote(`flat_selected_${suffix}`)
     const uniqueBaseCte = quote(`flat_unique_${suffix}`)
-    const selectedNeeded = selectedPath
     const pageOffset = offset > 0 || limit !== null ? sqlParameter(offset) : undefined
     const pageLimit = limit === null ? undefined : sqlParameter(limit)
-    const selectedBase = selectedPath
-      ? selectedNeeded ? selectedCte : uniqueBaseCte
-      : baseCte
-    const rowsBase = selectedPath ? selectedBase : baseCte
+    const selectedBase = selectedPath ? selectedCte : baseCte
+    const rowsBase = selectedBase
     if (selectedPath) {
       this.#batchDefinitions.push(this.#dedupeRowsDefinition(
         uniqueBaseCte,
@@ -3303,11 +3283,9 @@ class QueryProjection {
         ])
       }
       this.#batchDefinitions.push(
-        ...(selectedNeeded
-          ? [sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], '')]
-          : []),
+        sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], ''),
       )
-      if (selectedNeeded) this.#markAvailable(selectedCte)
+      this.#markAvailable(selectedCte)
     }
     const childRoot = this.#nextAlias('fi')
     const child = new QueryProjection(
@@ -3365,7 +3343,6 @@ class QueryProjection {
       itemQuery,
       itemsCte,
       limit,
-      matchedFilterPresent: filterPredicate !== undefined,
       matchedQuery: filterPredicate === undefined
         ? undefined
         : sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte} WHERE ` +
@@ -3509,7 +3486,6 @@ class QueryProjection {
       itemQuery: sqlConcat([sqlText(`SELECT * FROM ${rowsSource}`)]),
       itemsCte,
       limit,
-      matchedFilterPresent: selectedPath,
       matchedQuery,
       offset,
       prePaged: selectedPath,
@@ -3534,7 +3510,6 @@ class QueryProjection {
    * @param options.itemQuery - Complete item row query without paging.
    * @param options.itemsCte - JSON item CTE name.
    * @param options.limit - Page size.
-   * @param options.matchedFilterPresent - Whether a matched-count filter was compiled.
    * @param options.matchedQuery - Optional matched-row query fragment.
    * @param options.matchedRowsSource - Optional precomputed matched-row CTE.
    * @param options.offset - Page offset.
@@ -3551,7 +3526,6 @@ class QueryProjection {
     readonly itemQuery: SqlFragment,
     readonly itemsCte: string,
     readonly limit: number | null,
-    readonly matchedFilterPresent?: boolean,
     readonly matchedQuery?: SqlFragment,
     readonly matchedRowsSource?: string,
     readonly offset: number,
@@ -3567,7 +3541,6 @@ class QueryProjection {
       itemQuery,
       itemsCte,
       limit,
-      matchedFilterPresent,
       matchedQuery,
       matchedRowsSource,
       offset,
@@ -3591,7 +3564,6 @@ class QueryProjection {
       ? matchedRowsSource === undefined ? itemRows : sqlText(matchedRowsSource)
       : sqlConcat([sqlText('('), matchedQuery, sqlText(')')])
     const countsFromItems = unpaged
-      && !matchedFilterPresent
       && matchedQuery === undefined
       && matchedRowsSource === undefined
       && (countsRowsCte === undefined || countsRowsCte === baseCte)
@@ -4599,15 +4571,7 @@ export function compilePolymorphicQueryWithRejection(
   const limit = options.limit === undefined ? 25 : options.limit
   const pagination = SQL.paginate(limit, options.offset ?? 0)
   const rootRelation = projection.relation(definition.name)
-  const rootSelection = sqlConcat([
-    sqlText(`SELECT ${quote(projection.root.baseAlias)}.${quote('id')} AS ${quote('id')}`),
-    sqlText(` FROM ${rootRelation} ${quote(projection.root.baseAlias)}`),
-    ...projection.joins,
-    whereSql,
-    sqlText(ordering),
-    pagination,
-  ])
-  projection.setRootSelection(rootSelection, {
+  projection.setRootSelection({
     joins: [...projection.joins],
     ordering,
     pagination,
