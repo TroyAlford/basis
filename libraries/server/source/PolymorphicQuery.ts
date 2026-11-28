@@ -242,24 +242,87 @@ interface EntityContext {
   readonly singularNavigations: ReadonlyMap<string, DerivedSingularDefinition>,
 }
 
-/** Canonical semantic inputs shared by every physical collection adapter. */
-interface CollectionSemantics {
+/**
+ * Canonical collection semantics shared by every physical adapter.
+ *
+ * The semantic rules for identity counting, paging, and item aggregation live
+ * here; physical strategies only supply their member query.
+ */
+class CollectionSemantics {
   /** Requested filter expression, before it is compiled against a member adapter. */
-  readonly filter?: string,
+  readonly filter?: string
   /** Result identity aliases. */
-  readonly identity: readonly string[],
+  readonly identity: readonly string[]
   /** Whether member rows are already unique by identity. */
-  readonly identityUnique: boolean,
-  /** Stable logical collection path. */
-  readonly key: string,
+  readonly identityUnique: boolean
   /** Effective page size. */
-  readonly limit: number | null,
+  readonly limit: number | null
   /** Effective page offset. */
-  readonly offset: number,
+  readonly offset: number
   /** Effective item ordering. */
-  readonly orderBy?: OrderBy,
-  /** Canonical relation plan supplying the physical relation. */
-  readonly plan: CollectionRelationPlan,
+  readonly orderBy?: OrderBy
+
+  /**
+   * Create one canonical collection contract.
+   * @param options - Resolved collection inputs.
+   * @param options.filter - Requested filter expression.
+   * @param options.identity - Result identity aliases.
+   * @param options.identityUnique - Whether member rows are already unique by identity.
+   * @param options.limit - Effective page size.
+   * @param options.offset - Effective page offset.
+   * @param options.orderBy - Effective item ordering.
+   */
+  constructor(options: {
+    readonly filter?: string,
+    readonly identity: readonly string[],
+    readonly identityUnique: boolean,
+    readonly limit: number | null,
+    readonly offset: number,
+    readonly orderBy?: OrderBy,
+  }) {
+    this.filter = options.filter
+    this.identity = options.identity
+    this.identityUnique = options.identityUnique
+    this.limit = options.limit
+    this.offset = options.offset
+    this.orderBy = options.orderBy
+  }
+
+  /**
+   * Count member identities under this contract.
+   * @param member - Member query.
+   * @returns Count fragment.
+   */
+  count(member: SqlFragment): SqlFragment {
+    return collectionIdentityCount(member, this.identity, this.identityUnique)
+  }
+
+  /**
+   * Order and page member identities under this contract.
+   * @param member - Member query.
+   * @param orderings - Requested and stable ordering.
+   * @returns Paged identity query.
+   */
+  page(member: SqlFragment, orderings: readonly CollectionOrdering[]): SqlFragment {
+    return collectionIdentityPage(
+      member,
+      this.identity,
+      orderings,
+      this.limit,
+      this.offset,
+      this.identityUnique,
+    )
+  }
+
+  /**
+   * Aggregate paged identities into one JSON item array.
+   * @param page - Paged identity query.
+   * @param orderings - Requested and stable ordering.
+   * @returns Item aggregation fragment.
+   */
+  items(page: SqlFragment, orderings: readonly CollectionOrdering[]): SqlFragment {
+    return collectionItems(page, orderings)
+  }
 }
 
 /** One reusable collection relation and its correlated condition. */
@@ -2987,25 +3050,21 @@ class QueryProjection {
    * expression, identity, ordering, limit, or offset.
    * @param spec - Requested collection projection.
    * @param plan - Canonical collection relation plan.
-   * @param key - Stable logical collection path.
    * @returns The shared collection semantics.
    */
   #collectionSemantics(
     spec: ProjectedCollectionSpec,
     plan: CollectionRelationPlan,
-    key: string,
   ): CollectionSemantics {
     const options = this.#collectionOptions(spec, plan)
-    return {
+    return new CollectionSemantics({
       ...options,
       filter: spec.filters.size === 0
         ? undefined
         : [...spec.filters].map(value => `(${value})`).join(' $and '),
       identity: this.#collectionIdentity(plan),
       identityUnique: true,
-      key,
-      plan,
-    }
+    })
   }
 
   /**
@@ -3036,11 +3095,7 @@ class QueryProjection {
       node.context.baseAlias,
       collectionKey(node.path, spec.collection.name),
     )
-    const semantics = this.#collectionSemantics(
-      spec,
-      plan,
-      collectionKey(node.path, spec.collection.name),
-    )
+    const semantics = this.#collectionSemantics(spec, plan)
     if (semantics.orderBy !== undefined) return false
     if (plan.resultType === 'record') {
       return plan.collection.kind === 'explicit'
@@ -3071,7 +3126,7 @@ class QueryProjection {
       || plan.relationshipAlias === undefined
       || plan.ownerId === undefined) return false
     this.#consume(plan.work)
-    const semantics = this.#collectionSemantics(spec, plan, collectionKey(node.path, spec.collection.name))
+    const semantics = this.#collectionSemantics(spec, plan)
     const { filter: filterText, identity, limit, offset } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
@@ -3224,7 +3279,7 @@ class QueryProjection {
     if (plan.resultType === 'record') return this.#addFlatRecordCollection(node, spec, plan)
     if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
     if (plan.target.abstract || plan.target.name === 'Entity') return false
-    const semantics = this.#collectionSemantics(spec, plan, key)
+    const semantics = this.#collectionSemantics(spec, plan)
     const { filter, limit, offset, orderBy } = semantics
     if (orderBy !== undefined) return false
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
@@ -3277,10 +3332,10 @@ class QueryProjection {
       filterProjection = sqlConcat([
         sqlText(', (CASE WHEN ('),
         filterPredicate,
-        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__batch_filter')}, `),
+        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter')}, `),
         sqlText('(CASE WHEN ('),
         filterMatched,
-        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__batch_filter_matched')}`),
+        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter_matched')}`),
       ], '')
     }
     const edgeProjection = edge === undefined
@@ -3357,26 +3412,16 @@ class QueryProjection {
       : baseCte
     const rowsBase = selectedPath ? selectedBase : baseCte
     if (selectedPath) {
-      this.#batchDefinitions.push(sqlConcat([
-        sqlText(`${uniqueBaseCte} AS MATERIALIZED (`),
-        sqlText(`SELECT DISTINCT ON (${quote('__parent_id')}, ${quote('__item_id')}) *`),
-        filterPredicate === undefined
-          ? undefined
-          : sqlText(`, bool_or(${quote('__batch_filter')}) OVER (` +
-            `PARTITION BY ${quote('__parent_id')}, ${quote('__item_id')}) ` +
-            `AS ${quote('__batch_filter_agg')}, ` +
-            `bool_or(${quote('__batch_filter_matched')}) OVER (` +
-            `PARTITION BY ${quote('__parent_id')}, ${quote('__item_id')}) ` +
-            `AS ${quote('__batch_filter_matched_agg')}`),
-        sqlText(' FROM ('),
+      this.#batchDefinitions.push(this.#dedupeRowsDefinition(
+        uniqueBaseCte,
         baseQuery,
-        sqlText(`) AS ${quote('__base')} ORDER BY ${quote('__parent_id')}, ${quote('__item_id')})`),
-      ], ''))
+        filterPredicate !== undefined,
+      ))
       this.#markAvailable(uniqueBaseCte)
       const selectedSource: SqlFragment = filterPredicate === undefined
         ? sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte}`)])
         : sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte} ` +
-          `WHERE ${quote('__batch_filter_agg')} IS TRUE`)])
+          `WHERE ${quote('__batch_filter')} IS TRUE`)])
       let selectedQuery: SqlFragment
       if (limit === null && offset === 0) {
         selectedQuery = selectedSource
@@ -3467,7 +3512,7 @@ class QueryProjection {
       matchedQuery: filterPredicate === undefined
         ? undefined
         : sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte} WHERE ` +
-          `${quote('__batch_filter_matched_agg')} IS TRUE`)]),
+          `${quote('__batch_filter_matched')} IS TRUE`)]),
       matchedRowsSource: selectedPath && filterPredicate === undefined ? uniqueBaseCte : undefined,
       offset,
       pageLimit,
@@ -3495,8 +3540,7 @@ class QueryProjection {
       || plan.relationship === undefined
       || plan.relationshipAlias === undefined
       || plan.ownerId === undefined) return false
-    const key = collectionKey(node.path, spec.collection.name)
-    const semantics = this.#collectionSemantics(spec, plan, key)
+    const semantics = this.#collectionSemantics(spec, plan)
     const { filter: filterText, limit, offset, orderBy } = semantics
     if (orderBy !== undefined) return false
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
@@ -3806,6 +3850,37 @@ class QueryProjection {
   }
 
   /**
+   * Emit the canonical distinct member relation for a batched collection.
+   *
+   * `source` must expose `__parent_id`, `__item_id`, and the member columns.
+   * When filters are present it must also expose `__raw_filter` and
+   * `__raw_filter_matched`; the caller owns how those raw flags are computed.
+   * Duplicate edges are collapsed only after both existential flags are
+   * aggregated, so independent item and matched matches survive.
+   * @param name - CTE name.
+   * @param source - Raw member row query.
+   * @param filtered - Whether independent filter flags are present.
+   * @returns The deduplicated member CTE definition.
+   */
+  #dedupeRowsDefinition(name: string, source: SqlFragment, filtered: boolean): SqlFragment {
+    const parent = quote('__parent_id')
+    const item = quote('__item_id')
+    const partition = `${parent}, ${item}`
+    return sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (SELECT DISTINCT ON (${partition}) *`),
+      filtered
+        ? sqlText(`, bool_or(${quote('__raw_filter')}) OVER (PARTITION BY ${partition}) ` +
+          `AS ${quote('__batch_filter')}, ` +
+          `bool_or(${quote('__raw_filter_matched')}) OVER (PARTITION BY ${partition}) ` +
+          `AS ${quote('__batch_filter_matched')}`)
+        : undefined,
+      sqlText(' FROM ('),
+      source,
+      sqlText(`) AS ${quote('__base')} ORDER BY ${partition})`),
+    ])
+  }
+
+  /**
    * Add one flat collection envelope to the owning projection.
    * @param node - Projection occurrence owning the collection.
    * @param spec - Requested collection projection.
@@ -3885,7 +3960,7 @@ class QueryProjection {
     if (plan.resultType === 'record') return this.#addBatchedRecordCollection(node, spec, plan)
     if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
     this.#consume(plan.work)
-    const semantics = this.#collectionSemantics(spec, plan, key)
+    const semantics = this.#collectionSemantics(spec, plan)
     const { filter, limit, offset } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
@@ -3926,12 +4001,9 @@ class QueryProjection {
     }
     const allSql = compiledFragment(childAll)
     const suffix = this.#nextAlias('bg')
-    const itemAlias = quote('__item')
-    const ordinalAlias = quote('__ordinal')
     const rootCte = quote(`batch_roots_${suffix}`)
     const rowsAllCte = quote(`batch_rows_all_${suffix}`)
     const rowsFilteredCte = quote(`batch_rows_filtered_${suffix}`)
-    const countsCte = quote(`batch_counts_${suffix}`)
     const itemsCte = quote(`batch_items_${suffix}`)
     const rootAlias = node.context.baseAlias
     const parentId = plan.ownerId
@@ -3950,34 +4022,24 @@ class QueryProjection {
       itemFilter?: SqlFragment,
       matchedFilter?: SqlFragment,
     ): SqlFragment => {
-      const partition = `${parentId}, ${quote('__child')}.${quote('id')}`
-      let itemFlag: SqlFragment | undefined
+      let rawFilter: SqlFragment | undefined
       if (itemFilter !== undefined) {
-        itemFlag = sqlConcat([
-          sqlText(', bool_or(CASE WHEN ('),
+        rawFilter = sqlConcat([
+          sqlText(', (CASE WHEN ('),
           itemFilter,
-          sqlText(`) THEN TRUE ELSE FALSE END) OVER (PARTITION BY ${partition}) ` +
-            `AS ${quote('__batch_filter')}`),
-        ])
-      }
-      let matchedFlag: SqlFragment | undefined
-      if (matchedFilter !== undefined) {
-        matchedFlag = sqlConcat([
-          sqlText(', bool_or(CASE WHEN ('),
+          sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter')}, `),
+          sqlText('(CASE WHEN ('),
           matchedFilter,
-          sqlText(`) THEN TRUE ELSE FALSE END) OVER (PARTITION BY ${partition}) ` +
-            `AS ${quote('__batch_filter_matched')}`),
+          sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter_matched')}`),
         ])
       }
-      return sqlConcat([
-        sqlText(`${name} AS MATERIALIZED (`),
-        sqlText(`SELECT DISTINCT ON (${parentId}, ${quote('__child')}.${quote('id')}) ` +
-          `${parentId} AS ${quote('__parent_id')}, ${quote('__child')}.*`),
+      const source = sqlConcat([
+        sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ` +
+          `${quote('__child')}.${quote('id')} AS ${quote('__item_id')}, ${quote('__child')}.*`),
         edgeFields.length === 0
           ? undefined
           : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
-        itemFlag,
-        matchedFlag,
+        rawFilter,
         sqlText(' FROM '),
         sqlText(`${plan.relation} `),
         sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
@@ -3985,13 +4047,9 @@ class QueryProjection {
         sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
         sqlText(`WHERE ${plan.condition}`),
         collectionPredicate,
-        sqlText(')'),
       ], '')
+      return this.#dedupeRowsDefinition(name, source, itemFilter !== undefined)
     }
-    const page = limit === null
-      ? `${quote('__ordinal')} > ${offset}`
-      : `${quote('__ordinal')} > ${offset} AND ` +
-        `${quote('__ordinal')} <= ${offset + limit}`
     this.#batchDefinitions.push(
       sqlConcat([
         sqlText(`${rootCte} AS MATERIALIZED (`),
@@ -4015,50 +4073,31 @@ class QueryProjection {
         sqlText(`${quote(`batch_rows_matched_${suffix}`)} AS MATERIALIZED (`),
         sqlText(`SELECT * FROM ${rowsAllCte} WHERE ${quote('__batch_filter_matched')} IS TRUE)`),
       ], '')]),
-      sqlConcat([
-        sqlText(`${countsCte} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__total')} `),
-        sqlText(`FROM ${rowsAllCte} GROUP BY ${quote('__parent_id')})`),
-      ], ''),
-      sqlConcat([
-        sqlText(`${itemsCte} AS MATERIALIZED (`),
-        sqlText(`WITH ${quote('__item_group')} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote('__parent_id')}, `),
-        sqlText(`COALESCE(json_agg(row_to_json(${itemAlias}) ORDER BY ${itemAlias}.${ordinalAlias}) `),
-        sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')} `),
-        sqlText('FROM ('),
-        sqlText('SELECT '),
-        sqlText('row_number() OVER ('),
-        sqlText(`PARTITION BY ${quote('__parent_id')} ORDER BY ${quote('__child')}.${quote('id')}) `),
-        sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
-        sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
-        sqlText(`AS ${quote('__item')} `),
-        sqlText(`GROUP BY ${quote('__parent_id')}), `),
-        sqlText(`${quote('__matched')} AS MATERIALIZED (`),
-        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__matched')} `),
-        sqlText(`FROM ${filter === undefined ? rowsAllCte : quote(`batch_rows_matched_${suffix}`)} `),
-        sqlText(`GROUP BY ${quote('__parent_id')}) `),
-        sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
-          `COALESCE(${quote('__item_group')}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
-          `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
-        sqlText(`FROM (SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
-          `SELECT ${quote('__parent_id')} FROM ${quote('__matched')}) AS ${quote('__parents')} `),
-        sqlText(`LEFT JOIN ${quote('__item_group')} ON ${quote('__item_group')}.${quote('__parent_id')} ` +
-          `= ${quote('__parents')}.${quote('__parent_id')} `),
-        sqlText(`LEFT JOIN ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +
-          `= ${quote('__parents')}.${quote('__parent_id')})`),
-      ], ''),
     )
+    const aggregate = this.#flatAggregateDefinitions({
+      baseCte: rowsAllCte,
+      countsRowsCte: rowsAllCte,
+      filterPresent: false,
+      itemOrder: `${quote('__child')}.${quote('id')}`,
+      itemQuery: sqlText(
+        `SELECT * FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte}`,
+      ),
+      itemsCte,
+      limit,
+      matchedQuery: filter === undefined
+        ? undefined
+        : sqlText(`SELECT * FROM ${quote(`batch_rows_matched_${suffix}`)}`),
+      offset,
+      prePaged: false,
+    })
+    this.#batchDefinitions.push(...aggregate.definitions)
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
     const totalAlias = `${alias}__total`
     const joinAlias = this.#nextAlias('bc')
-    const countsAlias = this.#nextAlias('bn')
     this.joins.push(sqlText(
       `LEFT JOIN ${itemsCte} ${quote(joinAlias)} ` +
-      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')} ` +
-      `LEFT JOIN ${countsCte} ${quote(countsAlias)} ` +
-      `ON ${quote(countsAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
+      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
     ))
     this.columns.push(sqlText(
       `${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`,
@@ -4067,7 +4106,7 @@ class QueryProjection {
       `${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
     ))
     this.columns.push(sqlText(
-      `${quote(countsAlias)}.${quote('__total')} AS ${quote(totalAlias)}`,
+      `${quote(joinAlias)}.${quote('__total')} AS ${quote(totalAlias)}`,
     ))
     node.projectedCollections.push({
       alias,
@@ -4110,7 +4149,7 @@ class QueryProjection {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)
-    const semantics = this.#collectionSemantics(spec, plan, key)
+    const semantics = this.#collectionSemantics(spec, plan)
     const { filter, limit, offset, orderBy } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
@@ -4134,23 +4173,10 @@ class QueryProjection {
     const matched = adapter.compile(filter)
     const matchedForCount = countAdapter.compile(filter)
     const total = filter === undefined ? undefined : countAdapter.compile(undefined)
-    const matchedCount = collectionIdentityCount(
-      matchedForCount,
-      countAdapter.identity,
-      countAdapter.identityUnique,
-    )
-    const totalCount = total === undefined
-      ? undefined
-      : collectionIdentityCount(total, countAdapter.identity, countAdapter.identityUnique)
-    const page = collectionIdentityPage(
-      matched,
-      adapter.identity,
-      orderings,
-      limit,
-      offset,
-      adapter.identityUnique,
-    )
-    const items = collectionItems(page, orderings)
+    const matchedCount = semantics.count(matchedForCount)
+    const totalCount = total === undefined ? undefined : semantics.count(total)
+    const page = semantics.page(matched, orderings)
+    const items = semantics.items(page, orderings)
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
     const totalAlias = totalCount === undefined ? matchedAlias : `${alias}__total`

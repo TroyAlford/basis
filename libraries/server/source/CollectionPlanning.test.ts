@@ -127,7 +127,7 @@ describe('collection planning', () => {
       fields: ['id', 'printings[title = \'One\']{$limit:null}', 'printings.card.name'],
     })
     expect(filtered.sql).toContain('flat_selected_')
-    expect(filtered.sql).toContain('__batch_filter_matched_agg')
+    expect(filtered.sql).toContain('__batch_filter_matched')
     expect(filtered.sql).toContain('"__counts" AS MATERIALIZED')
     expect(filtered.sql).not.toMatch(/SELECT count\(\*\)::int FROM \(/)
   })
