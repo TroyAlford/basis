@@ -242,6 +242,26 @@ interface EntityContext {
   readonly singularNavigations: ReadonlyMap<string, DerivedSingularDefinition>,
 }
 
+/** Canonical semantic inputs shared by every physical collection adapter. */
+interface CollectionSemantics {
+  /** Requested filter expression, before it is compiled against a member adapter. */
+  readonly filter?: string,
+  /** Result identity aliases. */
+  readonly identity: readonly string[],
+  /** Whether member rows are already unique by identity. */
+  readonly identityUnique: boolean,
+  /** Stable logical collection path. */
+  readonly key: string,
+  /** Effective page size. */
+  readonly limit: number | null,
+  /** Effective page offset. */
+  readonly offset: number,
+  /** Effective item ordering. */
+  readonly orderBy?: OrderBy,
+  /** Canonical relation plan supplying the physical relation. */
+  readonly plan: CollectionRelationPlan,
+}
+
 /** One reusable collection relation and its correlated condition. */
 interface CollectionRelationPlan {
   /** Collection navigation being planned. */
@@ -2960,6 +2980,46 @@ class QueryProjection {
   }
 
   /**
+   * Resolve the canonical semantic contract for one collection.
+   *
+   * Every physical adapter consumes these inputs. Adapters may assemble
+   * different SQL shapes, but they must not independently decide the filter
+   * expression, identity, ordering, limit, or offset.
+   * @param spec - Requested collection projection.
+   * @param plan - Canonical collection relation plan.
+   * @param key - Stable logical collection path.
+   * @returns The shared collection semantics.
+   */
+  #collectionSemantics(
+    spec: ProjectedCollectionSpec,
+    plan: CollectionRelationPlan,
+    key: string,
+  ): CollectionSemantics {
+    const options = this.#collectionOptions(spec, plan)
+    return {
+      ...options,
+      filter: spec.filters.size === 0
+        ? undefined
+        : [...spec.filters].map(value => `(${value})`).join(' $and '),
+      identity: this.#collectionIdentity(plan),
+      identityUnique: true,
+      key,
+      plan,
+    }
+  }
+
+  /**
+   * Resolve the canonical result identity for one collection relation.
+   * @param plan - Canonical collection relation plan.
+   * @returns Entity identity or relationship-record endpoint fields.
+   */
+  #collectionIdentity(plan: CollectionRelationPlan): readonly string[] {
+    return plan.resultType === 'record'
+      ? plan.relationship?.between.map(endpoint => endpoint.field) ?? []
+      : ['id']
+  }
+
+  /**
    * Whether one root collection can use the set-oriented batch plan.
    *
    * This remains conservative: it rejects explicit ordering and unsupported
@@ -2976,7 +3036,12 @@ class QueryProjection {
       node.context.baseAlias,
       collectionKey(node.path, spec.collection.name),
     )
-    if (this.#collectionOptions(spec, plan).orderBy !== undefined) return false
+    const semantics = this.#collectionSemantics(
+      spec,
+      plan,
+      collectionKey(node.path, spec.collection.name),
+    )
+    if (semantics.orderBy !== undefined) return false
     if (plan.resultType === 'record') {
       return plan.collection.kind === 'explicit'
         && plan.relationshipAlias !== undefined
@@ -3006,19 +3071,14 @@ class QueryProjection {
       || plan.relationshipAlias === undefined
       || plan.ownerId === undefined) return false
     this.#consume(plan.work)
-    const options = this.#collectionOptions(spec, plan)
-    const { limit, offset } = options
+    const semantics = this.#collectionSemantics(spec, plan, collectionKey(node.path, spec.collection.name))
+    const { filter: filterText, identity, limit, offset } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     let fields: readonly string[]
-    let identity: readonly string[]
     let filter: ReturnType<typeof SQL.where> | undefined
     try {
       fields = recordFields(plan, spec.fields)
-      identity = plan.relationship.between.map(endpoint => endpoint.field)
-      const filterText = spec.filters.size === 0
-        ? undefined
-        : [...spec.filters].map(value => `(${value})`).join(' $and ')
       filter = filterText === undefined ? undefined : this.#recordPredicate(plan, filterText)
     } catch {
       return false
@@ -3164,14 +3224,11 @@ class QueryProjection {
     if (plan.resultType === 'record') return this.#addFlatRecordCollection(node, spec, plan)
     if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
     if (plan.target.abstract || plan.target.name === 'Entity') return false
-    const options = this.#collectionOptions(spec, plan)
-    const { limit, offset, orderBy } = options
+    const semantics = this.#collectionSemantics(spec, plan, key)
+    const { filter, limit, offset, orderBy } = semantics
     if (orderBy !== undefined) return false
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
-    const filter = spec.filters.size === 0
-      ? undefined
-      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     let filterPredicate: SqlFragment | undefined
     let filterMatched: SqlFragment | undefined
     if (filter !== undefined) {
@@ -3438,21 +3495,18 @@ class QueryProjection {
       || plan.relationship === undefined
       || plan.relationshipAlias === undefined
       || plan.ownerId === undefined) return false
-    const options = this.#collectionOptions(spec, plan)
-    const { limit, offset, orderBy } = options
+    const key = collectionKey(node.path, spec.collection.name)
+    const semantics = this.#collectionSemantics(spec, plan, key)
+    const { filter: filterText, limit, offset, orderBy } = semantics
     if (orderBy !== undefined) return false
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     let fields: readonly string[]
-    let identity: readonly string[]
+    const identity = semantics.identity
     let filter: ReturnType<typeof SQL.where> | undefined
     let filterMatched: ReturnType<typeof SQL.where> | undefined
     try {
       fields = recordFields(plan, spec.fields)
-      identity = plan.relationship.between.map(endpoint => endpoint.field)
-      const filterText = spec.filters.size === 0
-        ? undefined
-        : [...spec.filters].map(value => `(${value})`).join(' $and ')
       filter = filterText === undefined ? undefined : this.#recordPredicate(plan, filterText)
       filterMatched = filterText === undefined ? undefined : this.#recordPredicate(plan, filterText)
     } catch {
@@ -3831,15 +3885,12 @@ class QueryProjection {
     if (plan.resultType === 'record') return this.#addBatchedRecordCollection(node, spec, plan)
     if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
     this.#consume(plan.work)
-    const options = this.#collectionOptions(spec, plan)
-    const { limit, offset } = options
+    const semantics = this.#collectionSemantics(spec, plan, key)
+    const { filter, limit, offset } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
     const edgeFields = [...spec.edgeFields]
-    const filter = spec.filters.size === 0
-      ? undefined
-      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const childAlias = this.#nextAlias('b')
     const targetIdsCte = quote(`batch_target_ids_${childAlias}`)
     const targetIds = sqlText(
@@ -4059,8 +4110,8 @@ class QueryProjection {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)
-    const options = this.#collectionOptions(spec, plan)
-    const { limit, offset, orderBy } = options
+    const semantics = this.#collectionSemantics(spec, plan, key)
+    const { filter, limit, offset, orderBy } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
     }
@@ -4073,9 +4124,6 @@ class QueryProjection {
       offset,
       ...(orderBy === undefined ? {} : { orderBy }),
     }
-    const filter = spec.filters.size === 0
-      ? undefined
-      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, effective)
       : this.#entityMember(plan, effective, key)
@@ -4225,7 +4273,7 @@ class QueryProjection {
     }
     return {
       compile,
-      identity: ['id'],
+      identity: this.#collectionIdentity(plan),
       identityUnique: true,
       orderable: new Set([...fields, ...projectedEdgeFields]),
     }
@@ -4247,7 +4295,7 @@ class QueryProjection {
     if (relationship === undefined) {
       throw new Error(`Record collection "${plan.collection.name}" has no relationship source`)
     }
-    const identity = relationship.between.map(endpoint => endpoint.field)
+    const identity = this.#collectionIdentity(plan)
     const requested = countOnly
       ? new Set(identity)
       : new Set(recordFields(plan, spec.fields))
