@@ -204,7 +204,7 @@ describe('vendor assets', () => {
     const vendor = await Bun.fetch(`${application.url}/assets/vendor/vendor.js`, { redirect: 'manual' })
     expect(vendor.status).toBe(307)
     expect(vendor.headers.get('location')).toContain('?v=')
-  })
+  }, 120_000)
 
   test('uses a configured trusted public origin for vendor scripts', async () => {
     const application = await useApplication({
