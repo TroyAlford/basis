@@ -3362,7 +3362,6 @@ class QueryProjection {
     const aggregate = this.#flatAggregateDefinitions({
       baseCte,
       countsRowsCte: selectedPath ? uniqueBaseCte : undefined,
-      filterPresent: !selectedPath && filterPredicate !== undefined,
       itemQuery,
       itemsCte,
       limit,
@@ -3505,7 +3504,6 @@ class QueryProjection {
     const aggregate = this.#flatAggregateDefinitions({
       baseCte,
       countsRowsCte: baseCte,
-      filterPresent: false,
       itemBuilder: `json_build_object(${itemFields})`,
       itemOrder,
       itemQuery: sqlConcat([sqlText(`SELECT * FROM ${rowsSource}`)]),
@@ -3531,7 +3529,6 @@ class QueryProjection {
    * @param options - Item query, count domains, and paging scope.
    * @param options.baseCte - Unfiltered base identity relation.
    * @param options.countsRowsCte - Optional source rows for the total count.
-   * @param options.filterPresent - Whether the item query carries filter flags.
    * @param options.itemBuilder - Optional JSON object field list for record rows.
    * @param options.itemOrder - Optional item ordering expression for record rows.
    * @param options.itemQuery - Complete item row query without paging.
@@ -3549,7 +3546,6 @@ class QueryProjection {
   #flatAggregateDefinitions(options: {
     readonly baseCte: string,
     readonly countsRowsCte?: string,
-    readonly filterPresent: boolean,
     readonly itemBuilder?: string,
     readonly itemOrder?: string,
     readonly itemQuery: SqlFragment,
@@ -3566,7 +3562,6 @@ class QueryProjection {
     const {
       baseCte,
       countsRowsCte,
-      filterPresent,
       itemBuilder,
       itemOrder,
       itemQuery,
@@ -3591,30 +3586,11 @@ class QueryProjection {
     const counts = quote('__counts')
     const matched = quote('__matched')
     const local: SqlFragment[] = []
-    let itemRows: SqlFragment = sqlConcat([sqlText('('), itemQuery, sqlText(')')])
-    let matchedRows: SqlFragment = matchedQuery === undefined
+    const itemRows: SqlFragment = sqlConcat([sqlText('('), itemQuery, sqlText(')')])
+    const matchedRows: SqlFragment = matchedQuery === undefined
       ? matchedRowsSource === undefined ? itemRows : sqlText(matchedRowsSource)
       : sqlConcat([sqlText('('), matchedQuery, sqlText(')')])
-    if (filterPresent) {
-      const filtered = quote('__filtered')
-      const matchedRowsCte = quote('__matched_rows')
-      local.push(
-        sqlConcat([
-          sqlText(`${filtered} AS MATERIALIZED (SELECT * FROM (`),
-          itemQuery,
-          sqlText(`) AS ${quote('__row')} WHERE ${quote('__batch_filter')} IS TRUE)`),
-        ]),
-        sqlConcat([
-          sqlText(`${matchedRowsCte} AS MATERIALIZED (SELECT * FROM (`),
-          itemQuery,
-          sqlText(`) AS ${quote('__row')} WHERE ${quote('__batch_filter_matched')} IS TRUE)`),
-        ]),
-      )
-      itemRows = sqlText(filtered)
-      matchedRows = sqlText(matchedRowsCte)
-    }
     const countsFromItems = unpaged
-      && !filterPresent
       && !matchedFilterPresent
       && matchedQuery === undefined
       && matchedRowsSource === undefined
@@ -3935,7 +3911,6 @@ class QueryProjection {
     const aggregate = this.#flatAggregateDefinitions({
       baseCte: rowsAllCte,
       countsRowsCte: rowsAllCte,
-      filterPresent: false,
       itemOrder: `${quote('__child')}.${quote('id')}`,
       itemQuery: sqlText(
         `SELECT * FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte}`,
@@ -3949,47 +3924,9 @@ class QueryProjection {
       prePaged: false,
     })
     this.#batchDefinitions.push(...aggregate.definitions)
-    const alias = columnAlias(node.path, spec.collection.name)
-    const matchedAlias = `${alias}__matched`
-    const totalAlias = `${alias}__total`
-    const joinAlias = this.#nextAlias('bc')
-    this.joins.push(sqlText(
-      `LEFT JOIN ${itemsCte} ${quote(joinAlias)} ` +
-      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${quote(rootAlias)}.${quote('id')}`,
-    ))
-    this.columns.push(sqlText(
-      `${quote(joinAlias)}.${quote('__items')} AS ${quote(alias)}`,
-    ))
-    this.columns.push(sqlText(
-      `${quote(joinAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
-    ))
-    this.columns.push(sqlText(
-      `${quote(joinAlias)}.${quote('__total')} AS ${quote(totalAlias)}`,
-    ))
-    node.projectedCollections.push({
-      alias,
-      hydrate: row => {
-        const raw = row[alias]
-        const entries = Array.isArray(raw)
-          ? raw
-          : typeof raw === 'string' ? JSON.parse(raw) as unknown[] : []
-        const matchedTotal = Number(row[matchedAlias] ?? 0)
-        return {
-          $matched: matchedTotal,
-          $total: Number(row[totalAlias] ?? matchedTotal),
-          items: entries.map(entry => {
-            const hydrated = childAll.hydrate(entry as Record<string, unknown>)
-            const edge = entry.__edge
-            if (edge !== undefined && edge !== null && typeof edge === 'object') {
-              Object.assign(hydrated, edge)
-            }
-            return hydrated
-          }),
-        }
-      },
-      matchedAlias,
-      name: spec.collection.name,
-      totalAlias,
+    this.#projectFlatEnvelope(node, spec, {
+      hydrateItem: entry => childAll.hydrate(entry),
+      itemsCte,
     })
     return true
   }
