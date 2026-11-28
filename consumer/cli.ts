@@ -199,7 +199,7 @@ const runTypecheck = async (): Promise<number> => (requireBunCheck() ? spawnBunC
  */
 const runCompleteCheck = async (paradigm: boolean): Promise<number> => {
   if (!requireBunCheck()) return 1
-  const emitCode = await runEmit(false)
+  const emitCode = await runEmit()
   if (emitCode !== 0) return emitCode
   const checks = [runLint(false), spawnBunCheck()]
   if (paradigm) checks.push(runCompliance())
@@ -211,35 +211,22 @@ const runCompleteCheck = async (paradigm: boolean): Promise<number> => {
 export interface EmitHooks {
   /** Emit the application Graph to its output root. */
   emit: typeof emit,
-  /** Format the generated output when the caller requested fixes. */
-  format: typeof runBunLint,
 }
 
 /** The production emit dependencies. */
-const defaultEmitHooks: EmitHooks = {
-  emit,
-  format: (fix, configPath, target) => runBunLint(fix, configPath, target),
-}
+const defaultEmitHooks: EmitHooks = { emit }
 
 /**
  * Runs the conventional application emit lifecycle.
- * @param fix - Whether to format the generated output as part of the run.
- * @param hooks - Emit and formatting dependencies.
+ * @param hooks - Emit dependency.
  * @returns Process exit code (`0` when emission succeeds or is not configured).
  */
-export const runEmit = async (
-  fix = false,
-  hooks: EmitHooks = defaultEmitHooks,
-): Promise<number> => {
+export const runEmit = async (hooks: EmitHooks = defaultEmitHooks): Promise<number> => {
   try {
     const result = await hooks.emit()
     if (!result) {
       logger.info('[basis] emit: no graph.ts found; skipped')
       return 0
-    }
-    if (fix) {
-      const formatCode = await hooks.format(true, undefined, 'generated')
-      if (formatCode !== 0) return formatCode
     }
     logger.info(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
     return 0
@@ -347,15 +334,12 @@ const main = async (): Promise<void> => {
   const command = Object.values(Command).find(candidate => candidate === rawCommand)
 
   if (command === Command.Doctor) process.exit(doctor())
-  if (command === Command.Emit) process.exit(await runEmit(false))
+  if (command === Command.Emit) process.exit(await runEmit())
   if (command === Command.Lint) process.exit(await runCompleteCheck(false))
-  if (command === Command.Format) {
-    const emitCode = await runEmit(true)
-    process.exit(emitCode === 0 ? await runLint(true) : emitCode)
-  }
+  if (command === Command.Format) process.exit(await runLint(true))
   if (command === Command.Compliance) process.exit(await runCompleteCheck(true))
   if (command === Command.Typecheck) {
-    const emitCode = await runEmit(false)
+    const emitCode = await runEmit()
     process.exit(emitCode === 0 ? await runTypecheck() : emitCode)
   }
 

@@ -3,6 +3,7 @@ import { run, runAsync } from 'basis/utilities'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { collectLintTargets, computeLintCacheKey, erroredLintTargets, hashFile, lintCachePath, pendingLintTargets, readLintCache, writeLintCache } from './lint-cache'
 
 /** Flat ESLint config filenames Bun discovers automatically. */
 const ESLINT_CONFIG_FILES = [
@@ -93,7 +94,8 @@ const eslintConfigPath = (): string => (
  * Bun runs a package.json `lint` script instead of the built-in linter when one
  * exists. The command therefore runs from a scratch package with no `lint`
  * script and points `--cwd` at the real project, preserving config and ignore
- * resolution without deferring to the consumer's script.
+ * resolution without deferring to the consumer's script. On repository-wide
+ * runs, unchanged clean files are skipped using the local result cache.
  * @param fix - Whether to apply the linter's fixes.
  * @param configPath - The ESLint config path to run.
  * @param target - The path to lint, relative to the working directory.
@@ -106,6 +108,32 @@ export const runBunLint = async (
 ): Promise<number> => {
   if (!requireBunLint()) return 1
 
+  const cwd = process.cwd()
+  const allTargets = target === '.' ? collectLintTargets(cwd) : [target]
+  if (allTargets.length === 0) return 0
+
+  let cache = null
+  let cachePath = ''
+  let targets = allTargets
+  if (target === '.') {
+    const key = computeLintCacheKey({
+      configPath,
+      cwd,
+      sourceRoots: [
+        join(basisDir(), 'libraries', 'linter-typescript'),
+        join(basisDir(), 'libraries', 'linter-support'),
+      ],
+    })
+    cachePath = lintCachePath(cwd, key)
+    cache = readLintCache(cachePath) ?? { files: {}, version: 1 }
+    const hashes = new Map(allTargets.map(file => [file, hashFile(join(cwd, file))]))
+    targets = pendingLintTargets(allTargets, hashes, cache)
+    if (targets.length === 0) {
+      process.stdout.write(`[basis] lint cache: ${allTargets.length} files unchanged\n`)
+      return 0
+    }
+  }
+
   const scratch = mkdtempSync(join(tmpdir(), 'basis-lint-'))
 
   try {
@@ -117,14 +145,38 @@ export const runBunLint = async (
     const result = await runAsync(process.execPath, [
       'lint',
       '--cwd',
-      process.cwd(),
+      cwd,
       '--config',
       configPath,
+      '--no-warn-ignored',
       ...(fix ? ['--fix'] : []),
-      target,
+      ...targets,
     ], { cwd: scratch, logger: silent })
     process.stdout.write(result.stdout)
     process.stderr.write(result.stderr)
+
+    if (cache !== null) {
+      const next = { files: { ...cache.files }, version: 1 as const }
+      const targetSet = new Set(allTargets)
+      for (const file of Object.keys(next.files)) {
+        if (!targetSet.has(file)) Reflect.deleteProperty(next.files, file)
+      }
+      const errored = result.exitCode === 0
+        ? new Set<string>()
+        : erroredLintTargets(`${result.stdout}${result.stderr}`, cwd, targets)
+      const allFailed = result.exitCode !== 0 && errored.size === 0
+      for (const file of targets) {
+        next.files[file] = {
+          hash: hashFile(join(cwd, file)),
+          status: result.exitCode === 0 || (!allFailed && !errored.has(file)) ? 'ok' : 'error',
+        }
+      }
+      try {
+        writeLintCache(cachePath, next)
+      } catch {
+        // The cache is an optimization; a read-only checkout must still lint.
+      }
+    }
 
     return result.exitCode
   } finally {

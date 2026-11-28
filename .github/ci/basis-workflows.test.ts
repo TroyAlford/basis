@@ -177,6 +177,13 @@ describe('Basis Code CI', () => {
     expect(code.jobs?.['check-pr-title']).toBeUndefined()
   })
 
+  test('caches and restores the Basis lint manifest', () => {
+    const steps = code.jobs?.compliance?.steps ?? []
+    const cache = steps.find(step => step.uses === 'actions/cache@v4')
+    expect(cache?.with?.path).toBe('.cache/basis-lint')
+    expect(cache?.with?.key).toContain('basis-lint')
+  })
+
   test('keeps the quality jobs and every test lane command', () => {
     expect(runs('compliance', 'bun run compliance')).toBe(true)
 
