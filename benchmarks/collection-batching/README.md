@@ -56,13 +56,13 @@ Both the original and generated statements bind eleven independent inputs. The p
 
 Basis `$total` is the authorized population before query-time filtering. The uploaded MTG statement’s filtered `decks__total` was a reference defect, not a generic compiler rule; the compiler applies the Graph contract uniformly to every collection, and the checked-in N7 reference now projects a filtered matched count separately from an unfiltered total.
 
-The multi-deck differential runs the consumer query against two visible decks for owner, editor, viewer, and a denied outsider. It keeps independent item and matched filters, uses a nonzero deck-entry offset, and compares raw and hydrated rows, `decks__matched`/`decks__total`, `deckEntries__matched`/`deckEntries__total`, and edge quantities with corrected N7. It is the acceptance check for the distinguishing case; the one-deck 106-root fixture alone cannot exercise it. `differential.json` records the result at Basis `2ff524f` and consumer `TroyAlford-AI/mtg-proxifier#2b7de76`.
+The multi-deck differential runs the consumer query against two visible decks for owner, editor, viewer, and a denied outsider. It keeps independent item and matched filters, uses a nonzero deck-entry offset, and compares raw and hydrated rows, `decks__matched`/`decks__total`, `deckEntries__matched`/`deckEntries__total`, and edge quantities with corrected N7. It is the acceptance check for the distinguishing case; the one-deck 106-root fixture alone cannot exercise it. `differential.json` records the result at Basis `2ff524f` and consumer `TroyAlford-AI/mtg-proxifier#e2bf27d`.
 
 The consumer test is staged behind `BASIS_N7_COMPILER=1` because the production MTG dependency remains the released `basis` tag until an authorized upgrade. It asserts the linked Basis Git SHA with `BASIS_N7_EXPECTED_SHA`, uses the supported `basis/testing` compiler adapter, and skips without those development inputs:
 
 ```sh
 BASIS_N7_COMPILER=1 \
-BASIS_N7_EXPECTED_SHA=238e4af1db7166cab3a463556165142a7c783444 \
+BASIS_N7_EXPECTED_SHA=93e995df6b1d6b7b49799533042925136ac999ff \
 bun test ./src/server/collectionN7.differential.integration.ts ./src/server/collectionN7.integration.ts
 ```
 
