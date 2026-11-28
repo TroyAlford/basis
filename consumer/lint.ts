@@ -100,16 +100,17 @@ const eslintConfigPath = (): string => (
  * @param fix - Whether to apply the linter's fixes.
  * @param configPath - The ESLint config path to run.
  * @param target - The path to lint, relative to the working directory.
+ * @param cwd - Repository root. Defaults to the current working directory.
  * @returns The child process exit code.
  */
 export const runBunLint = async (
   fix: boolean,
   configPath: string = eslintConfigPath(),
   target = '.',
+  cwd = process.cwd(),
 ): Promise<number> => {
   if (!requireBunLint()) return 1
 
-  const cwd = process.cwd()
   const allTargets = target === '.' ? collectLintTargets(cwd) : [target]
   const cacheEligible = target === '.'
   if (allTargets.length === 0) return 0

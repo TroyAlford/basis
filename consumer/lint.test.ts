@@ -39,7 +39,6 @@ describe('ESLint config discovery', () => {
 describe('lint config scoping', () => {
   test('lets Bun decide per-config ignores instead of prefiltering files', async () => {
     const root = tempDirectory('basis-lint-scope')
-    const previous = process.cwd()
     try {
       mkdirSync(join(root, 'src'), { recursive: true })
       writeFileSync(join(root, 'src', 'skip.ts'), 'debugger\n')
@@ -52,11 +51,9 @@ describe('lint config scoping', () => {
         '',
       ].join('\n'))
 
-      process.chdir(root)
-      expect(await runBunLint(false, config)).toBe(1)
-      expect(await runBunLint(false, config)).toBe(1)
+      expect(await runBunLint(false, config, '.', root)).toBe(1)
+      expect(await runBunLint(false, config, '.', root)).toBe(1)
     } finally {
-      process.chdir(previous)
       rmSync(root, { force: true, recursive: true })
     }
   })
