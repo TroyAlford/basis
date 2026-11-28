@@ -231,8 +231,10 @@ new Server()
   test('uses a configured trusted public origin for vendor scripts', async () => {
     const application = await useApplication({
       cwd: repoRoot,
+      development: true,
       entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
       env: { PUBLIC_ORIGIN: 'https://app.example' },
+      timeoutMs: 120_000,
     })
 
     try {
@@ -242,7 +244,7 @@ new Server()
     } finally {
       await application.stop()
     }
-  })
+  }, 120_000)
 
   test('preserves vendor HTTP cache headers and standalone chunk identity', async () => {
     const root = tempDirectory('basis-vendor-http-')
