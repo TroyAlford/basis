@@ -519,6 +519,13 @@ describe('flat collection pagination', () => {
       const firstPage = compile(0)
       expect(firstPage.sql).toContain('batch_rows_all_')
       const first = await run(firstPage, 1, 2)
+      const flatFirstPage = compilePolymorphicQuery(database.entities, definition, {
+        fields: ['id', 'children[rank = 100]{$limit:1}', 'children.label'],
+        where: { id: parent },
+      })
+      expect(flatFirstPage.sql).toContain('flat_selected_')
+      const flatFirst = await run(flatFirstPage, 1, 2)
+      expect(flatFirst).toEqual(first)
       expect(first.children.items.map(item => item.id)).toEqual([child(0)])
       expect(first.children.$matched).toBe(1)
       expect(first.children.$total).toBe(2)
