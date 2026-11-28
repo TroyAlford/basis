@@ -677,7 +677,8 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"visits"')
     expect(compiled.sql).toContain('"visits__matched"')
     expect(compiled.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(compiled.values).toEqual([2, 1, 25, 0])
+    expect(compiled.sql).toContain('BETWEEN 1 AND')
+    expect(compiled.values).toEqual([25, 0, 1, 2])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
@@ -703,9 +704,10 @@ describe('SQL.where', () => {
     expect(members.sql).toContain('FROM "authorized_Campaign" "t"')
     expect(members.sql).toMatch(/"Membership" "cj\d+"/)
     expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
-    expect(members.sql).toMatch(/"cj\d+"\."user\.id"/)
+    expect(members.sql).toMatch(/"__edge_row"\."user\.id"/)
     expect(members.sql).toContain('"members"')
-    expect(members.values).toEqual([2, 1, 25, 0])
+    expect(members.sql).toContain('"__selected_ordinal" -  $3  BETWEEN 1 AND  $4')
+    expect(members.values).toEqual([25, 0, 1, 2])
 
     const articles = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id', 'articles{$limit:1}'],
@@ -731,13 +733,13 @@ describe('SQL.where', () => {
       fields: ['id', 'members', 'members.name'],
     })
     expect(defaults.sql).toMatch(/LIMIT \$\d+ OFFSET \$\d+/u)
-    expect(defaults.values).toContain(3)
+    expect(defaults.sql).toContain('BETWEEN 1 AND')
     expect(defaults.sql).toContain('__matched')
 
     const capped = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:50}', 'members.name'],
     })
-    expect(capped.values).toContain(50)
+    expect(capped.sql).toContain('BETWEEN 1 AND')
 
     const filtered = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', "members[name != 'Ada']{$limit:null}", 'members.name'],
@@ -829,7 +831,8 @@ describe('SQL.where', () => {
     const compiled = compileEntityQuery(nestedCollectionDefinitions, 'User', {
       fields: ['id', 'pets', 'pets.toys', 'pets.toys.label'],
     })
-    expect(compiled.sql.match(/LEFT JOIN LATERAL/gu)?.length).toBeGreaterThanOrEqual(2)
+    expect(compiled.sql).not.toContain('LEFT JOIN LATERAL')
+    expect(compiled.sql).toContain('"flat_unique_')
     expect(compiled.sql).toContain('"toys"')
     expect(compiled.sql).toContain('"pets"')
   })

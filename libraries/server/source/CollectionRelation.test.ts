@@ -205,6 +205,7 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
+      ownerId: '"edge"."deck.id"',
       relation: '"DeckMember" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
       relationshipAlias: 'edge',
@@ -222,6 +223,7 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
+      ownerId: '"edge"."deck.id"',
       predicate: { sql: 'COALESCE("edge"."quantity" > $1, FALSE)', values: [3] },
       relation: '"DeckCardPrinting" "edge" JOIN "Card" "card" ' +
         'ON "card"."id" = "edge"."card.id" JOIN "Entity" "root" ON "root"."id" = "card"."id"',
@@ -240,6 +242,7 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
+      ownerId: '"edge"."deck.id"',
       predicate: { sql: 'COALESCE("edge"."quantity" > $1, FALSE)', values: [3] },
       relation: '"DeckCardPrinting" "edge"',
       relationshipAlias: 'edge',
@@ -255,6 +258,7 @@ describe('CollectionRelation', () => {
     })
     expect(sql).toEqual({
       condition: '"edge"."deck.id" = "deck"."id"',
+      ownerId: '"edge"."deck.id"',
       relation: '"DeckCardPrinting" "edge"',
       relationshipAlias: 'edge',
       resultType: 'record',

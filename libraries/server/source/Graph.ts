@@ -409,19 +409,19 @@ export class Graph {
     row: Record<string, unknown>,
   ): string | null {
     const targets = new Set(this.#ancestry(target))
-    const conditions: string[] = []
+    const conditions: { predicate: string, role: string }[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
       const actionMatches = grant.action === action
         || (MANAGED_ENTITIES.has(target) && grant.action === Action.Manage)
       if (!actionMatches) continue
-      const role = roleCondition(grant.role, this.#schema)
       const predicate = grant.predicate
         ? this.#compilePredicateForRow(grant, row)
         : 'TRUE'
-      conditions.push(`(${role} AND ${predicate})`)
+      conditions.push({ predicate, role: roleCondition(grant.role, this.#schema) })
     }
-    return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
+    const grouped = this.#groupRoleConditions(conditions)
+    return grouped.length === 0 ? null : `(${grouped.join(' OR ')})`
   }
 
   #compilePredicateForRow(grant: GraphGrant, row: Record<string, unknown>): string {
@@ -1397,7 +1397,7 @@ export class Graph {
 
   #createConditions(leaf: string, virtual: EntityDefinition, action: Action): string[] {
     const targets = new Set(this.#ancestry(leaf))
-    const conditions: string[] = []
+    const conditions: { predicate: string, role: string }[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
       const actionMatches = grant.action === action
@@ -1406,9 +1406,9 @@ export class Graph {
       const predicate = grant.predicate
         ? this.#compileDirectPredicate(grant, '__row', leaf, true, virtual)
         : 'TRUE'
-      conditions.push(`(${roleCondition(grant.role, this.#schema)} AND ${predicate})`)
+      conditions.push({ predicate, role: roleCondition(grant.role, this.#schema) })
     }
-    return conditions
+    return this.#groupRoleConditions(conditions)
   }
 
   #policyType(field: EffectiveFieldDefinition): string {
@@ -1541,6 +1541,27 @@ export class Graph {
   }
 
   /**
+   * Group equivalent role checks so one uncorrelated role subquery serves
+   * every predicate for that role in the same policy expression.
+   * @param conditions - Role conditions and their predicates.
+   * @returns SQL conditions with one role check per distinct role.
+   */
+  #groupRoleConditions(
+    conditions: readonly { readonly predicate: string, readonly role: string }[],
+  ): string[] {
+    const groups = new Map<string, string[]>()
+    for (const condition of conditions) {
+      const predicates = groups.get(condition.role)
+      if (predicates === undefined) groups.set(condition.role, [condition.predicate])
+      else predicates.push(condition.predicate)
+    }
+    return [...groups].map(([role, predicates]) => {
+      if (predicates.length === 1) return `(${role} AND ${predicates[0]})`
+      return `(${role} AND (${predicates.join(' OR ')}))`
+    })
+  }
+
+  /**
    * Compile the direct action rules before the READ prerequisite is applied.
    * @param leaf - Concrete entity or relationship table.
    * @param action - Action being evaluated.
@@ -1561,13 +1582,12 @@ export class Graph {
     createTarget?: string,
   ): string[] {
     const targets = new Set([...this.#ancestry(leaf)])
-    const conditions: string[] = []
+    const conditions: { predicate: string, role: string }[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
       const actionMatches = grant.action === action
         || (MANAGED_ENTITIES.has(leaf) && grant.action === Action.Manage)
       if (!actionMatches) continue
-      const role = roleCondition(grant.role, this.#schema)
       let predicate = 'TRUE'
       if (!roleOnly && grant.predicate && createTarget !== undefined && grant.target !== createTarget) {
         predicate = 'TRUE'
@@ -1576,9 +1596,9 @@ export class Graph {
           ? this.#compileDirectPredicate(grant, alias, table, true)
           : this.#compilePredicate(grant, alias, table, action)
       }
-      conditions.push(`(${role} AND ${predicate})`)
+      conditions.push({ predicate, role: roleCondition(grant.role, this.#schema) })
     }
-    return conditions
+    return this.#groupRoleConditions(conditions)
   }
 
   #compilePredicate(grant: GraphGrant, alias: string, table: string, action: Action): string {
@@ -1821,7 +1841,8 @@ export class Graph {
     const conditions = this.grants
       .filter(grant => grant.action === Action.Manage && targets.has(grant.target))
       .map(grant => roleCondition(grant.role, this.#schema))
-    return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
+    const unique = [...new Set(conditions)]
+    return unique.length === 0 ? null : `(${unique.join(' OR ')})`
   }
 
   #ancestry(name: string): readonly string[] {
@@ -2250,7 +2271,7 @@ function assertPolicySafe(filter: Filter): void {
  */
 function roleCondition(role: string, schema: string): string {
   if (role === PUBLIC_ROLE_ID) return 'TRUE'
-  return `basis.has_role(${literal(schema)}, ${literal(role)})`
+  return `(SELECT basis.has_role(${literal(schema)}, ${literal(role)}) AS has_role)`
 }
 
 /**

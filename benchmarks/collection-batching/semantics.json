@@ -1,0 +1,56 @@
+[
+  {
+    "actor": "editor",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "pre364"
+  },
+  {
+    "actor": "editor",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "previous"
+  },
+  {
+    "actor": "editor",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "current"
+  },
+  {
+    "actor": "owner",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "pre364"
+  },
+  {
+    "actor": "owner",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "previous"
+  },
+  {
+    "actor": "owner",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "current"
+  },
+  {
+    "actor": "viewer",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "pre364"
+  },
+  {
+    "actor": "viewer",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "previous"
+  },
+  {
+    "actor": "viewer",
+    "mismatches": 0,
+    "rows": 106,
+    "statement": "current"
+  }
+]

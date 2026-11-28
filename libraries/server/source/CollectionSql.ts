@@ -31,6 +31,8 @@ export interface CollectionSqlRelation {
    * their SQL and bound values into the surrounding statement.
    */
   readonly condition: string,
+  /** SQL expression for the owning parent identity. */
+  readonly ownerId?: string,
   /** Authored source predicate, when the collection declares one. */
   readonly predicate?: SQLPredicate,
   /** SQL relation containing source rows and any required root/target joins. */
@@ -75,6 +77,7 @@ export function collectionSqlRelation(
     const ownerId = `${quote(relationshipAlias)}.${quote(resolved.owner.column)}`
     return {
       condition: `${ownerId} = ${parentId}`,
+      ownerId,
       relation: `${quote(relationship.name)} ${quote(relationshipAlias)}`,
       relationshipAlias,
       resultType: 'record',
@@ -100,6 +103,7 @@ export function collectionSqlRelation(
       const ownerId = `${quote(aliases.root)}.${quote('id')}`
       return {
         condition: `${ownerId} = ${parentId}`,
+        ownerId,
         relation: `${quote(aliases.rootRelation ?? 'Entity')} ${quote(aliases.root)}`,
         resultType: 'entity',
         rootAlias: aliases.root,
@@ -110,6 +114,7 @@ export function collectionSqlRelation(
     const ownerId = `${quote(aliases.target)}.${quote(resolved.owner.column)}`
     return {
       condition: `${ownerId} = ${parentId}`,
+      ownerId,
       relation: aliases.targetRelation === undefined
         ? `${targetSource} JOIN ${quote('Entity')} ${quote(aliases.root)} ` +
           `ON ${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`
@@ -135,6 +140,7 @@ export function collectionSqlRelation(
   if (targetName === 'Entity') {
     return {
       condition,
+      ownerId,
       relation: `${relationshipSource} JOIN ${quote(aliases.rootRelation ?? 'Entity')} ` +
         `${quote(aliases.root)} ON ${rootId} = ${remoteId}`,
       relationshipAlias: aliases.relationship,
@@ -148,6 +154,7 @@ export function collectionSqlRelation(
   const targetJoin = `${relationshipSource} JOIN ${targetSource} ON ${targetId} = ${remoteId}`
   return {
     condition,
+    ownerId,
     relation: aliases.targetRelation === undefined
       ? `${targetJoin} JOIN ${quote('Entity')} ${quote(aliases.root)} ON ${rootId} = ${targetId}`
       : targetJoin,

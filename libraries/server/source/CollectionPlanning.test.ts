@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { compileEntityQuery } from './Database'
 import { Graph } from './Graph'
 
@@ -124,11 +125,10 @@ describe('collection planning', () => {
     const filtered = compileEntityQuery(graph.definitions, 'Deck', {
       fields: ['id', 'printings[title = \'One\']{$limit:null}', 'printings.card.name'],
     })
-    const scopes = countSubqueries(filtered.sql)
-    expect(scopes).toHaveLength(2)
-    for (const scope of scopes) {
-      expect(scope).not.toMatch(/"Card"|"Art"/)
-    }
+    expect(filtered.sql).toContain('flat_selected_')
+    expect(filtered.sql).toContain('__batch_filter_matched')
+    expect(filtered.sql).toContain('"__counts" AS MATERIALIZED')
+    expect(filtered.sql).not.toMatch(/SELECT count\(\*\)::int FROM \(/)
   })
 
   test('an edge projection does not duplicate target traversal', () => {
@@ -154,18 +154,15 @@ describe('collection planning', () => {
         'printings.card.name',
       ],
     })
-    const countScopes = countSubqueries(sql)
-    expect(countScopes).toHaveLength(2)
-    expect(countScopes[0]).toContain('ct1."title"')
-    expect(countScopes[1]).not.toContain('ct1."title"')
-    for (const scope of countScopes) {
-      expect(scope).not.toMatch(/"Card"|"Face"|"Panel"|"Art"/)
-    }
-    expect((sql.match(/OFFSET/g) ?? [])).toHaveLength(2)
-    expect(values).toEqual(['One', 2, 1, 'One', 25, 0])
+    expect(sql).toContain('flat_selected_')
+    expect(sql).toContain('"__counts" AS MATERIALIZED')
+    expect(sql).toContain('"__total"')
+    expect(sql).toContain('"__matched"')
+    expect(sql).toContain('BETWEEN 1 AND')
+    expect(values).toEqual([25, 0, 'One', 'One', 1, 2])
   })
 
-  test('does not expand nested resources for matched or total counts', () => {
+  test('batches nested counts without expanding nested resources', () => {
     const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
       fields: [
         'id',
@@ -176,11 +173,12 @@ describe('collection planning', () => {
         'printings.panels.art.name',
       ],
     })
-    const scopes = countSubqueries(sql)
-    expect(scopes.length).toBeGreaterThan(1)
-    for (const scope of scopes) {
-      expect(scope).not.toMatch(/"Card"|"Art"/)
-    }
+    expect(countSubqueries(sql)).toEqual([])
+    expect(sql.match(/"__item_group" AS MATERIALIZED/gu)?.length).toBeGreaterThan(1)
+    expect(sql).toContain('batch_selected_roots_')
+    expect(sql.match(/flat_base_/gu)?.length).toBeGreaterThan(2)
+    expect(sql).toMatch(/batch_parent_/u)
+    expect(sql).not.toContain('LEFT JOIN LATERAL')
   })
 
   test('keeps quantity on the collection edge', () => {
@@ -189,7 +187,7 @@ describe('collection planning', () => {
     })
     expect(sql).toContain('json_build_object( \'quantity\', "cj')
     expect(sql).toContain('"cj3"."deck.id" = "t"."id"')
-    expect(sql).toContain('"cj3"."printing.id" = "__child"."id"')
+    expect(sql).toMatch(/"cj3"\."printing\.id" = "ct\d+"\."id"/u)
   })
 
   test('extracts balanced count scopes without parsing quoted parentheses', () => {
@@ -208,7 +206,7 @@ describe('collection planning', () => {
     })
     expect(compiled.sql).toContain('"title"')
     expect(compiled.sql).toContain('"enabled"')
-    expect(compiled.values).toEqual(['A', 'A', true, 25, 0])
+    expect(compiled.values).toEqual([true, 25, 0, 'A', 'A'])
     expect(countSubqueries(compiled.sql).every(scope => (
       !scope.includes('"Card"') && !scope.includes('"Face"')
     ))).toBe(true)
@@ -221,6 +219,14 @@ describe('collection planning', () => {
     })
     expect(exists.sql).not.toContain('panels')
     expect(exists.sql).not.toContain('faces')
+  })
+
+  test('batches an inverse collection without a relationship table', () => {
+    const inverse = compileEntityQuery(graph.definitions, 'Printing', {
+      fields: ['id', 'panels{$limit:null}', 'panels.art.name'],
+    })
+    expect(inverse.sql).toContain('flat_base_')
+    expect(inverse.sql).not.toContain('LEFT JOIN LATERAL')
   })
 
   test('count and item outputs remain deterministic', () => {
@@ -269,4 +275,237 @@ test('unrelated entity definitions do not change concrete collection SQL', () =>
     fields: ['id', 'printings{$limit:null}', 'printings.title'],
   })
   expect(normalize(large.sql)).toBe(normalize(small.sql))
+})
+
+describe('flattened collection compilation', () => {
+  test('emits exact connected flat SQL with nested scope', () => {
+    const { sql, values } = compileEntityQuery(graph.definitions, 'Deck', {
+      fields: ['id', 'printings{$limit:1}', 'printings.card.faces{$limit:1}', 'printings.card.faces.name'],
+    })
+    expect(values).toEqual([25, 0, 0, 1, 0, 1])
+    const expected = readFileSync(new URL('./FlatCollection.expected.sql', import.meta.url), 'utf8')
+    expect(sql.replace(/\), "/gu, '),\n"')).toMatchIndented(expected)
+  })
+
+  test('falls back without leaking a discarded flat source', () => {
+    const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
+      fields: ['id', 'printings{$orderBy:title}', 'printings.title'],
+    })
+    expect(sql).not.toContain('flat_scope_')
+    expect(sql).toContain('LEFT JOIN LATERAL')
+  })
+
+  test('shares one relationship source across sibling collections', () => {
+    const shared = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'items', target: 'Item', type: 'Collection', via: 'RootItem[root = @].item' },
+            { field: 'otherItems', target: 'Item', type: 'Collection', via: 'RootItem[root = @].item' },
+          ],
+          name: 'Root',
+        },
+        { fields: [{ field: 'label', type: 'String' }], name: 'Item' },
+      ],
+      relationships: [{
+        between: [{ field: 'root', target: 'Root' }, { field: 'item', target: 'Item' }],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'RootItem',
+      }],
+    })
+    const { sql } = compileEntityQuery(shared.definitions, 'Root', {
+      fields: ['id', 'items{$limit:null}', 'items.label', 'otherItems{$limit:null}', 'otherItems.label'],
+    })
+    expect(count(sql, /"batch_source_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(2)
+  })
+
+  test('materializes selected root rows and distinct relationship targets once', () => {
+    const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
+      fields: ['id', 'printings{$limit:null}', 'printings.card.name'],
+    })
+    expect(count(sql, /"batch_selected_rows_\d+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"batch_selected_roots_\d+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"batch_source_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_targets_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(sql).toMatch(/SELECT "ct\d+"\.\* FROM "authorized_\w+" "ct\d+" WHERE "ct\d+"\."id" IN/u)
+    expect(count(sql, /"authorized_Deck" AS NOT MATERIALIZED/gu)).toBe(1)
+    expect(sql).toMatch(/FROM "batch_selected_rows_\d+" "t" LEFT JOIN/u)
+  })
+
+  test('emits one shared base and aggregate chain per collection path', () => {
+    const { sql } = compileEntityQuery(graph.definitions, 'Deck', {
+      fields: [
+        'id',
+        "printings[title = 'One']{$limit:null}",
+        'printings.card.faces{$limit:null}',
+        'printings.card.faces.name',
+        'printings.panels{$limit:null}',
+        'printings.panels.art.name',
+      ],
+    })
+    expect(sql).not.toContain('LEFT JOIN LATERAL')
+    expect(sql).not.toContain('authorized_batch_')
+    expect(sql).not.toContain('authorized_nested_')
+    expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(2)
+    expect(count(sql, /"flat_selected_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_unique_\w+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"flat_rows_\w+" AS MATERIALIZED/gu)).toBe(0)
+    expect(count(sql, /"flat_counts_\w+" AS MATERIALIZED/gu)).toBe(0)
+    expect(count(sql, /"flat_items_\w+" AS MATERIALIZED/gu)).toBe(3)
+    expect(count(sql, /"reachable_Card_\d+" AS MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"authorized_Card" AS NOT MATERIALIZED/gu)).toBe(0)
+    expect(count(sql, /"authorized_Panel" AS NOT MATERIALIZED/gu)).toBe(1)
+    expect(count(sql, /"authorized_Face" AS NOT MATERIALIZED/gu)).toBe(1)
+  })
+})
+
+describe('reachable reference identities', () => {
+  const reachability = new Graph({
+    entities: [
+      {
+        fields: [
+          { field: 'owner', target: 'Member', type: 'Entity' },
+          { field: 'items', target: 'ReachItem', type: 'Collection', via: 'ReachEdge[root = @].item' },
+        ],
+        name: 'ReachRoot',
+      },
+      {
+        fields: [
+          { field: 'owner', target: 'Member', type: 'Entity' },
+          { field: 'label', type: 'String' },
+        ],
+        name: 'ReachItem',
+      },
+      { fields: [{ field: 'label', type: 'String' }], name: 'Member' },
+    ],
+    relationships: [{
+      between: [
+        { field: 'root', target: 'ReachRoot' },
+        { field: 'item', target: 'ReachItem' },
+      ],
+      fields: [{ field: 'quantity', type: 'Number' }],
+      name: 'ReachEdge',
+    }],
+  })
+
+  test('restricts a root reference by the selected root identities', () => {
+    const { sql } = compileEntityQuery(reachability.definitions, 'ReachRoot', {
+      fields: ['id', 'owner.name', 'items{$limit:null}', 'items.label'],
+    })
+    expect(sql).toContain('"authorized_Member" AS MATERIALIZED')
+    expect(sql).toContain(
+      'WHERE "leaf"."id" IN (SELECT "owner.id" FROM "batch_selected_rows_0"',
+    )
+  })
+
+  test('gives each nested reference source its own reachable identity input', () => {
+    const { sql } = compileEntityQuery(reachability.definitions, 'ReachRoot', {
+      fields: [
+        'id',
+        'owner.name',
+        'items{$limit:null}',
+        'items.label',
+        'items.owner.name',
+      ],
+    })
+    expect(sql).toMatch(
+      /"authorized_Member" AS MATERIALIZED \(.*FROM "batch_selected_rows_0"/u,
+    )
+    expect(sql).toMatch(
+      /"reachable_Member_\d+" AS MATERIALIZED \(.*FROM "flat_base_\w+"/u,
+    )
+    expect(count(sql, /"reachable_Member_\d+" AS MATERIALIZED/gu)).toBe(1)
+  })
+})
+
+describe('chosen collection compilation', () => {
+  test('batches an unfiltered root collection by parent identity', () => {
+    const batchGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'label', type: 'String' },
+            { field: 'items', target: 'CollectionItem', type: 'Collection', via: 'RootItem[root = @].item' },
+            { field: 'entries', target: 'RootItem', type: 'Collection', via: 'RootItem[root = @]' },
+          ],
+          name: 'CollectionRoot',
+        },
+        { fields: [{ field: 'label', type: 'String' }], name: 'CollectionItem' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'root', target: 'CollectionRoot' },
+          { field: 'item', target: 'CollectionItem' },
+        ],
+        fields: [{ field: 'quantity', type: 'Number' }],
+        name: 'RootItem',
+      }],
+    })
+    const { sql } = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'items{$limit:null}', 'items.label'],
+    })
+    expect(sql).not.toContain('LEFT JOIN LATERAL')
+    expect(sql).toContain('"batch_selected_rows_0" AS MATERIALIZED')
+    expect(sql).toContain('"batch_selected_roots_1" AS MATERIALIZED')
+    expect(sql).toMatch(
+      /"batch_source_\w+" AS MATERIALIZED \(SELECT "cj\d+"\."root\.id" AS "__parent_id", /u,
+    )
+    expect(sql).toMatch(/"flat_targets_\w+" AS MATERIALIZED/u)
+    expect(sql).toMatch(/"flat_base_\w+" AS MATERIALIZED/u)
+    expect(sql).toMatch(/"ct\d+"\."id" AS "__item_id"/u)
+    expect(sql).toMatch(/"flat_items_\w+" AS MATERIALIZED \(WITH/u)
+    expect(sql).toContain('SELECT DISTINCT ON (')
+    expect(sql).not.toMatch(/"flat_counts_\w+" AS MATERIALIZED/u)
+    expect(sql).toContain('count(*)::int AS "__total", count(*)::int AS "__matched"')
+    expect(sql).not.toContain('authorized_batch_')
+
+    const scoped = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'items{$limit:null}', 'items.label'],
+      where: "label = 'One'",
+    })
+    expect(scoped.sql).toContain('"batch_selected_rows_0" AS MATERIALIZED')
+    expect(scoped.sql).toContain('SELECT "t".* FROM "authorized_CollectionRoot" "t"')
+    expect(scoped.sql).toContain('WHERE t."label" IS NOT DISTINCT FROM $1')
+    expect(scoped.sql).toMatch(/LIMIT \$2 OFFSET \$3/u)
+    expect(scoped.sql).toMatch(/JOIN "batch_selected_roots_1" "t" ON TRUE/u)
+    expect(scoped.values).toEqual(['One', 25, 0])
+
+    const edge = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'items{$limit:null}', 'items.label', 'items.quantity'],
+    })
+    expect(edge.sql).toContain(' AS "__edge"')
+    expect(edge.sql).toContain('json_build_object')
+
+    const record = compileEntityQuery(batchGraph.definitions, 'CollectionRoot', {
+      fields: ['id', 'entries{$limit:null}', 'entries.quantity'],
+    })
+    expect(record.sql).toContain('flat_base_')
+    expect(record.sql).toContain("json_build_object('quantity'")
+    expect(record.sql).not.toContain('LEFT JOIN LATERAL')
+  })
+})
+
+describe('abstract collection targets', () => {
+  test('use the correlated planner without a flat batch', () => {
+    const abstract = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'label', type: 'String' },
+            { field: 'parent', inverse: 'children', target: 'Node', type: 'Entity' },
+            { cardinality: 'Many', field: 'children', inverse: 'parent', target: 'Node', type: 'Inverse' },
+          ],
+          name: 'Node',
+        },
+        { extends: 'Node', fields: [], name: 'Child' },
+      ],
+    })
+    const compiled = compileEntityQuery(abstract.definitions, 'Child', {
+      fields: ['id', 'children{$limit:null}', 'children.label'],
+    })
+    expect(compiled.sql).toContain('LEFT JOIN LATERAL')
+    expect(compiled.sql).not.toContain('flat_items_')
+    expect(compiled.sql).toContain('authorized_Node')
+  })
 })

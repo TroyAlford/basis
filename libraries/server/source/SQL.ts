@@ -73,10 +73,17 @@ export interface CollectionScope {
   readonly filterCount?: (name: string) => CountScope | undefined,
   /** Classify terminal reference identities inside the collection. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
+  /** Parent identity expression for a root-selectable collection. */
+  readonly parentId?: string,
   /** Authored source predicate applied to the collection relation. */
   readonly predicate?: SqlFragment,
   /** SQL relation containing the related items. */
   readonly relation: string,
+  /** Build an uncorrelated parent-id selection for a member requirement. */
+  readonly selectParents?: (
+    member: SqlFragment,
+    predicate: SqlFragment,
+  ) => SqlFragment,
   /** Concrete physical variants for descendant-only sibling collections. */
   readonly variants?: readonly CollectionScopeVariant[],
   /** Expanded relation join work emitted by this scope. */
@@ -92,7 +99,7 @@ export interface CollectionScopeVariant {
 }
 
 /** One literal SQL text piece or structural parameter slot. */
-type SqlPiece = string | { readonly value: unknown }
+type SqlPiece = string | { readonly shared?: boolean, readonly value: unknown }
 
 /** One parameterized SQL fragment. */
 export interface SqlFragment {
@@ -111,13 +118,21 @@ export interface SqlFragment {
  */
 function compilePieces(pieces: readonly SqlPiece[]): { sql: string, values: readonly unknown[] } {
   const values: unknown[] = []
+  const sharedIndexes = new Map<object, number>()
   let sql = ''
   for (const piece of pieces) {
-    if (typeof piece === 'string') sql += piece
-    else {
-      values.push(piece.value)
-      sql += `$${values.length}`
+    if (typeof piece === 'string') {
+      sql += piece
+      continue
     }
+    const shared = piece.shared === true
+    let index = shared ? sharedIndexes.get(piece) : undefined
+    if (index === undefined) {
+      values.push(piece.value)
+      index = values.length
+      if (shared) sharedIndexes.set(piece, index)
+    }
+    sql += `$${index}`
   }
   return { sql, values }
 }
@@ -150,6 +165,18 @@ export function sqlText(text: string): SqlFragment {
  */
 export function sqlValue(value: unknown): SqlFragment {
   return fragmentOf([{ value }])
+}
+
+/**
+ * One reusable bound value slot.
+ *
+ * Reusing the returned fragment in more than one SQL location keeps one
+ * placeholder and one ordered value, so related predicates cannot drift.
+ * @param value - Bound value.
+ * @returns One shared parameter fragment.
+ */
+export function sqlParameter(value: unknown): SqlFragment {
+  return fragmentOf([{ shared: true, value }])
 }
 
 /**
@@ -670,6 +697,13 @@ function whereFilter(
       const predicate = collection.predicate === undefined
         ? sqlText('')
         : sqlFragment` AND (${literalFragment(asFragment(collection.predicate))})`
+      if (collection.selectParents !== undefined && collection.parentId !== undefined) {
+        return sqlConcat([
+          sqlText(`${collection.parentId} IN (`),
+          collection.selectParents(inner, predicate),
+          sqlText(')'),
+        ])
+      }
       const relation = sqlText(collection.relation)
       const condition = sqlText(collection.condition)
       const body = sqlFragment`${condition}${predicate} AND (${inner})`

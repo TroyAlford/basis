@@ -10,7 +10,7 @@ import { arrayItemField, Predicate } from './Predicate'
 import { PredicateEligibility } from './PredicateEligibility'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, BoundScalar, CollectionScope, CountScope, OrderBy, QueryScope, SqlFragment, SQLPredicate } from './SQL'
-import { SQL, sqlConcat, sqlFragment, sqlText } from './SQL'
+import { SQL, sqlConcat, sqlFragment, sqlParameter, sqlText, sqlValue } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
 const MAX_REFERENCE_DEPTH = 8
@@ -151,6 +151,15 @@ interface ProjectionNode {
   readonly fields: ScalarProjection[],
   /** Whether identity fields have been selected for a reference node. */
   identity?: IdentityProjection,
+  /** Joins required to reach this occurrence from the selected root. */
+  readonly joins: readonly SqlFragment[],
+  /** Reference identity expression available from the parent row. */
+  parentIdentity?: {
+    /** Parent row alias exposing the reference column. */
+    readonly alias: string,
+    /** Reference column expression carrying the target identity. */
+    readonly expression: string,
+  },
   /** Reference path from the query root. */
   readonly path: readonly string[],
   /** Projected collection output descriptors. */
@@ -233,12 +242,90 @@ interface EntityContext {
   readonly singularNavigations: ReadonlyMap<string, DerivedSingularDefinition>,
 }
 
+/**
+ * Canonical collection semantics shared by every physical adapter.
+ *
+ * The semantic rules for identity counting, paging, and item aggregation live
+ * here; physical strategies only supply their member query.
+ */
+class CollectionSemantics {
+  /** Requested filter expression, before it is compiled against a member adapter. */
+  readonly filter?: string
+  /** Result identity aliases. */
+  readonly identity: readonly string[]
+  /** Effective page size. */
+  readonly limit: number | null
+  /** Effective page offset. */
+  readonly offset: number
+  /** Effective item ordering. */
+  readonly orderBy?: OrderBy
+
+  /**
+   * Create one canonical collection contract.
+   * @param options - Resolved collection inputs.
+   * @param options.filter - Requested filter expression.
+   * @param options.identity - Result identity aliases.
+   * @param options.limit - Effective page size.
+   * @param options.offset - Effective page offset.
+   * @param options.orderBy - Effective item ordering.
+   */
+  constructor(options: {
+    readonly filter?: string,
+    readonly identity: readonly string[],
+    readonly limit: number | null,
+    readonly offset: number,
+    readonly orderBy?: OrderBy,
+  }) {
+    this.filter = options.filter
+    this.identity = options.identity
+    this.limit = options.limit
+    this.offset = options.offset
+    this.orderBy = options.orderBy
+  }
+
+  /**
+   * Count member identities under this contract.
+   * @param member - Member query.
+   * @returns Count fragment.
+   */
+  count(member: SqlFragment): SqlFragment {
+    return collectionIdentityCount(member)
+  }
+
+  /**
+   * Order and page member identities under this contract.
+   * @param member - Member query.
+   * @param orderings - Requested and stable ordering.
+   * @returns Paged identity query.
+   */
+  page(member: SqlFragment, orderings: readonly CollectionOrdering[]): SqlFragment {
+    return collectionIdentityPage(
+      member,
+      orderings,
+      this.limit,
+      this.offset,
+    )
+  }
+
+  /**
+   * Aggregate paged identities into one JSON item array.
+   * @param page - Paged identity query.
+   * @param orderings - Requested and stable ordering.
+   * @returns Item aggregation fragment.
+   */
+  items(page: SqlFragment, orderings: readonly CollectionOrdering[]): SqlFragment {
+    return collectionItems(page, orderings)
+  }
+}
+
 /** One reusable collection relation and its correlated condition. */
 interface CollectionRelationPlan {
   /** Collection navigation being planned. */
   readonly collection: DerivedCollectionDefinition,
   /** Correlated condition against the owning occurrence, including authored predicates. */
   readonly condition: string,
+  /** SQL expression for the owning parent identity. */
+  readonly ownerId?: string,
   /** Alias of the owning occurrence. */
   readonly parentAlias: string,
   /** Authored source predicate, when the collection declares one. */
@@ -275,8 +362,6 @@ interface CollectionMemberAdapter {
   readonly compile: (filter?: string) => CollectionMemberQuery,
   /** Output aliases forming the result identity. */
   readonly identity: readonly string[],
-  /** Whether member rows are already unique by identity. */
-  readonly identityUnique: boolean,
   /** Output aliases available for ordering. */
   readonly orderable: ReadonlySet<string>,
 }
@@ -287,6 +372,28 @@ interface AuthorizedField {
   readonly alias: string,
   /** Effective field metadata. */
   readonly field: EffectiveFieldDefinition,
+}
+
+/** One selected reachable identity source for an authorized relation. */
+interface AuthorizedRestriction {
+  /** Reference column carrying the reachable identity. */
+  readonly column: string,
+  /** Relation exposing the selected identity column. */
+  readonly relation: string,
+}
+
+/** One reachable restricted relation and its selected identity source. */
+interface AuthorizedReachableGroup {
+  /** Restricted CTE name for the requested entity or abstract union. */
+  readonly cte: string,
+  /** Whether the group has been emitted. */
+  emitted: boolean,
+  /** Restricted CTE names for concrete descendants of an abstract target. */
+  readonly leaves: ReadonlyMap<string, string>,
+  /** Requested entity name. */
+  readonly name: string,
+  /** Selected identity source. */
+  readonly source: AuthorizedRestriction,
 }
 
 /**
@@ -303,6 +410,22 @@ class AuthorizedRelations {
   readonly #entities: EntityDefinitions
   /** Prefix that prevents nested compiler CTEs from shadowing outer relations. */
   readonly #prefix: string
+  /** Whether set-oriented flat plans materialize concrete relations. */
+  #materialized = false
+  /** Root relations that must remain inline so filters can narrow them. */
+  readonly #excluded = new Set<string>()
+  /** Reachable identity groups keyed by target and selected source. */
+  readonly #groups = new Map<string, AuthorizedReachableGroup>()
+  /** Monotonic suffix for reachable CTE names. */
+  #groupIndex = 0
+  /** Root reference identities keyed by entity name. */
+  readonly #reachable = new Map<string, Map<string, AuthorizedRestriction>>()
+  /** Base relations already emitted with a shared reachable restriction. */
+  readonly #emittedBase = new Set<string>()
+  /** Relations referenced without a reachable identity restriction. */
+  readonly #baseUsed = new Set<string>()
+  /** CTE relations available before the current emission point. */
+  readonly #available = new Set<string>()
 
   /**
    * Create one relation planner for a query compilation.
@@ -315,12 +438,245 @@ class AuthorizedRelations {
   }
 
   /**
+   * Materialize concrete authorized relations for a flat set plan.
+   * @param exclude - Relations that must remain inline for early filtering.
+   */
+  materialize(exclude?: string | readonly string[]): void {
+    this.#materialized = true
+    const names = typeof exclude === 'string' ? [exclude] : exclude ?? []
+    for (const name of names) this.#excluded.add(name)
+  }
+
+  /**
+   * Keep one relation inline because a collection projects it directly.
+   * @param name - Entity name.
+   */
+  exclude(name: string): void {
+    this.#excluded.add(name)
+  }
+
+  /**
+   * Report whether flat planning has enabled materialized relations.
+   * @returns Whether projections should use reachable identity inputs.
+   */
+  get materialized(): boolean {
+    return this.#materialized
+  }
+
+  /**
+   * Report whether one relation is projected directly by a collection.
+   * @param name - Entity name.
+   * @returns Whether the relation must remain inline.
+   */
+  isExcluded(name: string): boolean {
+    return this.#excluded.has(name)
+  }
+
+  /**
+   * Create or reuse one reachable restricted relation.
+   *
+   * Each selected identity source gets its own CTE so a later reference from a
+   * different row set cannot silently reuse an earlier, narrower identity set.
+   * Multiple references from the same source still share one CTE.
+   * @param name - Entity name being projected.
+   * @param relation - Relation exposing the selected reference identities.
+   * @param column - Reference column carrying the reachable identity.
+   * @returns Quoted restricted CTE name.
+   */
+  reachable(name: string, relation: string, column: string): string {
+    if (name === 'Entity' || this.#excluded.has(name) || !this.#materialized) {
+      return this.relation(name)
+    }
+    const definition = this.#entities.entity(name)
+    if (definition === undefined) return this.relation(name)
+    const key = `${name}\u0000${relation}\u0000${column}`
+    const existing = this.#groups.get(key)
+    if (existing) return quote(existing.cte)
+    const index = this.#groupIndex
+    this.#groupIndex += 1
+    const cte = `reachable_${this.#prefix}${name}_${index}`
+    const leaves = new Map<string, string>()
+    if (definition.abstract) {
+      for (const leaf of this.#entities.concreteDescendants(name)) {
+        leaves.set(leaf.name, `reachable_${this.#prefix}${leaf.name}_${index}`)
+      }
+    }
+    this.#groups.set(key, {
+      cte,
+      emitted: false,
+      leaves,
+      name,
+      source: { column, relation },
+    })
+    return quote(cte)
+  }
+
+  /**
+   * Register one selected identity source for the shared base relation.
+   *
+   * Root projections materialize their selected rows once, so a root
+   * reference can share one restriction across every root row. Nested
+   * references use their own per-source restricted relation instead.
+   * @param name - Entity name being projected.
+   * @param relation - Relation exposing the selected reference identities.
+   * @param column - Reference column carrying the reachable identity.
+   */
+  baseReachable(name: string, relation: string, column: string): void {
+    if (name === 'Entity' || !this.#materialized) return
+    const definition = this.#entities.entity(name)
+    if (definition === undefined) return
+    const key = `${relation}\u0000${column}`
+    if (definition.abstract) {
+      if (!this.#reachable.has(name)) this.#reachable.set(name, new Map())
+      for (const leaf of this.#entities.concreteDescendants(name)) {
+        const fields = this.#reachable.get(leaf.name) ?? new Map<string, AuthorizedRestriction>()
+        fields.set(key, { column, relation })
+        this.#reachable.set(leaf.name, fields)
+      }
+      return
+    }
+    const fields = this.#reachable.get(name) ?? new Map<string, AuthorizedRestriction>()
+    fields.set(key, { column, relation })
+    this.#reachable.set(name, fields)
+  }
+
+  /**
+   * Record a CTE relation that later reachable restrictions may reference.
+   * @param name - Unquoted CTE name.
+   */
+  markAvailable(name: string): void {
+    this.#available.add(name)
+  }
+
+  /**
+   * Emit reachable restrictions whose identity sources are now available.
+   *
+   * Reference-to-reference chains are emitted in dependency order. Once a
+   * group is emitted its CTE name becomes available to dependent groups.
+   * @returns Ordered restricted CTE definitions.
+   */
+  flush(): string[] {
+    const definitions: string[] = []
+    let progressed = true
+    while (progressed) {
+      progressed = false
+      for (const name of this.#orderedNames()) {
+        if (this.#emittedBase.has(name) || !this.#hasBaseSources(name)) continue
+        const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+        if (definition === undefined) continue
+        if (definition.abstract) {
+          const leaves = this.#entities.concreteDescendants(name)
+          if (!leaves.every(leaf => !this.#hasBaseSources(leaf.name) || this.#emittedBase.has(leaf.name))) continue
+          definitions.push(this.#abstractDefinition(name))
+          this.#emittedBase.add(name)
+          this.#available.add(name)
+          progressed = true
+          continue
+        }
+        const sources = this.#baseSources(name)
+        if (!sources.every(source => this.#sourceAvailable(source.relation))) continue
+        definitions.push(this.#leafDefinition(
+          definition,
+          this.#relations.get(name) ?? new Map(),
+          sources,
+        ))
+        this.#emittedBase.add(name)
+        this.#available.add(name)
+        progressed = true
+      }
+      for (const group of this.#groups.values()) {
+        if (group.emitted || !this.#sourceAvailable(group.source.relation)) continue
+        const name = group.name
+        const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+        if (definition === undefined) continue
+        if (definition.abstract) {
+          const aliases = [...(this.#relations.get(name) ?? new Map()).keys()]
+          for (const leaf of this.#entities.concreteDescendants(name)) {
+            const leafCte = group.leaves.get(leaf.name)
+            if (leafCte === undefined) continue
+            definitions.push(this.#leafDefinition(
+              leaf,
+              this.#relations.get(leaf.name) ?? new Map(),
+              [group.source],
+              leafCte,
+            ))
+            this.#available.add(leafCte)
+          }
+          definitions.push(this.#abstractUnion(name, group.cte, group.leaves, aliases))
+        } else {
+          definitions.push(this.#leafDefinition(
+            definition,
+            this.#relations.get(name) ?? new Map(),
+            [group.source],
+            group.cte,
+          ))
+        }
+        group.emitted = true
+        this.#available.add(group.cte)
+        progressed = true
+      }
+    }
+    return definitions
+  }
+
+  /**
+   * Report whether one base relation has selected identity sources.
+   * @param name - Entity name.
+   * @returns Whether the base relation needs a reachable restriction.
+   */
+  #hasBaseSources(name: string): boolean {
+    if ((this.#reachable.get(name)?.size ?? 0) > 0) return true
+    const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+    if (definition?.abstract !== true) return false
+    return this.#entities.concreteDescendants(name)
+      .some(leaf => (this.#reachable.get(leaf.name)?.size ?? 0) > 0)
+  }
+
+  /**
+   * List the selected identity sources for one base relation.
+   * @param name - Entity name.
+   * @returns Selected restriction sources.
+   */
+  #baseSources(name: string): AuthorizedRestriction[] {
+    return [...(this.#reachable.get(name)?.values() ?? [])]
+  }
+
+  /**
+   * Report whether one dependency relation is available at this point.
+   * @param relation - Unquoted relation name.
+   * @returns Whether the source can be referenced now.
+   */
+  #sourceAvailable(relation: string): boolean {
+    if (this.#available.has(relation)) return true
+    const definition = this.#entities.entity(relation)
+    if (definition !== undefined || relation === 'Entity') {
+      return !this.#hasBaseSources(relation)
+    }
+    return true
+  }
+
+  /**
+   * List planned relation names in dependency order.
+   * @returns Concrete names followed by abstract names.
+   */
+  #orderedNames(): string[] {
+    const names = [...this.#relations.keys()]
+    const concrete = names.filter(name => {
+      if (name === 'Entity') return false
+      const definition = this.#entities.entity(name)
+      return definition !== undefined && !definition.abstract
+    })
+    return [...concrete, ...names.filter(name => !concrete.includes(name))]
+  }
+
+  /**
    * Require one entity relation and return its stable SQL name.
    * @param name - Entity name.
    * @returns Quoted authorized relation name.
    */
   relation(name: string): string {
     this.#ensure(name)
+    this.#markBase(name)
     return quote(this.relationName(name))
   }
 
@@ -331,7 +687,19 @@ class AuthorizedRelations {
    */
   relationName(name: string): string {
     this.#ensure(name)
+    this.#markBase(name)
     return `authorized_${this.#prefix}${name}`
+  }
+
+  /**
+   * Record one relation and its abstract descendants as base-relation users.
+   * @param name - Entity name.
+   */
+  #markBase(name: string): void {
+    this.#baseUsed.add(name)
+    const definition = name === 'Entity' ? identityDefinition() : this.#entities.entity(name)
+    if (definition?.abstract !== true) return
+    for (const leaf of this.#entities.concreteDescendants(name)) this.#baseUsed.add(leaf.name)
   }
 
   /**
@@ -401,17 +769,20 @@ class AuthorizedRelations {
         }
       }
     }
-    const names = [...this.#relations.keys()]
-    const concrete = names.filter(name => {
-      if (name === 'Entity') return false
-      const definition = this.#entities.entity(name)
-      return definition !== undefined && !definition.abstract
-    })
-    const abstract = names.filter(name => !concrete.includes(name))
-    return [
-      ...concrete.map(name => this.#concreteDefinition(name)),
-      ...abstract.map(name => this.#abstractDefinition(name)),
-    ].filter(definition => definition !== '')
+    const grouped = new Set<string>()
+    for (const group of this.#groups.values()) {
+      grouped.add(group.name)
+      for (const leaf of group.leaves.keys()) grouped.add(leaf)
+    }
+    return this.#orderedNames()
+      .filter(name => !this.#emittedBase.has(name))
+      .filter(name => this.#baseUsed.has(name) || !grouped.has(name) || this.#hasBaseSources(name))
+      .map(name => (
+        name !== 'Entity' && this.#entities.entity(name)?.abstract === false
+          ? this.#concreteDefinition(name)
+          : this.#abstractDefinition(name)
+      ))
+      .filter(definition => definition !== '')
   }
 
   /**
@@ -472,14 +843,43 @@ class AuthorizedRelations {
   }
 
   /**
+   * Emit one reachable abstract union over restricted concrete relations.
+   * @param name - Abstract entity name.
+   * @param cte - Union CTE name.
+   * @param leaves - Restricted CTE name by concrete leaf.
+   * @param aliases - Projected output aliases.
+   * @returns CTE definition.
+   */
+  #abstractUnion(
+    name: string,
+    cte: string,
+    leaves: ReadonlyMap<string, string>,
+    aliases: readonly string[],
+  ): string {
+    const output = aliases.length === 0 ? ['id'] : [...aliases].sort()
+    const selects = [...leaves].map(([, leafCte]) => (
+      `SELECT ${output.map(alias => quote(alias)).join(', ')} FROM ${quote(leafCte)}`
+    ))
+    if (selects.length === 0) {
+      return `${quote(cte)} AS NOT MATERIALIZED (` +
+        `SELECT ${output.map(alias => `NULL AS ${quote(alias)}`).join(', ')} WHERE FALSE)`
+    }
+    return `${quote(cte)} AS MATERIALIZED (${selects.join(' UNION ALL ')})`
+  }
+
+  /**
    * Project one concrete leaf with explicit output aliases.
    * @param definition - Concrete entity.
    * @param requirements - Required aliases and optional field metadata.
+   * @param sources - Optional selected reachable identity sources.
+   * @param cte - Optional reachable CTE name.
    * @returns CTE definition.
    */
   #leafDefinition(
     definition: EntityDefinition,
     requirements: ReadonlyMap<string, AuthorizedField | null>,
+    sources: readonly AuthorizedRestriction[] = [],
+    cte?: string,
   ): string {
     const aliases = [...requirements.keys()].sort()
     if (aliases.length === 0) aliases.push('id')
@@ -501,7 +901,22 @@ class AuthorizedRelations {
       return `${quote(ownerAlias)}.${quote(alias)} AS ${quote(alias)}`
     })
     const name = definition.name
-    return `${quote(`authorized_${this.#prefix}${name}`)} AS NOT MATERIALIZED (` +
+    const target = cte ?? `authorized_${this.#prefix}${name}`
+    const mode = cte !== undefined
+      ? 'MATERIALIZED'
+      : this.#materialized && !this.#excluded.has(name)
+        ? 'MATERIALIZED'
+        : 'NOT MATERIALIZED'
+    if (sources.length > 0 && mode === 'MATERIALIZED') {
+      const reachable = sources.map(source => (
+        `SELECT ${quote(source.column)} FROM ${quote(source.relation)} ` +
+        `WHERE ${quote(source.column)} IS NOT NULL`
+      )).join(' UNION ')
+      return `${quote(target)} AS ${mode} (` +
+        `SELECT ${projection.join(', ')} FROM ${quote(name)} ${quote('leaf')} ${joins.join(' ')} ` +
+        `WHERE ${quote('leaf')}.${quote('id')} IN (${reachable}))`
+    }
+    return `${quote(target)} AS ${mode} (` +
       `SELECT ${projection.join(', ')} FROM ${quote(name)} ${quote('leaf')} ${joins.join(' ')})`
   }
 }
@@ -513,6 +928,30 @@ class AuthorizedRelations {
  */
 function fieldAlias(field: EffectiveFieldDefinition): string {
   return 'column' in field ? field.column : field.name
+}
+
+/**
+ * Shared state for one statement's collection plan.
+ *
+ * Every nested item projection participates in the same statement, so alias,
+ * CTE, and authorized-relation allocation must be shared. Otherwise a nested
+ * projection could shadow an outer name or emit a duplicate target scan.
+ */
+interface ProjectionShared {
+  /** Shared table-alias counter. */
+  alias: number,
+  /** CTE relation backing each alias used by reachable reference projections. */
+  readonly aliasSources: Map<string, string>,
+  /** Shared CTE-name counter. */
+  cte: number,
+  /** Ordered collection CTE definitions for the complete statement. */
+  readonly definitions: SqlFragment[],
+  /** Root reference identities waiting for the selected root relation. */
+  readonly pendingBase: { readonly column: string, readonly name: string }[],
+  /** Authorized relations and their shared CTE requirements. */
+  readonly relations: AuthorizedRelations,
+  /** Shared relationship-edge sources keyed by parent/source identity. */
+  readonly sources: Map<string, string>,
 }
 
 /**
@@ -533,8 +972,33 @@ class QueryProjection {
   readonly #entities: EntityDefinitions
   /** Authorized relation requirements and their CTE definitions. */
   readonly #relations: AuthorizedRelations
-  /** Next generated table alias number. */
-  #alias = 0
+  /** Statement-wide alias, CTE and authorized-relation scope. */
+  readonly #shared: ProjectionShared
+  /** Batched collection CTE definitions emitted after authorized relations. */
+  readonly #batchDefinitions: SqlFragment[]
+  /** Root predicate used to scope batched collection roots. */
+  #rootPredicate?: SqlFragment
+  /** Shared selected-root CTE used by every batch plan in this scope. */
+  #batchRootSelection?: string
+  /** Parent identity selections keyed by reference path. */
+  readonly #batchParentSelections = new Map<string, string>()
+  /**
+   * Materialized identity rows for a nested item projection.
+   *
+   * When present, this projection is a flat child scope: the CTE already holds
+   * the parent identity and target columns, so collection roots select from it
+   * directly instead of rescanning the authorized target relation.
+   */
+  readonly #rootBase?: string
+  /** Materialized selected-root rows shared by the final projection and children. */
+  #rootRows?: string
+  /** Root joins, predicate, ordering and pagination captured for the shared rows. */
+  #rootConfig?: {
+    readonly joins: readonly SqlFragment[],
+    readonly ordering: string,
+    readonly pagination: SqlFragment,
+    readonly where: SqlFragment,
+  }
   /** Filter-only expression overrides keyed by logical path. */
   readonly #filterExpressions = new Map<string, string>()
   /** Predicate-only renderers that bind filtered collection count values. */
@@ -572,6 +1036,9 @@ class QueryProjection {
    * @param rootAlias - Root table alias for this query.
    * @param aliasPrefix - Prefix for nested compiler aliases.
    * @param relationPrefix - Prefix for nested relation CTE names.
+   * @param shared - Statement-wide scope shared with nested flat projections.
+   * @param rootBase - Materialized identity rows for a nested item projection.
+   * @param context - Root occurrence for a nested item projection.
    */
   constructor(
     entities: EntityDefinitions,
@@ -580,13 +1047,27 @@ class QueryProjection {
     rootAlias = 't',
     aliasPrefix = '',
     relationPrefix = '',
+    shared?: ProjectionShared,
+    rootBase?: string,
+    context?: EntityContext,
   ) {
     this.#entities = entities
-    this.#relations = new AuthorizedRelations(entities, relationPrefix)
+    this.#shared = shared ?? {
+      alias: 0,
+      aliasSources: new Map(),
+      cte: 0,
+      definitions: [],
+      pendingBase: [],
+      relations: new AuthorizedRelations(entities, relationPrefix),
+      sources: new Map(),
+    }
+    this.#relations = this.#shared.relations
+    this.#batchDefinitions = this.#shared.definitions
+    this.#rootBase = rootBase
     this.#budget = budget
     this.#aliasPrefix = aliasPrefix
     this.#relationPrefix = relationPrefix
-    this.root = {
+    this.root = context ?? {
       baseAlias: rootAlias,
       collections: contextCollections(entities, definition),
       definition,
@@ -601,20 +1082,91 @@ class QueryProjection {
         definition.singularNavigations.map(navigation => [navigation.name, navigation]),
       ),
     }
+    if (rootBase !== undefined) this.#registerAliasSource(this.root.baseAlias, rootBase)
+  }
+
+  /**
+   * Exclude one collection target and every collection target reachable from
+   * its requested field paths, before any reference relation is materialized.
+   * @param context - Occurrence owning the collection.
+   * @param collection - Collection navigation.
+   * @param fields - Relative field paths requested below the collection.
+   */
+  #excludeCollectionTarget(
+    context: EntityContext,
+    collection: DerivedCollectionDefinition,
+    fields: ReadonlySet<string>,
+  ): void {
+    const resolved = resolveCollectionRelation(collection, value => this.#entities.entity(value))
+    if (resolved.target.kind === 'record') return
+    const target = resolved.target.definition
+    this.#relations.exclude(target.name)
+    this.#excludeNestedTargets(
+      targetContext(this.#entities, target, 'target', 'target'),
+      fields,
+    )
+  }
+
+  /**
+   * Walk relative field paths and exclude nested collection targets.
+   * @param context - Occurrence whose fields are being inspected.
+   * @param fields - Relative field paths.
+   */
+  #excludeNestedTargets(context: EntityContext, fields: ReadonlySet<string>): void {
+    for (const field of fields) {
+      let current = context
+      for (const raw of splitFieldPath(field)) {
+        const name = parseCollectionDirectives(raw).name
+        const collection = current.collections.get(name)
+        if (collection) {
+          const resolved = resolveCollectionRelation(
+            collection,
+            value => this.#entities.entity(value),
+          )
+          if (resolved.target.kind === 'record') break
+          const target = resolved.target.definition
+          this.#relations.exclude(target.name)
+          current = targetContext(this.#entities, target, 'target', 'target')
+          continue
+        }
+        const singular = current.singularNavigations.get(name)
+        if (singular) {
+          const target = singular.target === 'Entity'
+            ? identityDefinition()
+            : this.#entities.entity(singular.target)
+          if (target === undefined) break
+          current = targetContext(this.#entities, target, 'target', 'target')
+          continue
+        }
+        const effective = current.effective.get(name)
+        if (effective?.type === FieldType.Entity) {
+          const target = effective.target === 'Entity'
+            ? identityDefinition()
+            : this.#entities.entity(effective.target)
+          if (target === undefined) break
+          current = targetContext(this.#entities, target, 'target', 'target')
+          continue
+        }
+        break
+      }
+    }
   }
 
   /**
    * Build the requested projection paths.
    * @param fields - Effective scalar names or dotted singular-reference paths.
    * @param _valueStart - Retained value-start compatibility argument.
+   * @param rootPredicate - Root predicate used to scope batched roots.
    * @returns A row hydrator for the requested nested shape.
    * @throws {Error} When a path is invalid or an expansion is not supported.
    */
   build(
     fields: readonly string[],
     _valueStart: number,
+    rootPredicate?: SqlFragment,
   ): (row: Record<string, unknown>) => Record<string, unknown> {
     void _valueStart
+    this.#rootPredicate = rootPredicate
     if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
     this.#validateBudget(fields)
     const root = this.#node(this.root, [])
@@ -623,8 +1175,24 @@ class QueryProjection {
     for (const node of nodes) {
       for (const reference of node.references) nodes.push(...reference.nodes)
     }
+    /*
+     * Collection targets stay inline so their parent scope can narrow them.
+     * Record every target before a reference projection can materialize a
+     * relation that a later sibling collection reads directly, including
+     * collections nested behind reference paths.
+     */
     for (const node of nodes) {
-      for (const spec of node.projectedSpecs.values()) this.#addProjectedCollection(node, spec)
+      for (const spec of node.projectedSpecs.values()) {
+        this.#excludeCollectionTarget(node.context, spec.collection, spec.fields)
+      }
+    }
+    for (const node of nodes) {
+      for (const spec of node.projectedSpecs.values()) {
+        this.#validateCollectionProjection(spec)
+        if (!this.#canBatchCollection(node, spec) || !this.#addFlatCollection(node, spec)) {
+          this.#addProjectedCollection(node, spec)
+        }
+      }
     }
     return row => hydrateRoot(row, root)
   }
@@ -661,6 +1229,169 @@ class QueryProjection {
   }
 
   /**
+   * Build one unique batch CTE name for this compiler scope.
+   * @param kind - Short CTE family name.
+   * @returns Quoted CTE identifier.
+   */
+  #nextBatchCte(kind: string): string {
+    const name = quote(`batch_${kind}_${this.#relationPrefix}${this.#shared.cte}`)
+    this.#shared.cte += 1
+    return name
+  }
+
+  /**
+   * Materialize one relationship source once per parent identity scope.
+   * @param plan - Relationship-backed collection plan.
+   * @param parentSource - Parent identity relation.
+   * @param parentAlias - Parent identity alias.
+   * @returns Quoted source CTE identifier.
+   */
+  #ensureFlatSource(
+    plan: CollectionRelationPlan,
+    parentSource: SqlFragment | string,
+    parentAlias: string,
+  ): string {
+    const relationship = plan.relationship
+    const relationshipAlias = plan.relationshipAlias
+    if (relationship === undefined || relationshipAlias === undefined || plan.ownerId === undefined) {
+      throw new Error(`Collection "${plan.collection.name}" has no relationship source`)
+    }
+    const sourceSql = typeof parentSource === 'string' ? parentSource : parentSource.sql
+    const collection = plan.collection
+    const owner = collection.kind === 'relationship'
+      ? collection.endpoint
+      : collection.kind === 'explicit'
+        ? collection.ownerEndpoint.field
+        : collection.reference.name
+    const key = `${sourceSql}\u0000${relationship.name}\u0000${owner}\u0000` +
+      `${plan.predicate?.sql ?? ''}`
+    const cached = this.#shared.sources.get(key)
+    if (cached !== undefined) return cached
+    const name = this.#nextBatchCte('source')
+    this.#shared.sources.set(key, name)
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT ${plan.ownerId} AS ${quote('__parent_id')}, ` +
+        `${quote(relationshipAlias)}.* `),
+      sqlText(`FROM ${quote(relationship.name)} ${quote(relationshipAlias)} `),
+      sqlText(`JOIN ${parentSource} ${quote(parentAlias)} ON TRUE `),
+      sqlText(`WHERE ${plan.condition}`),
+      plan.predicate === undefined
+        ? undefined
+        : sqlConcat([' AND (', plan.predicate as SqlFragment, ')']),
+      sqlText(')'),
+    ], ''))
+    this.#markAvailable(name)
+    return name
+  }
+
+  /**
+   * Materialize the selected root rows once for the final projection and every
+   * nested collection scope.
+   * @returns Quoted shared root-row CTE identifier.
+   */
+  #ensureRootRows(): string {
+    if (this.#rootRows !== undefined) return this.#rootRows
+    const name = this.#nextBatchCte('selected_rows')
+    this.#rootRows = name
+    const config = this.#rootConfig
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT ${quote(this.root.baseAlias)}.* FROM ` +
+        `${this.relation(this.root.definition.name)} ${quote(this.root.baseAlias)} `),
+      ...(config?.joins ?? []),
+      config?.where ??
+        (this.#rootPredicate === undefined
+          ? undefined
+          : sqlConcat([' WHERE ', this.#rootPredicate], '')),
+      sqlText(config?.ordering ?? ''),
+      config?.pagination,
+      sqlText(')'),
+    ]))
+    this.#markAvailable(name)
+    this.#registerAliasSource(this.root.baseAlias, name)
+    return name
+  }
+
+  /**
+   * Materialize the selected root identities once for all batch plans.
+   * @returns Quoted selected-root CTE identifier.
+   */
+  #ensureBatchRootSelection(): string {
+    if (this.#batchRootSelection !== undefined) return this.#batchRootSelection
+    if (this.#rootBase !== undefined) {
+      const name = this.#nextBatchCte('child_roots')
+      this.#batchRootSelection = name
+      this.#batchDefinitions.push(sqlConcat([
+        sqlText(`${name} AS MATERIALIZED (`),
+        sqlText(`SELECT DISTINCT ${quote('id')} FROM ${this.#rootBase})`),
+      ], ''))
+      this.#markAvailable(name)
+      return name
+    }
+    const rows = this.#ensureRootRows()
+    const name = this.#nextBatchCte('selected_roots')
+    this.#batchRootSelection = name
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT ${quote(this.root.baseAlias)}.${quote('id')} AS ${quote('id')} `),
+      sqlText(`FROM ${rows} ${quote(this.root.baseAlias)}`),
+      sqlText(')'),
+    ]))
+    this.#markAvailable(name)
+    return name
+  }
+
+  /**
+   * Materialize identities reachable to one reference occurrence from the
+   * selected roots. The shared root selection is evaluated once, then this
+   * CTE narrows the parent domain before any nested child is projected.
+   * @param node - Reference occurrence owning the nested collection.
+   * @param roots - Shared selected-root CTE identifier.
+   * @returns Quoted parent identity CTE identifier.
+   */
+  #ensureBatchParentSelection(node: ProjectionNode, roots: string): string {
+    const key = node.path.join('.')
+    const cached = this.#batchParentSelections.get(key)
+    if (cached !== undefined) return cached
+    const name = this.#nextBatchCte('parent')
+    const selectedRoot = quote('__selected_root')
+    const parentId = `${quote(node.context.baseAlias)}.${quote('id')}`
+    const identity = node.parentIdentity?.alias === this.root.baseAlias
+      ? node.parentIdentity.expression
+      : undefined
+    const joins = identity === undefined ? node.joins : []
+    let parentSource: SqlFragment
+    if (identity !== undefined && this.#rootRows !== undefined) {
+      parentSource = sqlConcat([
+        sqlText(`FROM ${this.#rootRows} ${quote(this.root.baseAlias)} `),
+      ])
+    } else if (this.#rootBase === undefined) {
+      const rootRelation = this.#rootRows ?? this.relation(this.root.definition.name)
+      parentSource = sqlConcat([
+        sqlText(`FROM ${roots} ${selectedRoot} `),
+        sqlText(`JOIN ${rootRelation} ${quote(this.root.baseAlias)} ` +
+          `ON ${quote(this.root.baseAlias)}.${quote('id')} = ${selectedRoot}.${quote('id')} `),
+        ...joins,
+      ], '')
+    } else {
+      parentSource = sqlConcat([
+        sqlText(`FROM ${this.#rootBase as string} ${quote(this.root.baseAlias)} `),
+        ...joins,
+      ], '')
+    }
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (`),
+      sqlText(`SELECT DISTINCT ${identity ?? parentId} AS ${quote('id')} `),
+      parentSource,
+      sqlText(')'),
+    ], ''))
+    this.#markAvailable(name)
+    this.#batchParentSelections.set(key, name)
+    return name
+  }
+
+  /**
    * Ensure the root table is joined for the root occurrence.
    * @returns The root alias.
    */
@@ -678,11 +1409,79 @@ class QueryProjection {
   }
 
   /**
+   * Register the CTE relation backing one SQL alias.
+   * @param alias - SQL alias exposed by the relation.
+   * @param relation - Quoted CTE name.
+   */
+  #registerAliasSource(alias: string, relation: string): void {
+    this.#shared.aliasSources.set(alias, unquoteIdentifier(relation))
+  }
+
+  /**
+   * Emit reachable restrictions whose identity sources are now available.
+   */
+  #flushReachable(): void {
+    if (this.#shared.pendingBase.length > 0) {
+      const source = this.#shared.aliasSources.get(this.root.baseAlias)
+      if (source !== undefined) {
+        for (const pending of this.#shared.pendingBase) {
+          this.#relations.baseReachable(pending.name, source, pending.column)
+        }
+        this.#shared.pendingBase.splice(0)
+      }
+    }
+    const definitions = this.#relations.flush()
+    if (definitions.length > 0) this.#batchDefinitions.push(...definitions.map(definition => sqlText(definition)))
+  }
+
+  /**
+   * Mark one emitted CTE as available to reachable identity restrictions.
+   * @param relation - Quoted CTE name.
+   */
+  #markAvailable(relation: string): void {
+    this.#relations.markAvailable(unquoteIdentifier(relation))
+  }
+
+  /**
    * Emit the planned authorized CTE definitions.
    * @returns Ordered CTE definitions.
    */
   relationDefinitions(): string[] {
     return this.#relations.definitions()
+  }
+
+  /**
+   * Store the selected-root joins, predicate, ordering and pagination.
+   * @param config - Root joins, predicate, ordering and pagination reused by the shared row base.
+   * @param config.joins - Root predicate joins absorbed by the shared row base.
+   * @param config.ordering - Root ordering SQL.
+   * @param config.pagination - Root limit/offset SQL.
+   * @param config.where - Root predicate including filters and raw correlation.
+   */
+  setRootSelection(config: {
+    readonly joins: readonly SqlFragment[],
+    readonly ordering: string,
+    readonly pagination: SqlFragment,
+    readonly where: SqlFragment,
+  }): void {
+    this.#rootConfig = config
+  }
+
+  /**
+   * Report the shared root rows, when the flat planner materialized them.
+   * @returns The row relation and the number of predicate joins it absorbed.
+   */
+  rootBasePlan(): { readonly joins: number, readonly relation: string } | undefined {
+    if (this.#rootRows === undefined || this.#rootConfig === undefined) return undefined
+    return { joins: this.#rootConfig.joins.length, relation: this.#rootRows }
+  }
+
+  /**
+   * Emit batched collection CTE definitions.
+   * @returns Ordered batch CTE definitions.
+   */
+  batchDefinitions(): SqlFragment[] {
+    return [...this.#batchDefinitions]
   }
 
   /**
@@ -1143,6 +1942,7 @@ class QueryProjection {
     const plan: CollectionRelationPlan = {
       collection,
       condition: sql.condition,
+      ownerId: sql.ownerId,
       parentAlias,
       relation: sql.relation,
       resultType: sql.resultType,
@@ -1240,6 +2040,49 @@ class QueryProjection {
   }
 
   /**
+   * Compile one collection member filter against the edge and target aliases
+   * already present in the batch rows. This keeps the filtered and unfiltered
+   * projections on one child query instead of compiling the child tree twice.
+   * @param plan - Collection relation plan.
+   * @param key - Stable logical collection path.
+   * @param filter - Collection member predicate.
+   * @returns Filter SQL fragment, or undefined when the filter is empty.
+   */
+  #collectionFilterPredicate(
+    plan: CollectionRelationPlan,
+    key: string,
+    filter: string,
+  ): SqlFragment | undefined {
+    const scope = this.#scopeForCollection(
+      { collection: plan.collection, parentAlias: plan.parentAlias },
+      key,
+    )
+    const normalized = QueryNormalizer.normalize(
+      plan.target,
+      filter,
+      scope.field,
+      scope.collection,
+      scope.array,
+    ) ?? undefined
+    const relationshipPrefix = plan.relationship === undefined
+      ? undefined
+      : `${lowerFirst(plan.relationship.name)}.`
+    let lowered: Filter | undefined
+    if (normalized !== undefined) {
+      lowered = PredicateEligibility.lowerMember(
+        this.#entities,
+        plan.target,
+        normalized,
+        relationshipPrefix,
+        plan.relationship?.fields.map(field => field.name),
+      )
+    }
+    if (lowered === undefined) return undefined
+    const predicate = SQL.whereFilter(this.#entities, plan.target.name, lowered, scope)
+    return predicate.sql === '' ? undefined : predicate as SqlFragment
+  }
+
+  /**
    * Render the authorized count of collection members matching one filter.
    * @param plan - Collection relation plan.
    * @param filter - Collection member predicate.
@@ -1260,7 +2103,7 @@ class QueryProjection {
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, plan.collection.name, true)
     const member = adapter.compile(filter)
-    const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
+    const count = collectionIdentityCount(member)
     return _bind => {
       void _bind
       return sqlFragment`(${count})`
@@ -1519,6 +2362,17 @@ class QueryProjection {
       field: resolve,
       filterCount: path => counts.get(path),
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
+      ...(plan.ownerId === undefined ? {} : {
+        parentId: `${quote(resolved.parentAlias)}.${quote('id')}`,
+        selectParents: (member, predicate) => sqlConcat([
+          sqlText(`SELECT DISTINCT ${plan.ownerId} FROM ` +
+            `${sqlConcat([plan.relation, ...joins]).sql} WHERE TRUE`),
+          predicate,
+          sqlText(' AND ('),
+          member,
+          sqlText(')'),
+        ]),
+      }),
       predicate: plan.predicate as SqlFragment,
       get relation() { return sqlConcat([plan.relation, ...joins]).sql },
       get work() { return plan.work + joins.length },
@@ -1547,7 +2401,7 @@ class QueryProjection {
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, key, true)
     const member = adapter.compile(undefined)
-    const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
+    const count = collectionIdentityCount(member)
     const exists = sqlConcat(['EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const empty = sqlConcat(['NOT EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const scope: CountScope = {
@@ -1971,10 +2825,14 @@ class QueryProjection {
       : this.#filterPathKey(path)
     let context = this.#filterContexts.get(key)
     if (!context) {
-      context = this.#joinTarget(field, sourceAlias)
+      context = this.#joinTarget(field, sourceAlias, undefined, true)
       this.#filterContexts.set(key, context)
     }
     const child = this.#node(context, path)
+    child.parentIdentity = {
+      alias: sourceAlias,
+      expression: `${sourceAlias}.${quote(field.column)}`,
+    }
     this.#identity(child)
     return child
   }
@@ -1984,33 +2842,59 @@ class QueryProjection {
    * @param field - Effective reference field.
    * @param sourceAlias - Source table alias containing the reference column.
    * @param scope - Local SQL join sink for this resolution scope.
+   * @param reachable - Whether projected identities must be selected first.
    * @returns The target occurrence.
    */
   #joinTarget(
     field: EffectiveFieldDefinition,
     sourceAlias: string,
     scope: FilterJoinScope = this.#outerFilterScope(),
+    reachable = false,
   ): EntityContext {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
     scope.consume()
     if (field.target === 'Entity') {
       const alias = scope.alias('r')
       this.#relations.registerAlias('Entity', 'id')
+      const relation = this.#referenceRelation('Entity', sourceAlias, field.column, reachable)
       scope.join(
-        `LEFT JOIN ${this.#relations.relation('Entity')} ${quote(alias)} ON ` +
+        `LEFT JOIN ${relation} ${quote(alias)} ON ` +
         `${quote(alias)}.${quote('id')} = ${sourceAlias}.${quote(field.column)}`,
       )
+      this.#registerAliasSource(alias, relation)
       return rootContext(this.#entities, alias)
     }
     const target = this.#entities.entity(field.target)
     if (!target) throw new Error(`Unknown target entity "${field.target}"`)
     const alias = scope.alias('b')
     this.#relations.registerAlias(target.name, 'id')
+    const relation = this.#referenceRelation(target.name, sourceAlias, field.column, reachable)
     scope.join(
-      `LEFT JOIN ${this.#relations.relation(target.name)} ${quote(alias)} ON ` +
+      `LEFT JOIN ${relation} ${quote(alias)} ON ` +
       `${quote(alias)}.${quote('id')} = ${sourceAlias}.${quote(field.column)}`,
     )
+    this.#registerAliasSource(alias, relation)
     return targetContext(this.#entities, target, alias, alias)
+  }
+
+  /**
+   * Resolve one projected reference target relation.
+   * @param name - Target entity name.
+   * @param sourceAlias - Alias exposing the reference column.
+   * @param column - Reference column carrying the target identity.
+   * @param reachable - Whether the join is a projection reference.
+   * @returns Quoted target relation name.
+   */
+  #referenceRelation(name: string, sourceAlias: string, column: string, reachable: boolean): string {
+    if (!reachable) return this.#relations.relation(name)
+    if (this.#rootBase === undefined && sourceAlias === this.root.baseAlias) {
+      this.#shared.pendingBase.push({ column, name })
+      return this.#relations.relation(name)
+    }
+    if (!this.#relations.materialized) return this.#relations.relation(name)
+    const source = this.#shared.aliasSources.get(sourceAlias)
+    if (source === undefined) return this.#relations.relation(name)
+    return this.#relations.reachable(name, source, column)
   }
 
   /**
@@ -2047,6 +2931,762 @@ class QueryProjection {
   }
 
   /**
+   * Resolve the effective collection directives shared by batch and fallback paths.
+   * @param spec - Requested collection projection.
+   * @param plan - Canonical collection relation plan.
+   * @returns Effective limit, offset, and ordering.
+   */
+  #collectionOptions(
+    spec: ProjectedCollectionSpec,
+    plan: CollectionRelationPlan,
+  ): { readonly limit: number | null, readonly offset: number, readonly orderBy?: OrderBy } {
+    const authored = plan.collection.kind === 'explicit' ? plan.collection : undefined
+    return {
+      limit: spec.limit !== undefined
+        ? spec.limit
+        : authored?.viaLimit !== undefined ? authored.viaLimit : 3,
+      offset: spec.offset !== undefined
+        ? spec.offset
+        : authored?.viaOffset !== undefined ? authored.viaOffset : 0,
+      ...(spec.orderBy ?? authored?.viaOrderBy) === undefined
+        ? {}
+        : { orderBy: spec.orderBy ?? authored?.viaOrderBy },
+    }
+  }
+
+  /**
+   * Resolve the canonical semantic contract for one collection.
+   *
+   * Every physical adapter consumes these inputs. Adapters may assemble
+   * different SQL shapes, but they must not independently decide the filter
+   * expression, identity, ordering, limit, or offset.
+   * @param spec - Requested collection projection.
+   * @param plan - Canonical collection relation plan.
+   * @returns The shared collection semantics.
+   */
+  #collectionSemantics(
+    spec: ProjectedCollectionSpec,
+    plan: CollectionRelationPlan,
+  ): CollectionSemantics {
+    const options = this.#collectionOptions(spec, plan)
+    return new CollectionSemantics({
+      ...options,
+      filter: spec.filters.size === 0
+        ? undefined
+        : [...spec.filters].map(value => `(${value})`).join(' $and '),
+      identity: this.#collectionIdentity(plan),
+    })
+  }
+
+  /**
+   * Resolve the canonical result identity for one collection relation.
+   * @param plan - Canonical collection relation plan.
+   * @returns Entity identity or relationship-record endpoint fields.
+   */
+  #collectionIdentity(plan: CollectionRelationPlan): readonly string[] {
+    return plan.resultType === 'record'
+      ? plan.relationship?.between.map(endpoint => endpoint.field) ?? []
+      : ['id']
+  }
+
+  /**
+   * Validate relationship-owned projection before choosing physical SQL.
+   * @param spec - Requested collection projection.
+   * @throws {Error} When an ambiguous edge property is projected.
+   */
+  #validateCollectionProjection(spec: ProjectedCollectionSpec): void {
+    const collection = spec.collection
+    if (collection.kind !== 'explicit') return
+    const target = this.#entities.entity(collection.target)
+    if (target !== undefined) {
+      for (const field of spec.fields) {
+        const name = splitFieldPath(field)[0]
+        if (name === undefined) continue
+        if (target.effectiveFields.some(candidate => candidate.name === name)
+          && collection.relationship.fields.some(candidate => candidate.name === name)) {
+          throw new Error(`Ambiguous collection field "${collection.name}.${name}"`)
+        }
+      }
+    }
+    const prefix = `${lowerFirst(collection.relationship.name)}.`
+    const targetField = [...spec.fields].find(name => name.startsWith(prefix))
+    const edgeField = targetField === undefined ? [...spec.edgeFields][0] : undefined
+    if (targetField === undefined && edgeField === undefined) return
+    if (this.#edgeProjectionAllowedCollection(collection)) return
+    const name = targetField ?? `${prefix}${edgeField as string}`
+    throw new Error(
+      `Entity collection "${collection.name}" cannot project relationship-owned field ` +
+      `"${name}"; one Entity may map to multiple edges`,
+    )
+  }
+
+  /**
+   * Whether one explicit collection has an unambiguous target/edge pair.
+   * @param collection - Explicit collection navigation.
+   * @returns `true` when relationship-owned projection is safe.
+   */
+  #edgeProjectionAllowedCollection(collection: DerivedCollectionDefinition): boolean {
+    if (collection.kind !== 'explicit') return true
+    const relationship = collection.relationship
+    if (relationship.between.length === 2) return true
+    const target = collection.targetEndpoint
+    if (!target) return false
+    return relationship.constraints.some(constraint => (
+      constraint.type === Constraint.Structural
+      && constraint.fields.length === 2
+      && constraint.fields.includes(collection.ownerEndpoint.field)
+      && constraint.fields.includes(target.field)
+    ))
+  }
+
+  /**
+   * Whether one root collection can use the set-oriented batch plan.
+   *
+   * This remains conservative: it rejects explicit ordering and unsupported
+   * relationship shapes. Filters, pagination, nested target projections,
+   * edge fields, and record collections use the batch path when their
+   * canonical Graph relation supports it.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested target fields.
+   * @returns `true` when the collection has the proven simple batch shape.
+   */
+  #canBatchCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
+    const plan = this.#collectionPlan(
+      spec.collection,
+      node.context.baseAlias,
+      collectionKey(node.path, spec.collection.name),
+    )
+    const semantics = this.#collectionSemantics(spec, plan)
+    if (semantics.orderBy !== undefined) return false
+    if (plan.resultType === 'record') {
+      return plan.collection.kind === 'explicit'
+        && plan.relationshipAlias !== undefined
+        && spec.edgeFields.size === 0
+    }
+    return plan.resultType === 'entity'
+      && plan.ownerId !== undefined
+      && plan.targetAlias !== undefined
+      && !plan.target.abstract
+      && plan.target.name !== 'Entity'
+      && (spec.edgeFields.size === 0
+        || (plan.collection.kind === 'explicit' && this.#edgeProjectionAllowed(plan)))
+  }
+
+  /**
+   * Add one collection as a flattened base/aggregate CTE chain.
+   *
+   * The collection relation is materialized once per selected parent identity.
+   * Its item projection, singular references, and nested collections then read
+   * that base instead of rescanning the authorized target relation. This keeps
+   * sibling and nested collections on one shared identity graph.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested target fields.
+   * @returns Whether the flattened plan was emitted.
+   */
+  #addFlatCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
+    const key = collectionKey(node.path, spec.collection.name)
+    const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
+    if (plan.resultType === 'record') return this.#addFlatRecordCollection(node, spec, plan)
+    if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
+    const semantics = this.#collectionSemantics(spec, plan)
+    const { filter, limit, offset } = semantics
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
+    if (!Number.isInteger(offset) || offset < 0) return false
+    let filterPredicate: SqlFragment | undefined
+    let filterMatched: SqlFragment | undefined
+    if (filter !== undefined) {
+      try {
+        filterPredicate = this.#collectionFilterPredicate(plan, key, filter)
+        filterMatched = this.#collectionFilterPredicate(plan, key, filter)
+      } catch {
+        return false
+      }
+    }
+    const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
+    const edgeFields = [...spec.edgeFields]
+    let edge: SqlFragment | undefined
+    try {
+      edge = edgeFields.length === 0
+        ? undefined
+        : this.#edgeProjection(plan, edgeFields, quote(plan.targetAlias))
+    } catch {
+      return false
+    }
+    this.#relations.materialize([this.root.definition.name, plan.target.name])
+    this.#consume(plan.work)
+    const roots = this.#ensureBatchRootSelection()
+    this.#flushReachable()
+    const parentSource = node.path.length === 0
+      ? roots
+      : this.#ensureBatchParentSelection(node, roots)
+    this.#flushReachable()
+    const suffix = this.#nextAlias('fb')
+    const baseCte = quote(`flat_base_${suffix}`)
+    const itemsCte = quote(`flat_items_${suffix}`)
+    const parentAlias = node.context.baseAlias
+    const parentId = plan.ownerId
+    const collectionPredicate = plan.predicate === undefined
+      ? undefined
+      : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
+    let filterProjection: SqlFragment | undefined
+    if (filterPredicate !== undefined) {
+      filterProjection = sqlConcat([
+        sqlText(', (CASE WHEN ('),
+        filterPredicate,
+        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter')}, `),
+        sqlText('(CASE WHEN ('),
+        filterMatched,
+        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter_matched')}`),
+      ], '')
+    }
+    const edgeProjection = edge === undefined
+      ? undefined
+      : sqlConcat([sqlText(', '), edge, sqlText(` AS ${quote('__edge')}`)], '')
+    const relationshipAlias = plan.relationshipAlias
+    const remote = plan.targetEndpoint
+    const splitTarget = relationshipAlias !== undefined
+      && plan.relationship !== undefined
+      && remote !== undefined
+      && spec.edgeFields.size === 0
+      && (filterPredicate === undefined || !filterPredicate.sql.includes(quote(relationshipAlias)))
+    let baseQuery: SqlFragment
+    if (splitTarget && relationshipAlias !== undefined && plan.relationship !== undefined && remote !== undefined) {
+      /*
+       * Materialize the owned edges once, then authorize each distinct target
+       * once. A many-to-one edge set (for example, many rows pointing at one
+       * shared target) otherwise evaluates the target's row policy once per
+       * edge instead of once per identity.
+       */
+      const sourceCte = this.#ensureFlatSource(plan, parentSource, parentAlias)
+      const targetsCte = quote(`flat_targets_${suffix}`)
+      const targetAlias = quote(plan.targetAlias)
+      const remoteId = `${quote('__edge_row')}.${quote(`${remote.field}.id`)}`
+      this.#batchDefinitions.push(sqlConcat([
+        sqlText(`${targetsCte} AS MATERIALIZED (`),
+        sqlText(`SELECT ${targetAlias}.* FROM ${this.relation(plan.target.name)} ${targetAlias} `),
+        sqlText(`WHERE ${targetAlias}.${quote('id')} IN ` +
+          `(SELECT ${remoteId} FROM ${sourceCte} AS ${quote('__edge_row')}))`),
+      ], ''))
+      this.#markAvailable(targetsCte)
+      baseQuery = sqlConcat([
+        sqlText(`SELECT ${quote('__edge_row')}.${quote('__parent_id')}, `),
+        sqlText(`${targetAlias}.${quote('id')} AS ${quote('__item_id')}, `),
+        sqlText(`${targetAlias}.*`),
+        filterProjection,
+        sqlText(` FROM ${sourceCte} AS ${quote('__edge_row')} `),
+        sqlText(`JOIN ${targetsCte} ${targetAlias} ` +
+          `ON ${targetAlias}.${quote('id')} = ${quote('__edge_row')}.${quote(`${remote.field}.id`)}`),
+      ], '')
+    } else {
+      baseQuery = sqlConcat([
+        sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, `),
+        sqlText(`${quote(plan.targetAlias)}.${quote('id')} AS ${quote('__item_id')}, `),
+        sqlText(`${quote(plan.targetAlias)}.*`),
+        edgeProjection,
+        filterProjection,
+        sqlText(` FROM ${plan.relation} `),
+        sqlText(`JOIN ${parentSource} ${quote(parentAlias)} ON TRUE `),
+        sqlText(`WHERE ${plan.condition}`),
+        collectionPredicate,
+      ], '')
+    }
+    const selectedPath = plan.resultType === 'entity'
+      && plan.ownerId !== undefined
+      && plan.targetAlias !== undefined
+      && (filterPredicate !== undefined || limit !== null || offset > 0)
+    if (!selectedPath) {
+      this.#batchDefinitions.push(sqlConcat([
+        sqlText(`${baseCte} AS MATERIALIZED (`),
+        baseQuery,
+        sqlText(')'),
+      ], ''))
+      this.#markAvailable(baseCte)
+    }
+    this.#flushReachable()
+    const selectedCte = quote(`flat_selected_${suffix}`)
+    const uniqueBaseCte = quote(`flat_unique_${suffix}`)
+    const pageOffset = offset > 0 || limit !== null ? sqlParameter(offset) : undefined
+    const pageLimit = limit === null ? undefined : sqlParameter(limit)
+    const selectedBase = selectedPath ? selectedCte : baseCte
+    const rowsBase = selectedBase
+    if (selectedPath) {
+      this.#batchDefinitions.push(this.#dedupeRowsDefinition(
+        uniqueBaseCte,
+        baseQuery,
+        filterPredicate !== undefined,
+      ))
+      this.#markAvailable(uniqueBaseCte)
+      const selectedSource: SqlFragment = filterPredicate === undefined
+        ? sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte}`)])
+        : sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte} ` +
+          `WHERE ${quote('__batch_filter')} IS TRUE`)])
+      let selectedQuery: SqlFragment
+      if (limit === null && offset === 0) {
+        selectedQuery = selectedSource
+      } else {
+        let selectedPage: SqlFragment
+        if (limit === null) {
+          selectedPage = sqlConcat([sqlText(`${quote('__selected_ordinal')} > `), pageOffset as SqlFragment])
+        } else {
+          selectedPage = sqlConcat([
+            sqlText(`${quote('__selected_ordinal')} - `), pageOffset as SqlFragment,
+            sqlText(' BETWEEN 1 AND '), pageLimit as SqlFragment,
+          ])
+        }
+        selectedQuery = sqlConcat([
+          sqlText(`SELECT * FROM (SELECT ${quote('__selected_source')}.*, `),
+          sqlText(`row_number() OVER (PARTITION BY ${quote('__parent_id')} ` +
+            `ORDER BY ${quote('__item_id')}) AS ${quote('__selected_ordinal')} `),
+          sqlText(`FROM (${selectedSource.sql}) AS ${quote('__selected_source')}) ` +
+            `AS ${quote('__selected')} WHERE `),
+          selectedPage,
+        ])
+      }
+      this.#batchDefinitions.push(
+        sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], ''),
+      )
+      this.#markAvailable(selectedCte)
+    }
+    const childRoot = this.#nextAlias('fi')
+    const child = new QueryProjection(
+      this.#entities,
+      plan.target,
+      this.#budget,
+      childRoot,
+      `${childRoot}_`,
+      `${this.#relationPrefix}flat_`,
+      this.#shared,
+      selectedBase,
+      targetContext(this.#entities, plan.target, childRoot, childRoot),
+    )
+    const hydrateItem = child.build(fields, 0, undefined)
+    this.#flushReachable()
+    const rowColumns = sqlConcat([
+      sqlText(`${quote(childRoot)}.${quote('__parent_id')}, ${quote(childRoot)}.${quote('__item_id')}, `),
+      sqlConcat(child.columns, ', '),
+      edge === undefined ? undefined : sqlText(`, ${quote(childRoot)}.${quote('__edge')}`),
+    ], '')
+    const itemQuery = sqlConcat([
+      selectedPath
+        ? sqlText('SELECT ')
+        : sqlText(`SELECT DISTINCT ON (${quote(childRoot)}.${quote('__parent_id')}, ` +
+          `${quote(childRoot)}.${quote('__item_id')}) `),
+      rowColumns,
+      sqlText(` FROM ${rowsBase} ${quote(childRoot)} `),
+      ...child.joins,
+    ])
+    const aggregate = this.#flatAggregateDefinitions({
+      baseCte,
+      countsRowsCte: selectedPath ? uniqueBaseCte : undefined,
+      itemQuery,
+      itemsCte,
+      limit,
+      matchedQuery: filterPredicate === undefined
+        ? undefined
+        : sqlConcat([sqlText(`SELECT * FROM ${uniqueBaseCte} WHERE ` +
+          `${quote('__batch_filter_matched')} IS TRUE`)]),
+      matchedRowsSource: selectedPath && filterPredicate === undefined ? uniqueBaseCte : undefined,
+      offset,
+      pageLimit,
+      pageOffset,
+      prePaged: selectedPath,
+    })
+    this.#batchDefinitions.push(...aggregate.definitions)
+    this.#projectFlatEnvelope(node, spec, { hydrateItem, itemsCte })
+    return true
+  }
+
+  /**
+   * Add one relationship-record collection as a flattened base/aggregate chain.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested record fields.
+   * @param plan - Collection relation plan.
+   * @returns Whether the flattened record plan was emitted.
+   */
+  #addFlatRecordCollection(
+    node: ProjectionNode,
+    spec: ProjectedCollectionSpec,
+    plan: CollectionRelationPlan,
+  ): boolean {
+    if (plan.collection.kind !== 'explicit'
+      || plan.relationship === undefined
+      || plan.relationshipAlias === undefined
+      || plan.ownerId === undefined) return false
+    const semantics = this.#collectionSemantics(spec, plan)
+    const { filter: filterText, limit, offset } = semantics
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
+    if (!Number.isInteger(offset) || offset < 0) return false
+    let fields: readonly string[]
+    const identity = semantics.identity
+    let filter: ReturnType<typeof SQL.where> | undefined
+    let filterMatched: ReturnType<typeof SQL.where> | undefined
+    try {
+      fields = recordFields(plan, spec.fields)
+      filter = filterText === undefined ? undefined : this.#recordPredicate(plan, filterText)
+      filterMatched = filterText === undefined ? undefined : this.#recordPredicate(plan, filterText)
+    } catch {
+      return false
+    }
+    this.#relations.materialize([this.root.definition.name, plan.target.name])
+    this.#consume(plan.work)
+    const selectedNames = [...new Set([...fields, ...identity])]
+    const selected = selectedNames
+      .map(name => `${recordColumn(plan, name)} AS ${quote(name)}`)
+      .join(', ')
+    const roots = this.#ensureBatchRootSelection()
+    this.#flushReachable()
+    const parentSource = node.path.length === 0
+      ? roots
+      : this.#ensureBatchParentSelection(node, roots)
+    this.#flushReachable()
+    const suffix = this.#nextAlias('fr')
+    const baseCte = quote(`flat_base_${suffix}`)
+    const itemsCte = quote(`flat_items_${suffix}`)
+    const filterPredicate = filter === undefined || filter.sql === ''
+      ? undefined
+      : filter as SqlFragment
+    const matchedPredicate = filterMatched === undefined || filterMatched.sql === ''
+      ? undefined
+      : filterMatched as SqlFragment
+    let filterProjection: SqlFragment | undefined
+    if (filterPredicate !== undefined) {
+      filterProjection = sqlConcat([
+        sqlText(', (CASE WHEN ('),
+        filterPredicate,
+        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__batch_filter')}, `),
+        sqlText('(CASE WHEN ('),
+        matchedPredicate,
+        sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__batch_filter_matched')}`),
+      ], '')
+    }
+    const sourceCte = this.#ensureFlatSource(plan, parentSource, node.context.baseAlias)
+    this.#batchDefinitions.push(sqlConcat([
+      sqlText(`${baseCte} AS MATERIALIZED (`),
+      sqlText(`SELECT ${quote('__parent_id')}, ${selected}`),
+      filterProjection,
+      sqlText(` FROM ${sourceCte} AS ${quote(plan.relationshipAlias)}`),
+      sqlText(')'),
+    ], ''))
+    this.#markAvailable(baseCte)
+    const itemFields = fields
+      .map(name => `${quoteLiteral(name)}, ${quote('__item')}.${quote(name)}`)
+      .join(', ')
+    const itemOrder = identity.map(name => `${quote('__child')}.${quote(name)}`).join(', ')
+    let rowsSource = baseCte
+    let matchedQuery: SqlFragment | undefined
+    let selectedPath = false
+    if (filterPredicate !== undefined) {
+      selectedPath = true
+      const selectedCte = quote(`flat_selected_${suffix}`)
+      const selectedSource = sqlConcat([
+        sqlText(`SELECT * FROM ${baseCte} WHERE ${quote('__batch_filter')} IS TRUE`),
+      ])
+      const offsetSlot = sqlValue(offset)
+      const limitSlot = limit === null ? undefined : sqlValue(limit)
+      let selectedQuery: SqlFragment
+      if (limit === null && offset === 0) {
+        selectedQuery = selectedSource
+      } else {
+        let selectedPage: SqlFragment
+        if (limit === null) {
+          selectedPage = sqlConcat([sqlText(`${quote('__selected_ordinal')} > `), offsetSlot])
+        } else {
+          selectedPage = sqlConcat([
+            sqlText(`${quote('__selected_ordinal')} - `), offsetSlot,
+            sqlText(' BETWEEN 1 AND '), limitSlot as SqlFragment,
+          ])
+        }
+        selectedQuery = sqlConcat([
+          sqlText(`SELECT * FROM (SELECT ${quote('__selected_source')}.*, `),
+          sqlText(`row_number() OVER (PARTITION BY ${quote('__parent_id')} ` +
+            `ORDER BY ${itemOrder.replaceAll(quote('__child'), quote('__selected_source'))}) ` +
+            `AS ${quote('__selected_ordinal')} `),
+          sqlText(`FROM (${selectedSource.sql}) AS ${quote('__selected_source')}) ` +
+            `AS ${quote('__selected')} WHERE `),
+          selectedPage,
+        ])
+      }
+      this.#batchDefinitions.push(
+        sqlConcat([sqlText(`${selectedCte} AS MATERIALIZED (`), selectedQuery, sqlText(')')], ''),
+      )
+      this.#markAvailable(selectedCte)
+      matchedQuery = sqlText(
+        `SELECT * FROM ${baseCte} WHERE ${quote('__batch_filter_matched')} IS TRUE`,
+      )
+      rowsSource = selectedCte
+    }
+    const aggregate = this.#flatAggregateDefinitions({
+      baseCte,
+      countsRowsCte: baseCte,
+      itemBuilder: `json_build_object(${itemFields})`,
+      itemOrder,
+      itemQuery: sqlConcat([sqlText(`SELECT * FROM ${rowsSource}`)]),
+      itemsCte,
+      limit,
+      matchedQuery,
+      offset,
+      prePaged: selectedPath,
+    })
+    this.#batchDefinitions.push(...aggregate.definitions)
+    this.#projectFlatEnvelope(node, spec, { itemsCte })
+    return true
+  }
+
+  /**
+   * Emit one flat collection item envelope, including its counts.
+   *
+   * The item row query is inlined into the envelope so PostgreSQL sees one
+   * materialized aggregate per collection instead of separate rows, counts,
+   * matched, and item CTEs. Filtered and matched domains still read their own
+   * sources when they differ from the item page.
+   * @param options - Item query, count domains, and paging scope.
+   * @param options.baseCte - Unfiltered base identity relation.
+   * @param options.countsRowsCte - Optional source rows for the total count.
+   * @param options.itemBuilder - Optional JSON object field list for record rows.
+   * @param options.itemOrder - Optional item ordering expression for record rows.
+   * @param options.itemQuery - Complete item row query without paging.
+   * @param options.itemsCte - JSON item CTE name.
+   * @param options.limit - Page size.
+   * @param options.matchedQuery - Optional matched-row query fragment.
+   * @param options.matchedRowsSource - Optional precomputed matched-row CTE.
+   * @param options.offset - Page offset.
+   * @param options.pageLimit - Optional shared bound limit slot.
+   * @param options.pageOffset - Optional shared bound offset slot.
+   * @param options.prePaged - Whether the item query is already filtered and paged.
+   * @returns The items CTE definition.
+   */
+  #flatAggregateDefinitions(options: {
+    readonly baseCte: string,
+    readonly countsRowsCte?: string,
+    readonly itemBuilder?: string,
+    readonly itemOrder?: string,
+    readonly itemQuery: SqlFragment,
+    readonly itemsCte: string,
+    readonly limit: number | null,
+    readonly matchedQuery?: SqlFragment,
+    readonly matchedRowsSource?: string,
+    readonly offset: number,
+    readonly pageLimit?: SqlFragment,
+    readonly pageOffset?: SqlFragment,
+    readonly prePaged?: boolean,
+  }): { readonly definitions: SqlFragment[] } {
+    const {
+      baseCte,
+      countsRowsCte,
+      itemBuilder,
+      itemOrder,
+      itemQuery,
+      itemsCte,
+      limit,
+      matchedQuery,
+      matchedRowsSource,
+      offset,
+      pageLimit,
+      pageOffset,
+      prePaged,
+    } = options
+    const unpaged = limit === null && offset === 0
+    const directRows = unpaged || prePaged === true
+    const offsetSlot = pageOffset ?? sqlValue(offset)
+    const limitSlot = pageLimit ?? (limit === null ? undefined : sqlValue(limit))
+    const ordered = itemOrder ?? `${quote('__child')}.${quote('__item_id')}`
+    const built = itemBuilder ?? `row_to_json(${quote('__item')})`
+    const itemOrderExpression = ordered.replaceAll(quote('__child'), quote('__item'))
+    const itemGroup = quote('__item_group')
+    const counts = quote('__counts')
+    const matched = quote('__matched')
+    const local: SqlFragment[] = []
+    const itemRows: SqlFragment = sqlConcat([sqlText('('), itemQuery, sqlText(')')])
+    const matchedRows: SqlFragment = matchedQuery === undefined
+      ? matchedRowsSource === undefined ? itemRows : sqlText(matchedRowsSource)
+      : sqlConcat([sqlText('('), matchedQuery, sqlText(')')])
+    const countsFromItems = unpaged
+      && matchedQuery === undefined
+      && matchedRowsSource === undefined
+      && (countsRowsCte === undefined || countsRowsCte === baseCte)
+    if (!countsFromItems) {
+      local.push(
+        sqlConcat([
+          sqlText(`${counts} AS MATERIALIZED (SELECT ${quote('__parent_id')}, ` +
+            `count(*)::int AS ${quote('__total')} FROM ${countsRowsCte ?? baseCte} ` +
+            `GROUP BY ${quote('__parent_id')})`),
+        ]),
+        sqlConcat([
+          sqlText(`${matched} AS MATERIALIZED (SELECT ${quote('__parent_id')}, ` +
+            `count(*)::int AS ${quote('__matched')} FROM `),
+          matchedRows,
+          sqlText(` GROUP BY ${quote('__parent_id')})`),
+        ]),
+      )
+    }
+    let aggregate: SqlFragment
+    if (directRows) {
+      aggregate = sqlConcat([
+        sqlText(`${quote('__parent_id')}, COALESCE(json_agg(${built} ` +
+          `ORDER BY ${itemOrderExpression}), '[]'::json) AS ${quote('__items')}`),
+        countsFromItems
+          ? sqlText(`, count(*)::int AS ${quote('__total')}, ` +
+            `count(*)::int AS ${quote('__matched')}`)
+          : undefined,
+        sqlText(' FROM '),
+        itemRows,
+        sqlText(` AS ${quote('__item')} GROUP BY ${quote('__parent_id')}`),
+      ])
+    } else {
+      const pageParts: SqlFragment[] = [
+        sqlText(`${quote('__ordinal')} - `),
+        offsetSlot,
+        sqlText(' BETWEEN 1 AND '),
+        limitSlot as SqlFragment,
+      ]
+      const page = limit === null
+        ? sqlConcat([sqlText(`${quote('__ordinal')} > `), offsetSlot])
+        : sqlConcat(pageParts)
+      aggregate = sqlConcat([
+        sqlText(`${quote('__parent_id')}, ` +
+          `COALESCE(json_agg(${built} ORDER BY ${quote('__item')}.${quote('__ordinal')}) ` +
+          'FILTER (WHERE '),
+        page,
+        sqlText(`), '[]'::json) AS ${quote('__items')} ` +
+          'FROM (SELECT row_number() OVER (' +
+          `PARTITION BY ${quote('__parent_id')} ORDER BY ${ordered}) ` +
+          `AS ${quote('__ordinal')}, ${quote('__child')}.* FROM `),
+        itemRows,
+        sqlText(` AS ${quote('__child')}) AS ${quote('__item')} ` +
+          `GROUP BY ${quote('__parent_id')}`),
+      ])
+    }
+    local.push(sqlConcat([
+      sqlText(`${itemGroup} AS MATERIALIZED (SELECT `),
+      aggregate,
+      sqlText(')'),
+    ]))
+    let select: SqlFragment
+    if (countsFromItems) {
+      select = sqlText(`SELECT ${quote('__parent_id')}, ${quote('__items')}, ` +
+        `${quote('__matched')}, ${quote('__total')} FROM ${itemGroup}`)
+    } else {
+      select = sqlConcat([
+        sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
+          `COALESCE(${itemGroup}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
+          `COALESCE(${matched}.${quote('__matched')}, 0) AS ${quote('__matched')}, ` +
+          `COALESCE(${counts}.${quote('__total')}, 0) AS ${quote('__total')} ` +
+          `FROM (SELECT ${quote('__parent_id')} FROM ${itemGroup} UNION ` +
+          `SELECT ${quote('__parent_id')} FROM ${counts}) AS ${quote('__parents')} ` +
+          `LEFT JOIN ${itemGroup} ON ${itemGroup}.${quote('__parent_id')} = ` +
+          `${quote('__parents')}.${quote('__parent_id')} ` +
+          `LEFT JOIN ${counts} ON ${counts}.${quote('__parent_id')} = ` +
+          `${quote('__parents')}.${quote('__parent_id')} ` +
+          `LEFT JOIN ${matched} ON ${matched}.${quote('__parent_id')} = ` +
+          `${quote('__parents')}.${quote('__parent_id')}`),
+      ])
+    }
+    return {
+      definitions: [sqlConcat([
+        sqlText(`${itemsCte} AS MATERIALIZED (WITH `),
+        sqlConcat(local, ', '),
+        sqlText(' '),
+        select,
+        sqlText(')'),
+      ])],
+    }
+  }
+
+  /**
+   * Emit the canonical distinct member relation for a batched collection.
+   *
+   * `source` must expose `__parent_id`, `__item_id`, and the member columns.
+   * When filters are present it must also expose `__raw_filter` and
+   * `__raw_filter_matched`; the caller owns how those raw flags are computed.
+   * Duplicate edges are collapsed only after both existential flags are
+   * aggregated, so independent item and matched matches survive.
+   * @param name - CTE name.
+   * @param source - Raw member row query.
+   * @param filtered - Whether independent filter flags are present.
+   * @returns The deduplicated member CTE definition.
+   */
+  #dedupeRowsDefinition(name: string, source: SqlFragment, filtered: boolean): SqlFragment {
+    const parent = quote('__parent_id')
+    const item = quote('__item_id')
+    const partition = `${parent}, ${item}`
+    return sqlConcat([
+      sqlText(`${name} AS MATERIALIZED (SELECT DISTINCT ON (${partition}) *`),
+      filtered
+        ? sqlText(`, bool_or(${quote('__raw_filter')}) OVER (PARTITION BY ${partition}) ` +
+          `AS ${quote('__batch_filter')}, ` +
+          `bool_or(${quote('__raw_filter_matched')}) OVER (PARTITION BY ${partition}) ` +
+          `AS ${quote('__batch_filter_matched')}`)
+        : undefined,
+      sqlText(' FROM ('),
+      source,
+      sqlText(`) AS ${quote('__base')} ORDER BY ${partition})`),
+    ])
+  }
+
+  /**
+   * Add one flat collection envelope to the owning projection.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested collection projection.
+   * @param plan - Emitted item and count CTE names, plus item hydration.
+   * @param plan.hydrateItem - Hydrate one selected item row.
+   * @param plan.itemsCte - JSON item CTE name.
+   */
+  #projectFlatEnvelope(
+    node: ProjectionNode,
+    spec: ProjectedCollectionSpec,
+    plan: {
+      readonly hydrateItem?: (row: Record<string, unknown>) => Record<string, unknown>,
+      readonly itemsCte: string,
+    },
+  ): void {
+    const alias = columnAlias(node.path, spec.collection.name)
+    const matchedAlias = `${alias}__matched`
+    const totalAlias = `${alias}__total`
+    const joinAlias = this.#nextAlias('bc')
+    const ownerAlias = quote(node.context.baseAlias)
+    this.joins.push(sqlText(
+      `LEFT JOIN ${plan.itemsCte} ${quote(joinAlias)} ` +
+      `ON ${quote(joinAlias)}.${quote('__parent_id')} = ${ownerAlias}.${quote('id')}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__items')}, '[]'::json) AS ${quote(alias)}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__matched')}, 0) AS ${quote(matchedAlias)}`,
+    ))
+    this.columns.push(sqlText(
+      `COALESCE(${quote(joinAlias)}.${quote('__total')}, 0) AS ${quote(totalAlias)}`,
+    ))
+    node.projectedCollections.push({
+      alias,
+      hydrate: row => {
+        const raw = row[alias]
+        const entries = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string' ? JSON.parse(raw) as unknown[] : []
+        const matchedTotal = Number(row[matchedAlias] ?? 0)
+        return {
+          $matched: matchedTotal,
+          $total: Number(row[totalAlias] ?? matchedTotal),
+          items: entries.map(entry => {
+            const record = entry as Record<string, unknown>
+            if (plan.hydrateItem === undefined) return record
+            const hydrated = plan.hydrateItem(record)
+            const edge = record.__edge
+            if (edge !== undefined && edge !== null && typeof edge === 'object') {
+              Object.assign(hydrated, edge)
+            }
+            return hydrated
+          }),
+        }
+      },
+      matchedAlias,
+      name: spec.collection.name,
+      totalAlias,
+    })
+  }
+
+  /**
    * Add one projected collection as a correlated child query.
    *
    * Entity-projected and relationship-record collections share the same
@@ -2059,29 +3699,20 @@ class QueryProjection {
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)
-    const authored = plan.collection.kind === 'explicit' ? plan.collection : undefined
-    const limit = spec.limit !== undefined
-      ? spec.limit
-      : authored?.viaLimit !== undefined ? authored.viaLimit : 3
+    const semantics = this.#collectionSemantics(spec, plan)
+    const { filter, limit, offset, orderBy } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
     }
-    const offset = spec.offset !== undefined
-      ? spec.offset
-      : authored?.viaOffset !== undefined ? authored.viaOffset : 0
     if (!Number.isInteger(offset) || offset < 0) {
       throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
     }
-    const orderBy = spec.orderBy ?? authored?.viaOrderBy
     const effective: ProjectedCollectionSpec = {
       ...spec,
       limit,
       offset,
       ...(orderBy === undefined ? {} : { orderBy }),
     }
-    const filter = spec.filters.size === 0
-      ? undefined
-      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const adapter = plan.resultType === 'record'
       ? this.#recordMember(plan, effective)
       : this.#entityMember(plan, effective, key)
@@ -2092,23 +3723,10 @@ class QueryProjection {
     const matched = adapter.compile(filter)
     const matchedForCount = countAdapter.compile(filter)
     const total = filter === undefined ? undefined : countAdapter.compile(undefined)
-    const matchedCount = collectionIdentityCount(
-      matchedForCount,
-      countAdapter.identity,
-      countAdapter.identityUnique,
-    )
-    const totalCount = total === undefined
-      ? undefined
-      : collectionIdentityCount(total, countAdapter.identity, countAdapter.identityUnique)
-    const page = collectionIdentityPage(
-      matched,
-      adapter.identity,
-      orderings,
-      limit,
-      offset,
-      adapter.identityUnique,
-    )
-    const items = collectionItems(page, orderings)
+    const matchedCount = semantics.count(matchedForCount)
+    const totalCount = total === undefined ? undefined : semantics.count(total)
+    const page = semantics.page(matched, orderings)
+    const items = semantics.items(page, orderings)
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
     const totalAlias = totalCount === undefined ? matchedAlias : `${alias}__total`
@@ -2231,8 +3849,7 @@ class QueryProjection {
     }
     return {
       compile,
-      identity: ['id'],
-      identityUnique: true,
+      identity: this.#collectionIdentity(plan),
       orderable: new Set([...fields, ...projectedEdgeFields]),
     }
   }
@@ -2253,7 +3870,7 @@ class QueryProjection {
     if (relationship === undefined) {
       throw new Error(`Record collection "${plan.collection.name}" has no relationship source`)
     }
-    const identity = relationship.between.map(endpoint => endpoint.field)
+    const identity = this.#collectionIdentity(plan)
     const requested = countOnly
       ? new Set(identity)
       : new Set(recordFields(plan, spec.fields))
@@ -2291,7 +3908,6 @@ class QueryProjection {
     return {
       compile,
       identity,
-      identityUnique: true,
       orderable: new Set(fields),
     }
   }
@@ -2302,27 +3918,17 @@ class QueryProjection {
    * @returns `true` when the owner/target pair is unique per edge.
    */
   #edgeProjectionAllowed(plan: CollectionRelationPlan): boolean {
-    const collection = plan.collection
-    if (collection.kind !== 'explicit') return true
-    const relationship = collection.relationship
-    if (relationship.between.length === 2) return true
-    const target = collection.targetEndpoint
-    if (!target) return false
-    return relationship.constraints.some(constraint => (
-      constraint.type === Constraint.Structural
-      && constraint.fields.length === 2
-      && constraint.fields.includes(collection.ownerEndpoint.field)
-      && constraint.fields.includes(target.field)
-    ))
+    return this.#edgeProjectionAllowedCollection(plan.collection)
   }
 
   /**
    * Build one correlated relationship-owned projection object.
    * @param plan - Collection relation plan.
    * @param fields - Relationship-owned property names.
-   * @returns JSON object SQL with the owning row correlated as `__child`.
+   * @param target - Alias or quoted identifier of the target identity row.
+   * @returns JSON object SQL correlated to the target identity.
    */
-  #edgeProjection(plan: CollectionRelationPlan, fields: readonly string[]): SqlFragment {
+  #edgeProjection(plan: CollectionRelationPlan, fields: readonly string[], target = quote('__child')): SqlFragment {
     const relationship = plan.relationship
     const relationshipAlias = plan.relationshipAlias
     const remote = plan.targetEndpoint
@@ -2348,7 +3954,7 @@ class QueryProjection {
       `${quote(relationship.name)} ${quote(relationshipAlias)}`,
       ' WHERE ', plan.condition, predicate, ' AND ',
       `${quote(relationshipAlias)}.${quote(`${remote.field}.id`)} = ` +
-        `${quote('__child')}.${quote('id')})`,
+        `${target}.${quote('id')})`,
     ])
   }
 
@@ -2570,6 +4176,7 @@ class QueryProjection {
       context,
       fieldNames: new Set(),
       fields: [],
+      joins: [...this.joins],
       path,
       projectedCollections: [],
       projectedSpecs: new Map(),
@@ -2595,8 +4202,8 @@ class QueryProjection {
    * @returns Unique alias.
    */
   #nextAlias(prefix: string): string {
-    this.#alias += 1
-    return `${this.#aliasPrefix}${prefix}${this.#alias}`
+    this.#shared.alias += 1
+    return `${this.#aliasPrefix}${prefix}${this.#shared.alias}`
   }
 }
 
@@ -2647,6 +4254,9 @@ export function compilePolymorphicQuery(
     options.rootAlias,
     options.aliasPrefix,
     options.relationPrefix,
+    undefined,
+    undefined,
+    undefined,
   )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
@@ -2694,10 +4304,6 @@ export function compilePolymorphicQuery(
       `${projection.root.baseAlias}."id" ASC`
   }
   const rawValues = options.rawWhere?.values ?? []
-  const hydrate = projection.build(options.fields, predicate.values.length + rawValues.length + 1)
-  const rootRelation = projection.relation(definition.name)
-  const relationDefinitions = projection.relationDefinitions()
-
   const leaves = definition.abstract
     ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
     : []
@@ -2715,16 +4321,40 @@ export function compilePolymorphicQuery(
       : sqlFragment`WHERE ${sqlConcat(conditions.map(condition => sqlFragment`(${condition})`), ' AND ')}`
   const limit = options.limit === undefined ? 25 : options.limit
   const pagination = SQL.paginate(limit, options.offset ?? 0)
-  const query = sqlConcat([
-    relationDefinitions.length === 0
-      ? sqlText('')
-      : sqlText(`WITH ${relationDefinitions.join(', ')}`),
-    sqlFragment`SELECT ${sqlConcat(projection.columns, ', ')}`,
-    sqlFragment`FROM ${sqlText(rootRelation)} ${sqlText(`"${projection.root.baseAlias}"`)}`,
-    ...projection.joins,
-    whereSql,
-    sqlText(ordering),
+  const rootRelation = projection.relation(definition.name)
+  projection.setRootSelection({
+    joins: [...projection.joins],
+    ordering,
     pagination,
+    where: whereSql,
+  })
+  const hydrate = projection.build(
+    options.fields,
+    predicate.values.length + rawValues.length + 1,
+    predicate.sql === '' ? undefined : predicate as SqlFragment,
+  )
+  const rootBase = projection.rootBasePlan()
+  const finalJoins = rootBase === undefined
+    ? projection.joins
+    : projection.joins.slice(rootBase.joins)
+  const finalRoot = rootBase?.relation ?? rootRelation
+  const finalWhere = rootBase === undefined ? whereSql : sqlText('')
+  const finalPagination = rootBase === undefined ? pagination : undefined
+  const relationDefinitions = [
+    ...projection.relationDefinitions().map(relation => sqlText(relation)),
+    ...projection.batchDefinitions(),
+  ]
+  const relationSql = relationDefinitions.length === 0
+    ? undefined
+    : sqlConcat(relationDefinitions, ', ')
+  const query = sqlConcat([
+    relationSql === undefined ? sqlText('') : sqlConcat([sqlText('WITH '), relationSql], ''),
+    sqlFragment`SELECT ${sqlConcat(projection.columns, ', ')}`,
+    sqlFragment`FROM ${sqlText(finalRoot)} ${sqlText(`"${projection.root.baseAlias}"`)}`,
+    ...finalJoins,
+    finalWhere,
+    sqlText(ordering),
+    finalPagination,
   ])
   const compiled = { hydrate, sql: query.sql, values: query.values }
   Object.defineProperty(compiled, 'pieces', { enumerable: false, value: query.pieces })
@@ -2915,78 +4545,38 @@ interface CollectionOrdering {
 }
 
 /**
- * Quote one alias-qualified identity tuple.
- * @param alias - Relation alias.
- * @param identity - Output aliases forming the identity.
- * @returns Comma-separated quoted columns.
- */
-function identityColumns(alias: string, identity: readonly string[]): string {
-  return identity.map(name => `${quote(alias)}.${quote(name)}`).join(', ')
-}
-
-/**
- * Count distinct result identities in one member query.
- * @param member - Member query before identity selection.
- * @param identity - Output aliases forming the identity.
- * @param unique - Whether member rows are already unique by identity.
+ * Count result identities in one member query.
+ *
+ * Every member adapter guarantees one row per result identity.
+ * @param member - Member query.
  * @returns The count fragment.
  */
-function collectionIdentityCount(
-  member: SqlFragment,
-  identity: readonly string[],
-  unique: boolean,
-): SqlFragment {
-  if (unique) {
-    return sqlConcat(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
-  }
-  return sqlConcat([
-    'SELECT count(*)::int FROM (SELECT DISTINCT ON (',
-    identityColumns('__member', identity),
-    ') * FROM (',
-    member,
-    ') AS "__member") AS "__distinct"',
-  ])
+function collectionIdentityCount(member: SqlFragment): SqlFragment {
+  return sqlConcat(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
 }
 
 /**
- * Select distinct identities after filtering, then order and page them.
- * @param member - Member query before identity selection.
- * @param identity - Output aliases forming the identity.
+ * Order and page member identities.
+ *
+ * Every member adapter guarantees one row per result identity.
+ * @param member - Member query.
  * @param orderings - Requested and stable ordering.
  * @param limit - Page size, or null for unlimited.
  * @param offset - Rows to skip.
- * @param unique - Whether member rows are already unique by identity.
  * @returns The ordered and paged identity query.
  */
 function collectionIdentityPage(
   member: SqlFragment,
-  identity: readonly string[],
   orderings: readonly CollectionOrdering[],
   limit: number | null,
   offset: number,
-  unique: boolean,
 ): SqlFragment {
   const order = orderings
     .map(entry => `${quote('__member')}.${quote(entry.name)} ${entry.direction}`)
     .join(', ')
-  if (unique) {
-    const paged = sqlConcat([
-      'SELECT * FROM (', member, ') AS "__member"',
-      order === '' ? undefined : ` ORDER BY ${order}`,
-    ])
-    return sqlConcat([paged, SQL.paginate(limit, offset)])
-  }
-  const distinct = sqlConcat([
-    'SELECT DISTINCT ON (', identityColumns('__member', identity), ') * FROM (',
-    member,
-    ') AS "__member" ORDER BY ', identityColumns('__member', identity),
-  ])
-  const distinctOrder = orderings
-    .map(entry => `${quote('__distinct')}.${quote(entry.name)} ${entry.direction}`)
-    .join(', ')
   const paged = sqlConcat([
-    'SELECT * FROM (', distinct, ') AS "__distinct"',
-    distinctOrder === '' ? undefined : ` ORDER BY ${distinctOrder}`,
+    'SELECT * FROM (', member, ') AS "__member"',
+    order === '' ? undefined : ` ORDER BY ${order}`,
   ])
   return sqlConcat([paged, SQL.paginate(limit, offset)])
 }
@@ -3115,12 +4705,16 @@ function recordProjectionView(relationship: RelationshipDefinition): EntityDefin
  * Resolve one record field to its physical SQL column.
  * @param plan - Record collection relation plan.
  * @param name - Logical endpoint or property name.
+ * @param alias - Optional relationship alias override.
  * @returns The qualified SQL column.
  * @throws {Error} When the relationship does not declare the field.
  */
-function recordColumn(plan: CollectionRelationPlan, name: string): string {
+function recordColumn(
+  plan: CollectionRelationPlan,
+  name: string,
+  alias = plan.relationshipAlias,
+): string {
   const relationship = plan.relationship
-  const alias = plan.relationshipAlias
   if (relationship === undefined || alias === undefined) {
     throw new Error(`Record collection "${plan.collection.name}" has no relationship source`)
   }
@@ -3308,4 +4902,15 @@ function quote(value: string): string {
  */
 function quoteLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
+}
+
+/**
+ * Remove PostgreSQL identifier quoting.
+ * @param value - Quoted identifier.
+ * @returns Unquoted identifier.
+ */
+function unquoteIdentifier(value: string): string {
+  return value.startsWith('"') && value.endsWith('"')
+    ? value.slice(1, -1).replaceAll('""', '"')
+    : value
 }
