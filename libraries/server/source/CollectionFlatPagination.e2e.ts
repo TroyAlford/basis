@@ -348,4 +348,69 @@ describe('flat collection pagination', () => {
     })
   })
 
+  test('keeps asymmetric item and matched domains across distinct targets with paging', async () => {
+    await withDatabase('flat-edge-filter-asymmetric', ownerUser, async database => {
+      const definition = database.entities.entity('Parent')
+      if (definition === undefined) throw new Error('Parent definition missing')
+      const compile = (offset: number) => compilePolymorphicQuery(
+        database.entities,
+        definition,
+        {
+          fields: ['id', `children[rank = 100]{$limit:1,$offset:${offset}}`, 'children.label'],
+          where: { id: parent },
+        },
+      )
+      const run = async (
+        compiled: ReturnType<typeof compile>,
+        itemRank: number,
+        matchedRank: number,
+      ): Promise<{ children: { $matched: number, $total: number, items: { id: string }[] } }> => {
+        const positions: number[] = []
+        compiled.values.forEach((value, index) => { if (value === 100) positions.push(index) })
+        expect(positions).toHaveLength(2)
+        const values = [...compiled.values]
+        values[positions[0] as number] = itemRank
+        values[positions[1] as number] = matchedRank
+        const rows = await database.sql.unsafe<Record<string, unknown>[]>(compiled.sql, values)
+        return compiled.hydrate(rows[0] as Record<string, unknown>) as {
+          children: { $matched: number, $total: number, items: { id: string }[] },
+        }
+      }
+      const firstPage = compile(0)
+      expect(firstPage.sql).toContain('flat_selected_')
+      const first = await run(firstPage, 1, 2)
+      expect(first.children.items.map(item => item.id)).toEqual([child(0)])
+      expect(first.children.$matched).toBe(1)
+      expect(first.children.$total).toBe(2)
+      const reverse = await run(firstPage, 2, 1)
+      expect(reverse.children.items.map(item => item.id)).toEqual([child(1)])
+      expect(reverse.children.$matched).toBe(2)
+      expect(reverse.children.$total).toBe(2)
+      const secondPage = await run(compile(1), 1, 2)
+      expect(secondPage.children.items.map(item => item.id)).toEqual([child(1)])
+      expect(secondPage.children.$matched).toBe(1)
+      expect(secondPage.children.$total).toBe(2)
+    }, {
+      graph,
+      setup: async (database: DatabaseContext) => {
+        await database.create('User', { id: ownerUser, label: 'Owner', name: 'Owner' })
+        await database.create('Parent', { id: parent, label: 'Parent', name: 'Parent', owner: ownerUser })
+        await database.create('Child', [
+          { id: child(0), label: 'Child 0', name: 'Child 0', owner: ownerUser },
+          { id: child(1), label: 'Child 1', name: 'Child 1', owner: ownerUser },
+        ])
+        await database.create('Tag', [
+          { id: '00000000-0000-4000-8000-000000000b01', label: 'Tag 1', name: 'Tag 1' },
+          { id: '00000000-0000-4000-8000-000000000b02', label: 'Tag 2', name: 'Tag 2' },
+        ])
+        await database.sql`
+          INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id", "rank")
+          VALUES
+            (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b01', 1),
+            (${parent}, ${child(1)}, '00000000-0000-4000-8000-000000000b01', 1),
+            (${parent}, ${child(1)}, '00000000-0000-4000-8000-000000000b02', 2)
+        `
+      },
+    })
+  })
 })

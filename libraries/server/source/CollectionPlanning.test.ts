@@ -485,3 +485,27 @@ describe('chosen collection compilation', () => {
     expect(record.sql).not.toContain('LEFT JOIN LATERAL')
   })
 })
+
+describe('abstract collection targets', () => {
+  test('use the correlated planner without a flat batch', () => {
+    const abstract = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'label', type: 'String' },
+            { field: 'parent', inverse: 'children', target: 'Node', type: 'Entity' },
+            { cardinality: 'Many', field: 'children', inverse: 'parent', target: 'Node', type: 'Inverse' },
+          ],
+          name: 'Node',
+        },
+        { extends: 'Node', fields: [], name: 'Child' },
+      ],
+    })
+    const compiled = compileEntityQuery(abstract.definitions, 'Child', {
+      fields: ['id', 'children{$limit:null}', 'children.label'],
+    })
+    expect(compiled.sql).toContain('LEFT JOIN LATERAL')
+    expect(compiled.sql).not.toContain('flat_items_')
+    expect(compiled.sql).toContain('authorized_Node')
+  })
+})

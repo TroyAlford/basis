@@ -25,18 +25,18 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor  | statement     | rows | params | direct median | direct range |  EXPLAIN |    plan | shared hits |
 | ------ | ------------- | ---: | -----: | ------------: | -----------: | -------: | ------: | ----------: |
-| owner | pre-#364 | 106 | 11 | 628.7 ms | 612.3–650.6 | 588.3 ms | 29.6 ms | 12,977 |
-| owner | #364 previous | 106 | 7 | 29.3 ms | 27.6–30.1 | 33.5 ms | 26.1 ms | 5,300 |
-| owner | flat current | 106 | 11 | 12.4 ms | 11.8–16.7 | 13.8 ms | 8.1 ms | 1,498 |
-| owner | N7 | 106 | 11 | 11.9 ms | 10.6–13.2 | 11.1 ms | 7.8 ms | 853 |
-| editor | pre-#364 | 106 | 11 | 746.9 ms | 735.6–758.7 | 711.4 ms | 29.2 ms | 36,167 |
-| editor | #364 previous | 106 | 7 | 159.5 ms | 153.4–163.0 | 157.8 ms | 26.2 ms | 20,365 |
-| editor | flat current | 106 | 11 | 46.4 ms | 45.4–51.3 | 51.7 ms | 7.3 ms | 4,355 |
-| editor | N7 | 106 | 11 | 57.3 ms | 53.8–59.9 | 46.5 ms | 6.6 ms | 3,712 |
-| viewer | pre-#364 | 106 | 11 | 807.7 ms | 806.7–849.6 | 784.0 ms | 28.5 ms | 37,401 |
-| viewer | #364 previous | 106 | 7 | 123.4 ms | 122.1–132.1 | 136.4 ms | 26.7 ms | 21,204 |
-| viewer | flat current | 106 | 11 | 49.5 ms | 47.6–55.3 | 52.8 ms | 7.0 ms | 4,560 |
-| viewer | N7 | 106 | 11 | 48.4 ms | 46.3–50.2 | 51.5 ms | 6.9 ms | 3,915 |
+| owner  | pre-#364      |  106 |     11 |      628.7 ms |  612.3–650.6 | 588.3 ms | 29.6 ms |      12,977 |
+| owner  | #364 previous |  106 |      7 |       29.3 ms |    27.6–30.1 |  33.5 ms | 26.1 ms |       5,300 |
+| owner  | flat current  |  106 |     11 |       12.4 ms |    11.8–16.7 |  13.8 ms |  8.1 ms |       1,498 |
+| owner  | N7            |  106 |     11 |       11.9 ms |    10.6–13.2 |  11.1 ms |  7.8 ms |         853 |
+| editor | pre-#364      |  106 |     11 |      746.9 ms |  735.6–758.7 | 711.4 ms | 29.2 ms |      36,167 |
+| editor | #364 previous |  106 |      7 |      159.5 ms |  153.4–163.0 | 157.8 ms | 26.2 ms |      20,365 |
+| editor | flat current  |  106 |     11 |       46.4 ms |    45.4–51.3 |  51.7 ms |  7.3 ms |       4,355 |
+| editor | N7            |  106 |     11 |       57.3 ms |    53.8–59.9 |  46.5 ms |  6.6 ms |       3,712 |
+| viewer | pre-#364      |  106 |     11 |      807.7 ms |  806.7–849.6 | 784.0 ms | 28.5 ms |      37,401 |
+| viewer | #364 previous |  106 |      7 |      123.4 ms |  122.1–132.1 | 136.4 ms | 26.7 ms |      21,204 |
+| viewer | flat current  |  106 |     11 |       49.5 ms |    47.6–55.3 |  52.8 ms |  7.0 ms |       4,560 |
+| viewer | N7            |  106 |     11 |       48.4 ms |    46.3–50.2 |  51.5 ms |  6.9 ms |       3,915 |
 
 Projected references now materialize only the reachable identities selected by their parent rows: root references share the selected-root set, and each nested reference source gets its own restricted CTE. That removes the broad `authorized_CustomCard`/`OfficialCard`/`Workspace`/`CardEdition`/`Art` scans from the previous head and reduces shared-buffer work for every actor. The owner and editor direct medians are at or below N7 in this run; the viewer median is within 1.1 ms. The generated statement is 88 `SELECT`s with 45 `AS MATERIALIZED` clauses (and 3 `row_number()` calls), versus N7's 35 and 19. The three physical collection planners now share the same identity, dedupe, count, matched-count, paging, and item-aggregation rules. The multi-deck differential and selected-reachability scaling test both pass.
 
