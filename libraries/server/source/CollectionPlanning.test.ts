@@ -371,7 +371,7 @@ describe('flattened collection compilation', () => {
     expect(sql).not.toContain('LEFT JOIN LATERAL')
     expect(sql).not.toContain('authorized_batch_')
     expect(sql).not.toContain('authorized_nested_')
-    expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(3)
+    expect(count(sql, /"flat_base_\w+" AS MATERIALIZED/gu)).toBe(2)
     expect(count(sql, /"flat_selected_\w+" AS MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"flat_unique_\w+" AS MATERIALIZED/gu)).toBe(1)
     expect(count(sql, /"flat_rows_\w+" AS MATERIALIZED/gu)).toBe(0)

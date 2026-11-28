@@ -895,8 +895,8 @@ describe('Query contract', () => {
       fields: ['id'],
       where: "pets $contains (title = 'Ada' $and owner.title = 'Grace')",
     })
-    expect(bracketed.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Pet"/gu)).toHaveLength(2)
-    expect(grouped.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Pet"/gu)).toHaveLength(1)
+    expect(bracketed.sql.match(/IN \( SELECT DISTINCT/gu)).toHaveLength(2)
+    expect(grouped.sql.match(/IN \( SELECT DISTINCT/gu)).toHaveLength(1)
     expect(bracketed.values).toEqual(['Ada', 'Grace', 25, 0])
 
     const all = compileEntityQuery(relationshipDefinitions, 'User', {
@@ -908,7 +908,7 @@ describe('Query contract', () => {
       where: "pets !$contains ($not (title = 'Ada'))",
     })
     expect(all.sql).toContain('NOT EXISTS (SELECT 1 FROM "authorized_Pet"')
-    expect(explicitNegation.sql).toContain('EXISTS (SELECT 1 FROM "authorized_Pet"')
+    expect(explicitNegation.sql).toContain('IN ( SELECT DISTINCT "ct1"."owner.id" FROM "authorized_Pet"')
     expect(all.sql).not.toBe(explicitNegation.sql)
     expect(all.values).toEqual(explicitNegation.values)
 
@@ -1075,7 +1075,7 @@ describe('Query contract', () => {
       limit: null,
       where: "toys $contains (label = 'ball')",
     })
-    expect(nested.sql).toMatch(/EXISTS \(SELECT 1 FROM "authorized_Toy"/u)
+    expect(nested.sql).toContain('IN ( SELECT DISTINCT "ct1"."pet.id" FROM "authorized_Toy"')
     expect(nested.sql).toContain('"pet.id"')
 
     const composed = compileEntityQuery(nestedDefinitions, 'Pet', {
@@ -1083,15 +1083,15 @@ describe('Query contract', () => {
       limit: null,
       where: "owner.pets $contains (label = 'Rex')",
     })
-    expect(composed.sql).toContain('"owner.id" = "b1"."id"')
-    expect(composed.sql).toMatch(/EXISTS \(SELECT 1 FROM "authorized_Pet"/u)
+    expect(composed.sql).toContain('"b1"."id" IN ( SELECT DISTINCT "ct2"."owner.id" FROM "authorized_Pet"')
+    expect(composed.sql).toContain('IN ( SELECT DISTINCT "ct2"."owner.id" FROM "authorized_Pet"')
 
     const memberNested = compileEntityQuery(nestedDefinitions, 'User', {
       fields: ['id'],
       limit: null,
       where: "pets $contains (toys $contains (label = 'ball'))",
     })
-    expect(memberNested.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Toy"/gu)).toHaveLength(1)
+    expect(memberNested.sql.match(/IN \( SELECT DISTINCT/gu)).toHaveLength(2)
     expect(memberNested.sql).toContain('"pet.id"')
 
     const sameMember = compileEntityQuery(nestedDefinitions, 'User', {
@@ -1099,7 +1099,7 @@ describe('Query contract', () => {
       limit: null,
       where: "pets $contains (label = 'Rex' AND toys $contains (label = 'ball'))",
     })
-    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Pet"/gu)).toHaveLength(1)
-    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "authorized_Toy"/gu)).toHaveLength(1)
+    expect(sameMember.sql.match(/IN \( SELECT DISTINCT/gu)).toHaveLength(2)
+    expect(sameMember.sql.match(/IN \( SELECT DISTINCT/gu)).toHaveLength(2)
   })
 })

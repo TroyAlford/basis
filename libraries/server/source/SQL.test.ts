@@ -832,7 +832,7 @@ describe('SQL.where', () => {
       fields: ['id', 'pets', 'pets.toys', 'pets.toys.label'],
     })
     expect(compiled.sql).not.toContain('LEFT JOIN LATERAL')
-    expect(compiled.sql).toContain('"flat_base_')
+    expect(compiled.sql).toContain('"flat_unique_')
     expect(compiled.sql).toContain('"toys"')
     expect(compiled.sql).toContain('"pets"')
   })

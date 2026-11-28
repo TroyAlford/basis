@@ -73,10 +73,17 @@ export interface CollectionScope {
   readonly filterCount?: (name: string) => CountScope | undefined,
   /** Classify terminal reference identities inside the collection. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
+  /** Parent identity expression for a root-selectable collection. */
+  readonly parentId?: string,
   /** Authored source predicate applied to the collection relation. */
   readonly predicate?: SqlFragment,
   /** SQL relation containing the related items. */
   readonly relation: string,
+  /** Build an uncorrelated parent-id selection for a member requirement. */
+  readonly selectParents?: (
+    member: SqlFragment,
+    predicate: SqlFragment,
+  ) => SqlFragment,
   /** Concrete physical variants for descendant-only sibling collections. */
   readonly variants?: readonly CollectionScopeVariant[],
   /** Expanded relation join work emitted by this scope. */
@@ -690,6 +697,13 @@ function whereFilter(
       const predicate = collection.predicate === undefined
         ? sqlText('')
         : sqlFragment` AND (${literalFragment(asFragment(collection.predicate))})`
+      if (collection.selectParents !== undefined && collection.parentId !== undefined) {
+        return sqlConcat([
+          sqlText(`${collection.parentId} IN (`),
+          collection.selectParents(inner, predicate),
+          sqlText(')'),
+        ])
+      }
       const relation = sqlText(collection.relation)
       const condition = sqlText(collection.condition)
       const body = sqlFragment`${condition}${predicate} AND (${inner})`

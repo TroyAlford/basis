@@ -2367,6 +2367,17 @@ class QueryProjection {
       field: resolve,
       filterCount: path => counts.get(path),
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
+      ...(plan.ownerId === undefined ? {} : {
+        parentId: `${quote(resolved.parentAlias)}.${quote('id')}`,
+        selectParents: (member, predicate) => sqlConcat([
+          sqlText(`SELECT DISTINCT ${plan.ownerId} FROM ` +
+            `${sqlConcat([plan.relation, ...joins]).sql} WHERE TRUE`),
+          predicate,
+          sqlText(' AND ('),
+          member,
+          sqlText(')'),
+        ]),
+      }),
       predicate: plan.predicate as SqlFragment,
       get relation() { return sqlConcat([plan.relation, ...joins]).sql },
       get work() { return plan.work + joins.length },
@@ -3233,7 +3244,7 @@ class QueryProjection {
       && remote !== undefined
       && spec.edgeFields.size === 0
       && (filterPredicate === undefined || !filterPredicate.sql.includes(quote(relationshipAlias)))
-    let baseDefinition: SqlFragment
+    let baseQuery: SqlFragment
     if (splitTarget && relationshipAlias !== undefined && plan.relationship !== undefined && remote !== undefined) {
       /*
        * Materialize the owned edges once, then authorize each distinct target
@@ -3252,19 +3263,17 @@ class QueryProjection {
           `(SELECT ${remoteId} FROM ${sourceCte} AS ${quote('__edge_row')}))`),
       ], ''))
       this.#markAvailable(targetsCte)
-      baseDefinition = sqlConcat([
-        sqlText(`${baseCte} AS MATERIALIZED (`),
+      baseQuery = sqlConcat([
         sqlText(`SELECT ${quote('__edge_row')}.${quote('__parent_id')}, `),
         sqlText(`${targetAlias}.${quote('id')} AS ${quote('__item_id')}, `),
         sqlText(`${targetAlias}.*`),
         filterProjection,
         sqlText(` FROM ${sourceCte} AS ${quote('__edge_row')} `),
         sqlText(`JOIN ${targetsCte} ${targetAlias} ` +
-          `ON ${targetAlias}.${quote('id')} = ${quote('__edge_row')}.${quote(`${remote.field}.id`)})`),
+          `ON ${targetAlias}.${quote('id')} = ${quote('__edge_row')}.${quote(`${remote.field}.id`)}`),
       ], '')
     } else {
-      baseDefinition = sqlConcat([
-        sqlText(`${baseCte} AS MATERIALIZED (`),
+      baseQuery = sqlConcat([
         sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, `),
         sqlText(`${quote(plan.targetAlias)}.${quote('id')} AS ${quote('__item_id')}, `),
         sqlText(`${quote(plan.targetAlias)}.*`),
@@ -3274,16 +3283,21 @@ class QueryProjection {
         sqlText(`JOIN ${parentSource} ${quote(parentAlias)} ON TRUE `),
         sqlText(`WHERE ${plan.condition}`),
         collectionPredicate,
-        sqlText(')'),
       ], '')
     }
-    this.#batchDefinitions.push(baseDefinition)
-    this.#markAvailable(baseCte)
-    this.#flushReachable()
     const selectedPath = plan.resultType === 'entity'
       && plan.ownerId !== undefined
       && plan.targetAlias !== undefined
       && (filterPredicate !== undefined || limit !== null || offset > 0)
+    if (!selectedPath) {
+      this.#batchDefinitions.push(sqlConcat([
+        sqlText(`${baseCte} AS MATERIALIZED (`),
+        baseQuery,
+        sqlText(')'),
+      ], ''))
+      this.#markAvailable(baseCte)
+    }
+    this.#flushReachable()
     const selectedCte = quote(`flat_selected_${suffix}`)
     const uniqueBaseCte = quote(`flat_unique_${suffix}`)
     const selectedNeeded = selectedPath
@@ -3305,7 +3319,9 @@ class QueryProjection {
             `bool_or(${quote('__batch_filter_matched')}) OVER (` +
             `PARTITION BY ${quote('__parent_id')}, ${quote('__item_id')}) ` +
             `AS ${quote('__batch_filter_matched_agg')}`),
-        sqlText(` FROM ${baseCte} ORDER BY ${quote('__parent_id')}, ${quote('__item_id')})`),
+        sqlText(' FROM ('),
+        baseQuery,
+        sqlText(`) AS ${quote('__base')} ORDER BY ${quote('__parent_id')}, ${quote('__item_id')})`),
       ], ''))
       this.#markAvailable(uniqueBaseCte)
       const selectedSource: SqlFragment = filterPredicate === undefined

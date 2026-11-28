@@ -25,22 +25,22 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor  | statement     | rows | params | direct median | direct range |  EXPLAIN |    plan | shared hits |
 | ------ | ------------- | ---: | -----: | ------------: | -----------: | -------: | ------: | ----------: |
-| owner  | pre-#364      |  106 |     11 |      637.6 ms |  634.0–667.6 | 618.5 ms | 29.5 ms |      12,977 |
-| owner  | #364 previous |  106 |      7 |       29.2 ms |    28.4–29.7 |  34.6 ms | 26.2 ms |       5,300 |
-| owner  | flat current  |  106 |     11 |       13.9 ms |    12.1–15.1 |  14.1 ms |  8.0 ms |       1,498 |
-| owner  | N7            |  106 |     11 |       12.2 ms |    11.7–13.6 |  11.1 ms |  7.2 ms |         853 |
-| editor | pre-#364      |  106 |     11 |      750.6 ms |  727.7–775.9 | 708.2 ms | 29.1 ms |      36,167 |
-| editor | #364 previous |  106 |      7 |      162.2 ms |  159.3–166.7 | 169.4 ms | 26.7 ms |      20,365 |
-| editor | flat current  |  106 |     11 |       51.0 ms |    47.4–52.2 |  50.4 ms |  8.2 ms |       4,355 |
-| editor | N7            |  106 |     11 |       58.5 ms |    52.9–60.3 |  48.7 ms |  6.7 ms |       3,712 |
-| viewer | pre-#364      |  106 |     11 |      813.2 ms |  800.8–885.2 | 830.3 ms | 29.8 ms |      37,401 |
-| viewer | #364 previous |  106 |      7 |      142.3 ms |  139.0–158.2 | 133.1 ms | 25.7 ms |      21,204 |
-| viewer | flat current  |  106 |     11 |       50.9 ms |    47.9–54.8 |  50.3 ms |  7.5 ms |       4,560 |
-| viewer | N7            |  106 |     11 |       49.6 ms |    47.6–55.5 |  44.5 ms |  6.5 ms |       3,915 |
+| owner  | pre-#364      |  106 |     11 |      643.6 ms |  635.9–650.8 | 612.1 ms | 29.7 ms |      12,977 |
+| owner  | #364 previous |  106 |      7 |       29.3 ms |    28.6–29.6 |  35.2 ms | 26.8 ms |       5,300 |
+| owner  | flat current  |  106 |     11 |       12.4 ms |    12.1–13.8 |  14.6 ms |  8.1 ms |       1,498 |
+| owner  | N7            |  106 |     11 |       12.6 ms |    10.9–13.0 |  11.6 ms |  7.6 ms |         853 |
+| editor | pre-#364      |  106 |     11 |      750.4 ms |  723.7–778.5 | 710.0 ms | 28.2 ms |      36,167 |
+| editor | #364 previous |  106 |      7 |      160.5 ms |  157.4–162.1 | 160.7 ms | 26.1 ms |      20,365 |
+| editor | flat current  |  106 |     11 |       49.6 ms |    47.0–53.7 |  51.5 ms |  7.3 ms |       4,355 |
+| editor | N7            |  106 |     11 |       56.9 ms |    54.8–58.7 |  48.2 ms |  6.6 ms |       3,712 |
+| viewer | pre-#364      |  106 |     11 |      810.6 ms |  800.2–826.4 | 822.7 ms | 28.9 ms |      37,401 |
+| viewer | #364 previous |  106 |      7 |      138.2 ms |  137.1–143.5 | 132.8 ms | 25.8 ms |      21,204 |
+| viewer | flat current  |  106 |     11 |       50.5 ms |    46.3–51.9 |  50.1 ms |  7.8 ms |       4,560 |
+| viewer | N7            |  106 |     11 |       49.2 ms |    46.7–49.5 |  46.5 ms |  6.8 ms |       3,915 |
 
-Projected references now materialize only the reachable identities selected by their parent rows: root references share the selected-root set, and each nested reference source gets its own restricted CTE. That removes the broad `authorized_CustomCard`/`OfficialCard`/`Workspace`/`CardEdition`/`Art` scans from the previous head and reduces shared-buffer work for every actor. The editor and viewer direct medians are within N7's repeatable range (editor is faster in this run); the owner median remains about 1.14× N7. The remaining owner difference is concentrated in the deck/member aggregation and root-selection stages; the plan JSON records those nodes. The multi-deck differential and selected-reachability scaling test both pass.
+Projected references now materialize only the reachable identities selected by their parent rows: root references share the selected-root set, and each nested reference source gets its own restricted CTE. That removes the broad `authorized_CustomCard`/`OfficialCard`/`Workspace`/`CardEdition`/`Art` scans from the previous head and reduces shared-buffer work for every actor. The owner and editor direct medians are at or below N7 in this run; the viewer median is within 1.3 ms. The generated statement is 88 `SELECT`s with 45 `AS MATERIALIZED` clauses (and 3 `row_number()` calls), versus N7's 35 and 19. The remaining syntactic difference is shared aggregation/authorization structure, not an unaddressed broad materialization. The multi-deck differential and selected-reachability scaling test both pass.
 
-All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. At this revision the current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 19.4 ms (owner), 64.4 ms (editor), and 60.1 ms (viewer). Subtracting the direct medians gives roughly 5.5 ms, 13.4 ms, and 9.2 ms of mapping/hydration work. These totals and the direct medians come from the same run and fixture.
+All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. At this revision the current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 17.8 ms (owner), 62.1 ms (editor), and 54.0 ms (viewer). Subtracting the direct medians gives roughly 5.4 ms, 12.5 ms, and 3.5 ms of mapping/hydration work. These totals and the direct medians come from the same run and fixture.
 
 ## Policy observation
 
