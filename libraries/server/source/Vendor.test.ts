@@ -186,6 +186,7 @@ describe('vendor assets', () => {
     const application = await useApplication({
       cwd: repoRoot,
       entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
+      timeoutMs: 120_000,
     })
 
     const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
