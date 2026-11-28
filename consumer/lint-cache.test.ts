@@ -2,7 +2,7 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { collectLintTargets, computeLintCacheKey, erroredLintTargets, filterIgnoredTargets, hashContent, pendingLintTargets } from './lint-cache'
+import { collectLintTargets, computeLintCacheKey, erroredLintTargets, hashContent, ignoredLintTargets, pendingLintTargets } from './lint-cache'
 
 describe('lint cache targets', () => {
   test('collects source files while skipping generated and dependency trees', () => {
@@ -122,13 +122,23 @@ describe('cache invalidation inputs', () => {
     }
   })
 
-  test('filters paths the effective config ignores', async () => {
-    const root = tempDirectory('basis-cache-ignore')
-    try {
-      const config = join(root, 'eslint.config.mjs')
-      writeFileSync(config, "export default [{ ignores: ['ignored/**'] }]\n")
+})
 
-      expect(await filterIgnoredTargets(root, ['src/a.ts', 'ignored/b.ts'], config)).toEqual(['src/a.ts'])
+describe('ignored target attribution', () => {
+  test('identifies files Bun reported as ignored', () => {
+    const root = tempDirectory('basis-cache-ignored')
+    try {
+      const output = [
+        join(root, 'src', 'a.ts'),
+        '  0:0  warning  File ignored because of a matching ignore pattern.',
+        '',
+        join(root, 'src', 'b.ts'),
+        '  0:0  warning  File ignored because of a matching ignore pattern.',
+        '::warning file=src/c.ts,line=1,col=1::File ignored because of a matching ignore pattern.',
+      ].join('\n')
+
+      expect(ignoredLintTargets(output, root, ['src/a.ts', 'src/b.ts', 'src/c.ts']))
+        .toEqual(new Set(['src/a.ts', 'src/b.ts', 'src/c.ts']))
     } finally {
       rmSync(root, { force: true, recursive: true })
     }

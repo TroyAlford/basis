@@ -3,7 +3,8 @@ import { run, runAsync } from 'basis/utilities'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { collectLintTargets, computeLintCacheKey, erroredLintTargets, filterIgnoredTargets, hashFile, lintCachePath, pendingLintTargets, readLintCache, writeLintCache } from './lint-cache'
+import type { LintCache } from './lint-cache'
+import { collectLintTargets, computeLintCacheKey, erroredLintTargets, hashFile, ignoredLintTargets, lintCachePath, pendingLintTargets, readLintCache, writeLintCache } from './lint-cache'
 
 /** Flat ESLint config filenames Bun discovers automatically. */
 const ESLINT_CONFIG_FILES = [
@@ -109,17 +110,11 @@ export const runBunLint = async (
   if (!requireBunLint()) return 1
 
   const cwd = process.cwd()
-  let allTargets = target === '.' ? collectLintTargets(cwd) : [target]
-  let cacheEligible = target === '.'
-
-  if (cacheEligible) {
-    const filtered = await filterIgnoredTargets(cwd, allTargets, configPath)
-    if (filtered === null) cacheEligible = false
-    else allTargets = filtered
-  }
+  const allTargets = target === '.' ? collectLintTargets(cwd) : [target]
+  const cacheEligible = target === '.'
   if (allTargets.length === 0) return 0
 
-  let cache = null
+  let cache: LintCache | null = null
   let cachePath = ''
   let targets = allTargets
   if (cacheEligible) {
@@ -134,10 +129,12 @@ export const runBunLint = async (
     if (key !== null) {
       cachePath = lintCachePath(cwd, key)
       cache = readLintCache(cachePath) ?? { files: {}, version: 1 }
-      const hashes = new Map(allTargets.map(file => [file, hashFile(join(cwd, file))]))
-      targets = pendingLintTargets(allTargets, hashes, cache)
+      const ignored = new Set(cache.ignored ?? [])
+      const checkableTargets = allTargets.filter(file => !ignored.has(file))
+      const hashes = new Map(checkableTargets.map(file => [file, hashFile(join(cwd, file))]))
+      targets = pendingLintTargets(checkableTargets, hashes, cache)
       if (targets.length === 0) {
-        process.stdout.write(`[basis] lint cache: ${allTargets.length} files unchanged\n`)
+        process.stdout.write(`[basis] lint cache: ${checkableTargets.length} files unchanged\n`)
         return 0
       }
     }
@@ -157,7 +154,6 @@ export const runBunLint = async (
       cwd,
       '--config',
       configPath,
-      '--no-warn-ignored',
       ...(fix ? ['--fix'] : []),
       ...targets,
     ], { cwd: scratch, logger: silent })
@@ -165,16 +161,29 @@ export const runBunLint = async (
     process.stderr.write(result.stderr)
 
     if (cache !== null) {
-      const next = { files: { ...cache.files }, version: 1 as const }
+      const next: LintCache = { files: { ...cache.files }, version: 1 }
       const targetSet = new Set(allTargets)
       for (const file of Object.keys(next.files)) {
         if (!targetSet.has(file)) Reflect.deleteProperty(next.files, file)
       }
+      const combined = `${result.stdout}${result.stderr}`
       const errored = result.exitCode === 0
         ? new Set<string>()
-        : erroredLintTargets(`${result.stdout}${result.stderr}`, cwd, targets)
+        : erroredLintTargets(combined, cwd, targets)
+      const ignored = ignoredLintTargets(combined, cwd, targets)
+      const nextIgnored = new Set(cache.ignored ?? [])
+      for (const file of ignored) {
+        nextIgnored.add(file)
+        Reflect.deleteProperty(next.files, file)
+      }
+      for (const file of targets) {
+        if (ignored.has(file)) continue
+        nextIgnored.delete(file)
+      }
+      next.ignored = [...nextIgnored].filter(file => targetSet.has(file))
       const allFailed = result.exitCode !== 0 && errored.size === 0
       for (const file of targets) {
+        if (ignored.has(file)) continue
         next.files[file] = {
           hash: hashFile(join(cwd, file)),
           status: result.exitCode === 0 || (!allFailed && !errored.has(file)) ? 'ok' : 'error',

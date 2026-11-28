@@ -2,7 +2,7 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findEslintConfig } from './lint'
+import { findEslintConfig, runBunLint } from './lint'
 
 describe('ESLint config discovery', () => {
   test('walks up from a nested repository directory', () => {
@@ -31,6 +31,32 @@ describe('ESLint config discovery', () => {
 
       expect(findEslintConfig(nested)).toBe(inner)
     } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+})
+
+describe('lint config scoping', () => {
+  test('lets Bun decide per-config ignores instead of prefiltering files', async () => {
+    const root = tempDirectory('basis-lint-scope')
+    const previous = process.cwd()
+    try {
+      mkdirSync(join(root, 'src'), { recursive: true })
+      writeFileSync(join(root, 'src', 'skip.ts'), 'debugger\n')
+      const config = join(root, 'eslint.config.mjs')
+      writeFileSync(config, [
+        'export default [',
+        "  { files: ['**/*.ts'], ignores: ['src/skip.ts'], rules: { 'no-console': 'error' } },",
+        "  { files: ['**/*.ts'], rules: { 'no-debugger': 'error' } },",
+        ']',
+        '',
+      ].join('\n'))
+
+      process.chdir(root)
+      expect(await runBunLint(false, config)).toBe(1)
+      expect(await runBunLint(false, config)).toBe(1)
+    } finally {
+      process.chdir(previous)
       rmSync(root, { force: true, recursive: true })
     }
   })

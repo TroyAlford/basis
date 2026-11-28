@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 /** Cache format version. */
 const CACHE_VERSION = 1
@@ -36,6 +35,8 @@ export interface LintCacheEntry {
 export interface LintCache {
   /** Per-file results, keyed by repository-relative path. */
   files: Record<string, LintCacheEntry>,
+  /** Paths Bun reported as ignored by the effective config. */
+  ignored?: string[],
   /** Cache format version. */
   version: typeof CACHE_VERSION,
 }
@@ -171,53 +172,6 @@ const configDependencyInputs = async (configPath: string): Promise<string[] | nu
 }
 
 /**
- * Read global ignore patterns from a loaded flat config.
- * @param configPath - Absolute config path.
- * @returns Ignore patterns, or null when the config cannot be loaded.
- */
-const configIgnorePatterns = async (configPath: string): Promise<string[] | null> => {
-  try {
-    const module = await import(`${pathToFileURL(configPath).href}?basis-cache=${Date.now()}`) as {
-      readonly default?: unknown,
-    }
-    const entries = Array.isArray(module.default) ? module.default : [module.default]
-    const patterns: string[] = []
-    for (const entry of entries) {
-      if (typeof entry !== 'object' || entry === null) continue
-      const ignores = (entry as { readonly ignores?: unknown }).ignores
-      if (typeof ignores === 'string') patterns.push(ignores)
-      else if (Array.isArray(ignores)) {
-        for (const pattern of ignores) {
-          if (typeof pattern === 'string') patterns.push(pattern)
-        }
-      }
-    }
-    return patterns
-  } catch {
-    return null
-  }
-}
-
-/**
- * Remove paths the effective config ignores before caching or linting.
- * @param root - Repository root.
- * @param targets - Candidate repository-relative paths.
- * @param configPath - Effective flat config path.
- * @returns Paths not ignored by the config, or null when the config cannot be loaded.
- */
-export const filterIgnoredTargets = async (
-  root: string,
-  targets: readonly string[],
-  configPath: string,
-): Promise<string[] | null> => {
-  const patterns = await configIgnorePatterns(configPath)
-  if (patterns === null) return null
-  if (patterns.length === 0) return [...targets]
-  const globs = patterns.map(pattern => new Bun.Glob(pattern))
-  return targets.filter(target => !globs.some(glob => glob.match(target)))
-}
-
-/**
  * Build the cache key for one lint configuration.
  * @param options - Config, repository, and rule-source inputs.
  * @returns Hexadecimal cache key.
@@ -267,6 +221,45 @@ export const erroredLintTargets = (
     if (wanted.has(file)) errored.add(file)
   }
   return errored
+}
+
+/**
+ * Find candidate files Bun reported as ignored by the effective config.
+ * @param output - Combined stdout and stderr.
+ * @param cwd - Repository root.
+ * @param targets - Files included in the lint run.
+ * @returns Repository-relative paths Bun ignored.
+ */
+export const ignoredLintTargets = (
+  output: string,
+  cwd: string,
+  targets: readonly string[],
+): Set<string> => {
+  const wanted = new Set(targets)
+  const ignored = new Set<string>()
+  let candidate: string | null = null
+
+  for (const line of output.split('\n')) {
+    const value = line.trim()
+    if (value === '') continue
+    const annotation = /^::warning file=([^,]+),/.exec(value)
+    if (annotation !== null && value.includes('File ignored because')) {
+      const reported = annotation[1]
+      const file = isAbsolute(reported) ? relative(cwd, reported) : reported
+      if (wanted.has(file)) ignored.add(file)
+      continue
+    }
+    if (isAbsolute(value)) {
+      candidate = value
+      continue
+    }
+    if (candidate === null || !value.includes('File ignored because')) continue
+    const file = relative(cwd, candidate)
+    if (wanted.has(file)) ignored.add(file)
+    candidate = null
+  }
+
+  return ignored
 }
 
 /**
