@@ -25,22 +25,22 @@ Direct times are the median of five interleaved runs; ranges are min–max.
 
 | actor  | statement     | rows | params | direct median | direct range |  EXPLAIN |    plan | shared hits |
 | ------ | ------------- | ---: | -----: | ------------: | -----------: | -------: | ------: | ----------: |
-| owner  | pre-#364      |  106 |     11 |      643.6 ms |  635.9–650.8 | 612.1 ms | 29.7 ms |      12,977 |
-| owner  | #364 previous |  106 |      7 |       29.3 ms |    28.6–29.6 |  35.2 ms | 26.8 ms |       5,300 |
-| owner  | flat current  |  106 |     11 |       12.4 ms |    12.1–13.8 |  14.6 ms |  8.1 ms |       1,498 |
-| owner  | N7            |  106 |     11 |       12.6 ms |    10.9–13.0 |  11.6 ms |  7.6 ms |         853 |
-| editor | pre-#364      |  106 |     11 |      750.4 ms |  723.7–778.5 | 710.0 ms | 28.2 ms |      36,167 |
-| editor | #364 previous |  106 |      7 |      160.5 ms |  157.4–162.1 | 160.7 ms | 26.1 ms |      20,365 |
-| editor | flat current  |  106 |     11 |       49.6 ms |    47.0–53.7 |  51.5 ms |  7.3 ms |       4,355 |
-| editor | N7            |  106 |     11 |       56.9 ms |    54.8–58.7 |  48.2 ms |  6.6 ms |       3,712 |
-| viewer | pre-#364      |  106 |     11 |      810.6 ms |  800.2–826.4 | 822.7 ms | 28.9 ms |      37,401 |
-| viewer | #364 previous |  106 |      7 |      138.2 ms |  137.1–143.5 | 132.8 ms | 25.8 ms |      21,204 |
-| viewer | flat current  |  106 |     11 |       50.5 ms |    46.3–51.9 |  50.1 ms |  7.8 ms |       4,560 |
-| viewer | N7            |  106 |     11 |       49.2 ms |    46.7–49.5 |  46.5 ms |  6.8 ms |       3,915 |
+| owner | pre-#364 | 106 | 11 | 628.7 ms | 612.3–650.6 | 588.3 ms | 29.6 ms | 12,977 |
+| owner | #364 previous | 106 | 7 | 29.3 ms | 27.6–30.1 | 33.5 ms | 26.1 ms | 5,300 |
+| owner | flat current | 106 | 11 | 12.4 ms | 11.8–16.7 | 13.8 ms | 8.1 ms | 1,498 |
+| owner | N7 | 106 | 11 | 11.9 ms | 10.6–13.2 | 11.1 ms | 7.8 ms | 853 |
+| editor | pre-#364 | 106 | 11 | 746.9 ms | 735.6–758.7 | 711.4 ms | 29.2 ms | 36,167 |
+| editor | #364 previous | 106 | 7 | 159.5 ms | 153.4–163.0 | 157.8 ms | 26.2 ms | 20,365 |
+| editor | flat current | 106 | 11 | 46.4 ms | 45.4–51.3 | 51.7 ms | 7.3 ms | 4,355 |
+| editor | N7 | 106 | 11 | 57.3 ms | 53.8–59.9 | 46.5 ms | 6.6 ms | 3,712 |
+| viewer | pre-#364 | 106 | 11 | 807.7 ms | 806.7–849.6 | 784.0 ms | 28.5 ms | 37,401 |
+| viewer | #364 previous | 106 | 7 | 123.4 ms | 122.1–132.1 | 136.4 ms | 26.7 ms | 21,204 |
+| viewer | flat current | 106 | 11 | 49.5 ms | 47.6–55.3 | 52.8 ms | 7.0 ms | 4,560 |
+| viewer | N7 | 106 | 11 | 48.4 ms | 46.3–50.2 | 51.5 ms | 6.9 ms | 3,915 |
 
-Projected references now materialize only the reachable identities selected by their parent rows: root references share the selected-root set, and each nested reference source gets its own restricted CTE. That removes the broad `authorized_CustomCard`/`OfficialCard`/`Workspace`/`CardEdition`/`Art` scans from the previous head and reduces shared-buffer work for every actor. The owner and editor direct medians are at or below N7 in this run; the viewer median is within 1.3 ms. The generated statement is 88 `SELECT`s with 45 `AS MATERIALIZED` clauses (and 3 `row_number()` calls), versus N7's 35 and 19. The remaining syntactic difference is shared aggregation/authorization structure, not an unaddressed broad materialization. The multi-deck differential and selected-reachability scaling test both pass.
+Projected references now materialize only the reachable identities selected by their parent rows: root references share the selected-root set, and each nested reference source gets its own restricted CTE. That removes the broad `authorized_CustomCard`/`OfficialCard`/`Workspace`/`CardEdition`/`Art` scans from the previous head and reduces shared-buffer work for every actor. The owner and editor direct medians are at or below N7 in this run; the viewer median is within 1.1 ms. The generated statement is 88 `SELECT`s with 45 `AS MATERIALIZED` clauses (and 3 `row_number()` calls), versus N7's 35 and 19. The three physical collection planners now share the same identity, dedupe, count, matched-count, paging, and item-aggregation rules. The multi-deck differential and selected-reachability scaling test both pass.
 
-All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. At this revision the current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 17.8 ms (owner), 62.1 ms (editor), and 54.0 ms (viewer). Subtracting the direct medians gives roughly 5.4 ms, 12.5 ms, and 3.5 ms of mapping/hydration work. These totals and the direct medians come from the same run and fixture.
+All actors saw the same requested nested shape: 106 root rows, 1 panel row, 106 deck rows, 106 deck-member rows, 106 deck-entry rows, and 106 card-face rows. `nested.json` records those counts. At this revision the current compiler’s `queryEntity` total (SQL plus mapping/hydration) had medians of 18.2 ms (owner), 64.3 ms (editor), and 53.8 ms (viewer). Subtracting the direct medians gives roughly 5.8 ms, 17.9 ms, and 4.3 ms of mapping/hydration work. These totals and the direct medians come from the same run and fixture.
 
 ## Policy observation
 
@@ -56,13 +56,13 @@ Both the original and generated statements bind eleven independent inputs. The p
 
 Basis `$total` is the authorized population before query-time filtering. The uploaded MTG statement’s filtered `decks__total` was a reference defect, not a generic compiler rule; the compiler applies the Graph contract uniformly to every collection, and the checked-in N7 reference now projects a filtered matched count separately from an unfiltered total.
 
-The multi-deck differential runs the consumer query against two visible decks for owner, editor, viewer, and a denied outsider. It keeps independent item and matched filters, uses a nonzero deck-entry offset, and compares raw and hydrated rows, `decks__matched`/`decks__total`, `deckEntries__matched`/`deckEntries__total`, and edge quantities with corrected N7. It is the acceptance check for the distinguishing case; the one-deck 106-root fixture alone cannot exercise it. `differential.json` records the result at Basis `2ff524f` and consumer `TroyAlford-AI/mtg-proxifier#e2bf27d`.
+The multi-deck differential runs the consumer query against two visible decks for owner, editor, viewer, and a denied outsider. It keeps independent item and matched filters, uses a nonzero deck-entry offset, and compares raw and hydrated rows, `decks__matched`/`decks__total`, `deckEntries__matched`/`deckEntries__total`, and edge quantities with corrected N7. It is the acceptance check for the distinguishing case; the one-deck 106-root fixture alone cannot exercise it. `differential.json` records the result at Basis `d5cead6` and consumer `TroyAlford-AI/mtg-proxifier#e768ec2`.
 
 The consumer test is staged behind `BASIS_N7_COMPILER=1` because the production MTG dependency remains the released `basis` tag until an authorized upgrade. It asserts the linked Basis Git SHA with `BASIS_N7_EXPECTED_SHA`, uses the supported `basis/testing` compiler adapter, and skips without those development inputs:
 
 ```sh
 BASIS_N7_COMPILER=1 \
-BASIS_N7_EXPECTED_SHA=40abac7cf6d1313a1aa6ade9469de97c16d28e8c \
+BASIS_N7_EXPECTED_SHA=d5cead68c18d875ac9faf0db6607850002d0479b \
 bun test ./src/server/collectionN7.differential.integration.ts ./src/server/collectionN7.integration.ts
 ```
 
