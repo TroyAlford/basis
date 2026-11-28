@@ -62,7 +62,7 @@ The consumer test is staged behind `BASIS_N7_COMPILER=1` because the production 
 
 ```sh
 BASIS_N7_COMPILER=1 \
-BASIS_N7_EXPECTED_SHA=37125a4fd6e205602f56c3960e4d6b1e3a2e923d \
+BASIS_N7_EXPECTED_SHA=67cffaad41487efc8fbd53e342b51b5975829011 \
 bun test ./src/server/collectionN7.differential.integration.ts ./src/server/collectionN7.integration.ts
 ```
 
