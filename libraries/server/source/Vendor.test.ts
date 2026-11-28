@@ -2,7 +2,7 @@ import { tempDirectory, useApplication, waitFor } from 'basis/testing'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RawSourceMap } from 'source-map-js'
 import { SourceMapConsumer } from 'source-map-js'
@@ -183,29 +183,49 @@ describe('vendor assets', () => {
   })
 
   test('wires the discovered vendor bundle into a Server application automatically', async () => {
-    const application = await useApplication({
-      cwd: repoRoot,
-      development: true,
-      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
-      timeoutMs: 120_000,
-    })
+    const appRoot = tempDirectory('basis-vendor-server-')
+    await cp(join(repoRoot, 'testing', 'server', 'Application.tsx'), join(appRoot, 'Application.tsx'))
+    await cp(join(repoRoot, 'testing', 'server', 'Application.styles.ts'), join(appRoot, 'Application.styles.ts'))
+    const serve = join(appRoot, 'serve.ts')
+    await writeFile(serve, `
+import { Server } from 'basis/server'
 
-    const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
-    expect(shell).toContain('<!-- VENDORS -->')
+new Server()
+  .root(${JSON.stringify(repoRoot)})
+  .main(${JSON.stringify(join(appRoot, 'Application.tsx'))})
+  .assets(${JSON.stringify(join(repoRoot, 'testing', 'server', 'assets'))})
+  .start()
+`.trim())
 
-    const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
-    expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
-    expect(html).not.toContain('document.write')
+    let application: Awaited<ReturnType<typeof useApplication>> | null = null
+    try {
+      application = await useApplication({
+        cwd: repoRoot,
+        development: true,
+        entry: serve,
+        timeoutMs: 120_000,
+      })
 
-    const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]
-    expect(source).toBeDefined()
-    const applicationBundle = await Bun.fetch(`${application.url}${source}`).then(response => response.text())
-    expect(applicationBundle).toContain('__basisVendor')
-    expect(applicationBundle).not.toContain('react.production')
+      const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
+      expect(shell).toContain('<!-- VENDORS -->')
 
-    const vendor = await Bun.fetch(`${application.url}/assets/vendor/vendor.js`, { redirect: 'manual' })
-    expect(vendor.status).toBe(307)
-    expect(vendor.headers.get('location')).toContain('?v=')
+      const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
+      expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
+      expect(html).not.toContain('document.write')
+
+      const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]
+      expect(source).toBeDefined()
+      const applicationBundle = await Bun.fetch(`${application.url}${source}`).then(response => response.text())
+      expect(applicationBundle).toContain('__basisVendor')
+      expect(applicationBundle).not.toContain('react.production')
+
+      const vendor = await Bun.fetch(`${application.url}/assets/vendor/vendor.js`, { redirect: 'manual' })
+      expect(vendor.status).toBe(307)
+      expect(vendor.headers.get('location')).toContain('?v=')
+    } finally {
+      await application?.stop()
+      await rm(appRoot, { force: true, recursive: true })
+    }
   }, 120_000)
 
   test('uses a configured trusted public origin for vendor scripts', async () => {
