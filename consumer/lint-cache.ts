@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 /** Cache format version. */
 const CACHE_VERSION = 1
@@ -149,15 +150,91 @@ const collectManifests = (root: string): string[] => {
 }
 
 /**
+ * Resolve the local modules a lint config imports.
+ * @param configPath - Absolute config path.
+ * @returns Repository-relative or absolute input paths, or null when the graph cannot be inspected.
+ */
+const configDependencyInputs = async (configPath: string): Promise<string[] | null> => {
+  try {
+    const result = await Bun.build({
+      entrypoints: [configPath],
+      metafile: true,
+      packages: 'external',
+      target: 'bun',
+      write: false,
+    } as Parameters<typeof Bun.build>[0] & { write: false })
+    if (!result.success || result.metafile === undefined) return null
+    return Object.keys(result.metafile.inputs)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read global ignore patterns from a loaded flat config.
+ * @param configPath - Absolute config path.
+ * @returns Ignore patterns, or null when the config cannot be loaded.
+ */
+const configIgnorePatterns = async (configPath: string): Promise<string[] | null> => {
+  try {
+    const module = await import(`${pathToFileURL(configPath).href}?basis-cache=${Date.now()}`) as {
+      readonly default?: unknown,
+    }
+    const entries = Array.isArray(module.default) ? module.default : [module.default]
+    const patterns: string[] = []
+    for (const entry of entries) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const ignores = (entry as { readonly ignores?: unknown }).ignores
+      if (typeof ignores === 'string') patterns.push(ignores)
+      else if (Array.isArray(ignores)) {
+        for (const pattern of ignores) {
+          if (typeof pattern === 'string') patterns.push(pattern)
+        }
+      }
+    }
+    return patterns
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Remove paths the effective config ignores before caching or linting.
+ * @param root - Repository root.
+ * @param targets - Candidate repository-relative paths.
+ * @param configPath - Effective flat config path.
+ * @returns Paths not ignored by the config, or null when the config cannot be loaded.
+ */
+export const filterIgnoredTargets = async (
+  root: string,
+  targets: readonly string[],
+  configPath: string,
+): Promise<string[] | null> => {
+  const patterns = await configIgnorePatterns(configPath)
+  if (patterns === null) return null
+  if (patterns.length === 0) return [...targets]
+  const globs = patterns.map(pattern => new Bun.Glob(pattern))
+  return targets.filter(target => !globs.some(glob => glob.match(target)))
+}
+
+/**
  * Build the cache key for one lint configuration.
  * @param options - Config, repository, and rule-source inputs.
  * @returns Hexadecimal cache key.
  */
-export const computeLintCacheKey = (options: LintCacheKeyOptions): string => {
+export const computeLintCacheKey = async (options: LintCacheKeyOptions): Promise<string | null> => {
   const hash = createHash('sha256')
   hash.update(`basis-lint-cache:${CACHE_VERSION}\0`)
   hash.update(`bun:${Bun.revision ?? Bun.version}\0`)
   hash.update(`config:${hashFile(options.configPath)}\0`)
+  hash.update(`lock:${hashFile(join(options.cwd, 'bun.lock'))}\0`)
+
+  const dependencies = await configDependencyInputs(options.configPath)
+  if (dependencies === null) return null
+  for (const dependency of [...dependencies].sort()) {
+    const path = isAbsolute(dependency) ? dependency : resolve(process.cwd(), dependency)
+    hash.update(`config-dependency:${path}:${hashFile(path)}\0`)
+  }
 
   for (const root of [...options.sourceRoots].sort()) {
     hash.update(`source:${root}:${hashDirectory(root)}\0`)

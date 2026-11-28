@@ -2,7 +2,7 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { collectLintTargets, computeLintCacheKey, erroredLintTargets, hashContent, pendingLintTargets } from './lint-cache'
+import { collectLintTargets, computeLintCacheKey, erroredLintTargets, filterIgnoredTargets, hashContent, pendingLintTargets } from './lint-cache'
 
 describe('lint cache targets', () => {
   test('collects source files while skipping generated and dependency trees', () => {
@@ -49,14 +49,14 @@ describe('lint cache targets', () => {
     expect(pendingLintTargets([...hashes.keys()], hashes, cache)).toEqual(['b.ts', 'c.ts', 'd.ts'])
   })
 
-  test('changes the cache key when the config changes', () => {
+  test('changes the cache key when the config changes', async () => {
     const root = tempDirectory('basis-cache-key')
     try {
       const config = join(root, 'eslint.config.mjs')
       writeFileSync(config, 'export default []\n')
-      const before = computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
+      const before = await computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
       writeFileSync(config, 'export default [{ rules: {} }]\n')
-      const after = computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
+      const after = await computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
 
       expect(after).not.toBe(before)
     } finally {
@@ -80,6 +80,55 @@ describe('lint cache error attribution', () => {
       ].join('\n')
 
       expect(erroredLintTargets(output, root, ['a.ts', 'b.ts', 'c.ts'])).toEqual(new Set(['a.ts', 'b.ts']))
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+})
+
+describe('cache invalidation inputs', () => {
+  test('changes the key when an imported config module changes', async () => {
+    const root = tempDirectory('basis-cache-import')
+    try {
+      const rules = join(root, 'rules.mjs')
+      const config = join(root, 'eslint.config.mjs')
+      writeFileSync(rules, 'export const rules = {}\n')
+      writeFileSync(config, "import { rules } from './rules.mjs'\nexport default [{ rules }]\n")
+
+      const before = await computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
+      writeFileSync(rules, "export const rules = { 'no-console': 'error' }\n")
+      const after = await computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
+
+      expect(after).not.toBe(before)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test('changes the key when the lockfile changes', async () => {
+    const root = tempDirectory('basis-cache-lock')
+    try {
+      const config = join(root, 'eslint.config.mjs')
+      const lock = join(root, 'bun.lock')
+      writeFileSync(config, 'export default []\n')
+      writeFileSync(lock, 'one\n')
+      const before = await computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
+      writeFileSync(lock, 'two\n')
+      const after = await computeLintCacheKey({ configPath: config, cwd: root, sourceRoots: [] })
+
+      expect(after).not.toBe(before)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test('filters paths the effective config ignores', async () => {
+    const root = tempDirectory('basis-cache-ignore')
+    try {
+      const config = join(root, 'eslint.config.mjs')
+      writeFileSync(config, "export default [{ ignores: ['ignored/**'] }]\n")
+
+      expect(await filterIgnoredTargets(root, ['src/a.ts', 'ignored/b.ts'], config)).toEqual(['src/a.ts'])
     } finally {
       rmSync(root, { force: true, recursive: true })
     }
