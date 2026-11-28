@@ -93,6 +93,42 @@ async function activeVendorSnapshot(base: string): Promise<ActiveVendorSnapshot>
   return { bytes, hash, mapBytes, mapHash, mapUrl, url }
 }
 
+/**
+ * Start a vendor-wiring application from a unique root inside the repository.
+ * @param env - Extra environment for the server process.
+ * @returns The application handle and its disposable root.
+ */
+async function isolatedVendorApplication(
+  env: Record<string, string> = {},
+): Promise<{ readonly appRoot: string, readonly application: Awaited<ReturnType<typeof useApplication>> }> {
+  const appRoot = tempDirectory('basis-vendor-app-')
+  try {
+    await cp(join(repoRoot, 'testing', 'server', 'Application.tsx'), join(appRoot, 'Application.tsx'))
+    await cp(join(repoRoot, 'testing', 'server', 'Application.styles.ts'), join(appRoot, 'Application.styles.ts'))
+    const serve = join(appRoot, 'serve.ts')
+    await writeFile(serve, `
+import { Server } from 'basis/server'
+
+new Server()
+  .root(${JSON.stringify(repoRoot)})
+  .main(${JSON.stringify(join(appRoot, 'Application.tsx'))})
+  .assets(${JSON.stringify(join(repoRoot, 'testing', 'server', 'assets'))})
+  .start()
+`.trim())
+    const application = await useApplication({
+      cwd: repoRoot,
+      development: true,
+      entry: serve,
+      env,
+      timeoutMs: 120_000,
+    })
+    return { appRoot, application }
+  } catch (error) {
+    await rm(appRoot, { force: true, recursive: true })
+    throw error
+  }
+}
+
 describe('vendor assets', () => {
   test('builds deterministic, isolated, content-versioned artifacts', async () => {
     const root = tempDirectory('basis-vendor-build-')
@@ -183,29 +219,9 @@ describe('vendor assets', () => {
   })
 
   test('wires the discovered vendor bundle into a Server application automatically', async () => {
-    const appRoot = tempDirectory('basis-vendor-server-')
-    await cp(join(repoRoot, 'testing', 'server', 'Application.tsx'), join(appRoot, 'Application.tsx'))
-    await cp(join(repoRoot, 'testing', 'server', 'Application.styles.ts'), join(appRoot, 'Application.styles.ts'))
-    const serve = join(appRoot, 'serve.ts')
-    await writeFile(serve, `
-import { Server } from 'basis/server'
+    const { application, appRoot } = await isolatedVendorApplication()
 
-new Server()
-  .root(${JSON.stringify(repoRoot)})
-  .main(${JSON.stringify(join(appRoot, 'Application.tsx'))})
-  .assets(${JSON.stringify(join(repoRoot, 'testing', 'server', 'assets'))})
-  .start()
-`.trim())
-
-    let application: Awaited<ReturnType<typeof useApplication>> | null = null
     try {
-      application = await useApplication({
-        cwd: repoRoot,
-        development: true,
-        entry: serve,
-        timeoutMs: 120_000,
-      })
-
       const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
       expect(shell).toContain('<!-- VENDORS -->')
 
@@ -223,19 +239,13 @@ new Server()
       expect(vendor.status).toBe(307)
       expect(vendor.headers.get('location')).toContain('?v=')
     } finally {
-      await application?.stop()
+      await application.stop()
       await rm(appRoot, { force: true, recursive: true })
     }
   }, 120_000)
 
   test('uses a configured trusted public origin for vendor scripts', async () => {
-    const application = await useApplication({
-      cwd: repoRoot,
-      development: true,
-      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
-      env: { PUBLIC_ORIGIN: 'https://app.example' },
-      timeoutMs: 120_000,
-    })
+    const { application, appRoot } = await isolatedVendorApplication({ PUBLIC_ORIGIN: 'https://app.example' })
 
     try {
       const html = await Bun.fetch(application.url).then(response => response.text())
@@ -243,6 +253,7 @@ new Server()
       expect(html).not.toContain('src="http://127.0.0.1')
     } finally {
       await application.stop()
+      await rm(appRoot, { force: true, recursive: true })
     }
   }, 120_000)
 
