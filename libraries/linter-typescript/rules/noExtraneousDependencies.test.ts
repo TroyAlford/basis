@@ -6,10 +6,10 @@ import { lintWithBun } from './testUtils'
 
 /*
  * The ESLint flat-config matcher only lints files below `process.cwd()`, so this
- * fixture must live inside the repository. It sits under the gitignored `tmp/`
- * and is owned by the run-scoped temp root, which the testing preload removes.
+ * fixture must live inside the repository. `tempDirectory` places it under the
+ * gitignored `./.basis/tmp`, which the testing preload removes.
  */
-const fixtureRoot = tempDirectory('no-extraneous-dependencies', join(process.cwd(), 'tmp'))
+const fixtureRoot = tempDirectory('no-extraneous-dependencies')
 
 const writeFixture = (path: string, contents: string): void => {
   const target = join(fixtureRoot, path)

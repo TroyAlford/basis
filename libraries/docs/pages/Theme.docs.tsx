@@ -133,13 +133,13 @@ export class ThemeDocs extends DocumentationPage<State> {
     }
     const computed = getComputedStyle(target)
     const line = (name: string) => `  ${name}: ${computed.getPropertyValue(name).trim()};`
-    return [
-      '/* Preview element (scoped theme) */',
-      line('--basis-color-primary'),
-      line('--basis-color-contrast'),
-      line('--basis-font-size-md'),
-      line('--basis-radius-md'),
-    ].join('\n')
+    return `
+/* Preview element (scoped theme) */
+${line('--basis-color-primary')}
+${line('--basis-color-contrast')}
+${line('--basis-font-size-md')}
+${line('--basis-radius-md')}
+    `.trim()
   }
 
   #applyColorScheme = (): void => {
@@ -240,6 +240,7 @@ export class ThemeDocs extends DocumentationPage<State> {
           <h2>Official Presets</h2>
           <p>Basis ships <code>LIGHT_THEME</code> and <code>DARK_THEME</code> from <code>basis/react</code>. <code>LIGHT_THEME</code> carries the same values as <code>DEFAULT_THEME</code>, so the existing default light appearance is unchanged. <code>DARK_THEME</code> uses a neutral palette that is substantially darker than the legacy MTG <code>#30404d</code> chrome and separates the page background from resting, elevated, and inset surfaces.</p>
           {Code.format(`
+
             import { Button, DARK_THEME, LIGHT_THEME, Theme } from 'basis/react'
 
             // Named light theme (same values as the default)
@@ -252,7 +253,8 @@ export class ThemeDocs extends DocumentationPage<State> {
             <main data-theme="dark">
               <Button>Dark button</Button>
             </main>
-          `)}
+
+          `.trim())}
           <p>Controls resolve their state colours from the nearest theme instead of computing light values on <code>:root</code>. A dark-themed ancestor therefore reaches buttons, editors, tables, dialogs, notifications, tooltips, and popup menus without component-specific palette overrides.</p>
           <h3>Semantic colour roles</h3>
           <ul>
@@ -354,10 +356,13 @@ export class ThemeDocs extends DocumentationPage<State> {
           <h2>Usage Examples</h2>
           <h3>Basic Theme</h3>
           {Code.format(`
+
             <Theme name="light" />
-          `)}
+
+          `.trim())}
           <h3>Custom Colors</h3>
           {Code.format(`
+
             <Theme
               name="brand"
               color={{
@@ -366,9 +371,11 @@ export class ThemeDocs extends DocumentationPage<State> {
                 foreground: '#212529',
               }}
             />
-          `)}
+
+          `.trim())}
           <h3>Complete Theme</h3>
           {Code.format(`
+
             <Theme
               name="dark"
               color={{
@@ -393,7 +400,8 @@ export class ThemeDocs extends DocumentationPage<State> {
                 lg: 24,      // 24px
               }}
             />
-          `)}
+
+          `.trim())}
         </section>
         <section>
           <h2>Key Props</h2>
@@ -422,11 +430,13 @@ export class ThemeDocs extends DocumentationPage<State> {
           <h3>Namespaced Themes</h3>
           <p>When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same variable names. Put <code>data-theme</code> on a subtree to apply that token set. For the shipped palettes, prefer <code>&lt;Theme name="dark" &#123;...DARK_THEME&#125; /&gt;</code> over hand-written colour values so controls and overlays resolve the same semantic roles.</p>
           {Code.format(`
+
             .my-component {
               background-color: var(--basis-color-background);
               color: var(--basis-color-foreground);
             }
-          `, 'css')}
+
+          `.trim(), 'css')}
         </section>
         <section>
           <h2>Default Values</h2>
@@ -436,6 +446,7 @@ export class ThemeDocs extends DocumentationPage<State> {
           <h2>Using Theme Variables in CSS</h2>
           <p>Once Theme is rendered, you can use the generated CSS variables anywhere in your stylesheets:</p>
           {Code.format(`
+
             .my-button {
               background-color: var(--basis-color-primary);
               color: var(--basis-color-contrast);
@@ -445,7 +456,7 @@ export class ThemeDocs extends DocumentationPage<State> {
               box-shadow: var(--basis-shadow-sm);
               transition: all var(--basis-transition-medium);
             }
-            
+
             .my-card {
               background-color: var(--basis-color-background);
               border: 1px solid var(--basis-color-disabled);
@@ -453,12 +464,14 @@ export class ThemeDocs extends DocumentationPage<State> {
               padding: var(--basis-unit-lg);
               box-shadow: var(--basis-shadow-md);
             }
-          `)}
+
+          `.trim())}
         </section>
         <section>
           <h2>Multiple Themes</h2>
           <p>You can create multiple themes and switch between them dynamically:</p>
           {Code.format(`
+
             // Light theme
             <Theme
               name="light"
@@ -468,7 +481,7 @@ export class ThemeDocs extends DocumentationPage<State> {
                 primary: '#0070f3',
               }}
             />
-            
+
             // Dark theme
             <Theme
               name="dark"
@@ -478,11 +491,12 @@ export class ThemeDocs extends DocumentationPage<State> {
                 primary: '#00d4ff',
               }}
             />
-            
+
             // Usage in components
             <div data-theme="light">Light themed content</div>
             <div data-theme="dark">Dark themed content</div>
-          `)}
+
+          `.trim())}
         </section>
         <section>
           <h2>Performance Considerations</h2>

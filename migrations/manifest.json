@@ -1,0 +1,10 @@
+{
+  "migrations": [
+    "0001-initial.json",
+    "0002-release.json",
+    "0003-release.json",
+    "0004-release.json",
+    "0005-release.json"
+  ],
+  "version": "1.4.0"
+}

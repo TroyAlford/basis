@@ -9,13 +9,12 @@ const START_MARKER = '# >>> basis:development-server >>>'
 const END_MARKER = '# <<< basis:development-server <<<'
 
 /** The fenced block Basis writes into a consumer's `bunfig.toml`. */
-const BLOCK = [
-  START_MARKER,
-  '[serve.static]',
-  `plugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]`,
-  END_MARKER,
-  '',
-].join('\n')
+const BLOCK = `
+${START_MARKER}
+[serve.static]
+plugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]
+${END_MARKER}
+`.trimStart()
 
 /** The result of ensuring the development-server plugin is configured. */
 export interface ServeStaticConfig {
@@ -46,9 +45,12 @@ export function ensureServeStaticConfig(existing: string): ServeStaticConfig {
   }
 
   if (start !== -1 && end !== -1) {
-    const afterEnd = current[end + END_MARKER.length] === '\n' ? end + END_MARKER.length + 1 : end + END_MARKER.length
-    const text = `${current.slice(0, start)}${BLOCK}${current.slice(afterEnd)}`
-    return validate(text, text !== current)
+    /*
+     * A fenced block is consumer-owned after creation. Leave it intact so a
+     * custom plugin composition (for example a vendor-aware serve plugin that
+     * composes Basis's loaders) survives reinstall.
+     */
+    return { changed: false, text: current }
   }
 
   if (current.includes(SERVE_STATIC_PLUGIN)) return { changed: false, text: current }

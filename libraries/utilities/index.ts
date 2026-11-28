@@ -1,10 +1,27 @@
 export { AbortablePromise } from './functions/AbortablePromise'
+export {
+  APPROVED_BUN_SERVER_COMMIT,
+  APPROVED_BUN_SERVER_PACKAGE,
+  APPROVED_BUN_SERVER_REVISION,
+  assertBasisServerCompatible,
+  basisServerUnsupportedReason,
+  bunCheckUnsupportedReason,
+  currentBunRuntime,
+  MINIMUM_BUN_FOR_CHECK,
+  MINIMUM_BUN_FOR_SERVER,
+  parseBunVersion,
+  supportsBasisServer,
+  supportsBunCheck,
+} from './functions/BunRuntime'
+export type { BunRuntimeInfo, ParsedVersion } from './functions/BunRuntime'
 export { clamp } from './functions/clamp'
+export { checksum } from './functions/checksum'
 export { classNames } from './functions/classNames'
 export { clone } from './functions/clone'
 export { Color } from './functions/Color'
 export { dataAttributes } from './functions/dataAttributes'
 export { deburr } from './functions/deburr'
+export { directories } from './functions/directories'
 export { decode, encode } from './functions/encode'
 export { deepEquals } from './functions/deepEquals'
 export { EMPTY_BASIS_RUNTIME, parseBasisRuntime, serializeBasisRuntime } from './functions/BasisRuntime'
@@ -29,6 +46,8 @@ export { parseTemplateURI } from './functions/parseTemplateURI'
 export { parseURI } from './functions/parseURI'
 export { pascalCase } from './functions/pascalCase'
 export { randomHash } from './functions/randomHash'
+export { run, runAsync } from './functions/run'
+export type { CommandResult, RunOptions } from './functions/run'
 export { set } from './functions/set'
 export { snakeCase } from './functions/snakeCase'
 export { sortBy } from './functions/sortBy'
@@ -36,6 +55,8 @@ export { splitFrontMatter } from './functions/splitFrontMatter'
 export { titleCase } from './functions/titleCase'
 export { unique } from './functions/unique'
 export type { BasisRuntime } from './functions/BasisRuntime'
+export type { ChecksumOptions } from './functions/checksum'
+export type { Directory, DirectoryWriteOptions } from './functions/directories'
 export type { FrontMatterParts } from './functions/splitFrontMatter'
 export type { ILogger, LoggerContext, LoggerOptions } from './functions/Logger'
 export type { PathOf, Primitive } from './types/PathOf'

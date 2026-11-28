@@ -15,7 +15,8 @@ The documentation site built from [`docs/`](../docs/index.mdx) is the authoritat
 ```ts
 import { Button, Theme } from 'basis/react'
 import { Server } from 'basis/server'
-import { Environment, run, runAsync } from 'basis/configuration'
+import { Environment } from 'basis/configuration'
+import { run, runAsync } from 'basis/utilities'
 import { Logger } from 'basis/logger'
 import { Identity } from 'basis/oauth'
 import { matchScreenshot, test, useApplication } from 'basis/testing'
@@ -33,20 +34,20 @@ Declare non-npm host capabilities in the application root:
 
 The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken. Basis-owned patches live in the package and are applied by that hook; consumers never copy patch files or add their own `patchedDependencies` entries. See [Installation](../docs/installation.mdx).
 
-## Lint, format, and typecheck
+## Lint, format, compliance, and typecheck
 
 ```bash
 bunx basis lint
 bunx basis format
+bunx basis compliance
 bunx basis typecheck
-bunx basis check
 ```
 
-`basis lint` uses the Basis policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), and [TypeScript](../docs/typescript.mdx).
+`basis lint` uses the Basis style policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. `basis compliance` runs the same style and typecheck surface plus the authoritative architecture and infrastructure rules. Choose `lint` or `compliance` for a repository gate, not both. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), [Compliance](../docs/compliance.mdx), and [TypeScript](../docs/typescript.mdx).
 
-`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer. `basis lint` runs Bun's built-in linter and requires the first stable Bun release that ships `bun lint`; stable 1.4.4 does not. Both commands stop with an upgrade instruction when the runtime lacks their command. Installing Basis does not enforce either runtime version by itself; the commands perform the checks. `basis check` runs `basis lint` before it typechecks.
+`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer. `basis lint` and `basis compliance` run Bun's built-in linter; use the pinned canary or a future stable release that ships `bun lint` (stable 1.4.5 does not). The full Basis Server install requires Bun 1.4.6 or the approved canary described in [Installation](../docs/installation.mdx). The install hook and `Server.start()` enforce the server requirement. Installing Basis does not enforce the typecheck or linter minimums by itself; those commands perform their own checks.
 
-## Server
+## Server and database
 
 ```ts
 import { Server } from 'basis/server'
@@ -54,10 +55,11 @@ import { Server } from 'basis/server'
 new Server()
   .root(import.meta.dir)
   .main('./Application.tsx')
+  .database()
   .start()
 ```
 
-See [Server](../docs/server/index.mdx) for lifecycle, API routes, assets, SSE, sockets, and embedding.
+`server.database()` is zero-config and creates the Basis-managed PostgreSQL capability. `server.db.sql` is Bun's pooled tagged-template API, and `server.db.tx(async sql => ...)` owns a transaction boundary. See [Server](../docs/server/index.mdx), [Database & Transactions](../docs/server/database.mdx), and [Authorization & Row-Level Security](../docs/server/authorization.mdx).
 
 ## Testing
 

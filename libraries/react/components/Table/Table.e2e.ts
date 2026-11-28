@@ -1,7 +1,9 @@
-import { beforeAll, expect } from 'bun:test'
+import { beforeAll, expect, setDefaultTimeout } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from '../../../testing'
 import { matchScreenshot, test, useApplication } from '../../../testing'
+
+setDefaultTimeout(30_000)
 
 const ROOT = join(import.meta.dir, '..', '..', '..', '..')
 
@@ -10,10 +12,11 @@ let app: ApplicationHandle
 beforeAll(async () => {
   app = await useApplication({
     cwd: ROOT,
+    development: true,
     entry: './testing/components/serve.ts',
     timeoutMs: 120_000,
   })
-}, 120_000)
+})
 
 test('keeps the sticky header above pinned body cells while scrolling', async () => {
   const result = await app.visit('/table', async page => {
@@ -54,7 +57,7 @@ test('keeps the sticky header above pinned body cells while scrolling', async ()
   expect(result.scrolled).toBe(true)
   expect(result.probes).toEqual([true, true, true])
   expect(result.headerPinned).toBe(true)
-}, 120_000)
+})
 
 test('stacks a pinned-cell tooltip above the sticky header', async () => {
   const result = await app.visit('/table-tooltip', async page => {
@@ -98,4 +101,4 @@ test('stacks a pinned-cell tooltip above the sticky header', async () => {
 
   expect(result.overlapsHeader).toBe(true)
   expect(result.onTop).toBe(true)
-}, 120_000)
+})

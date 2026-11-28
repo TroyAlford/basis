@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing benchmark command. */
+import { run } from 'basis/utilities'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { arch, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -25,13 +26,14 @@ const saveLoad = process.argv.includes('--save-load')
  */
 function measure(command: string[], cwd = root): { code: number, ms: number, output: string } {
   const start = performance.now()
-  const result = Bun.spawnSync(command, { cwd, stderr: 'pipe', stdout: 'pipe' })
+  const [executable, ...args] = command
+  if (!executable) throw new Error('command must include an executable')
+  const result = run(executable, args, { cwd })
   const ms = performance.now() - start
-  const decoder = new TextDecoder()
   return {
-    code: result.exitCode ?? -1,
+    code: result.exitCode,
     ms,
-    output: `${decoder.decode(result.stdout)}${decoder.decode(result.stderr)}`.trim(),
+    output: `${result.stdout}${result.stderr}`.trim(),
   }
 }
 

@@ -1,0 +1,3931 @@
+import { createHash } from 'node:crypto'
+import { FieldType } from './FieldType'
+import { Operator } from './Operator'
+import { comparableFieldType, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { parseCollectionDirectives, splitFieldPath } from './PathSyntax'
+import { postgresScalarType } from './PostgresTypes'
+import type { CollectionFilterScope, Filter } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayMemberEntity, arrayMemberField, arrayMemberResolver, isFieldOperand, Predicate } from './Predicate'
+import { QueryNormalizer } from './QueryNormalizer'
+import type { PhysicalCheck, PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
+import type { OrderBy } from './SQL'
+
+export { FieldType } from './FieldType'
+
+/** Enable PostgreSQL trigram search for universal names. */
+const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
+
+/** Supported declarative constraint kinds. */
+export enum Constraint {
+  /** A deterministic structural index over one or more physical fields. */
+  Structural = 'Structural',
+  /** A positive valid-state predicate over Graph-native transaction state. */
+  Validation = 'Validation',
+}
+
+/** Field types that represent scalar values. */
+export type ScalarFieldType =
+  | FieldType.Boolean
+  | FieldType.Date
+  | FieldType.ID
+  | FieldType.Number
+  | FieldType.String
+  | FieldType.Timestamp
+
+/** Supported canonical identity formats. */
+export type IdentityFormat = 'Snowflake' | 'UUID'
+
+/** One scalar element in a native array field. */
+export interface ScalarArrayElementDefinition {
+  /** Optional identity format for ID elements. */
+  readonly format?: IdentityFormat,
+  /** Scalar element type. */
+  readonly type: ScalarFieldType,
+}
+
+/** One scalar field definition. */
+export interface ScalarFieldDefinition {
+  /** Default SQL value expression, when present. */
+  readonly default?: unknown,
+  /** Canonical format for an ID field. */
+  readonly format?: IdentityFormat,
+  /** Maximum string length for String fields. */
+  readonly maxLength?: number,
+  /** Inclusive maximum for Number fields. */
+  readonly maximum?: number,
+  /** Minimum string length for String fields. */
+  readonly minLength?: number,
+  /** Inclusive minimum for Number fields. */
+  readonly minimum?: number,
+  /** Field name, in camelCase. */
+  readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Scalar field type. */
+  readonly type: ScalarFieldType,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
+}
+
+/** One named enum value and its generated TypeScript member. */
+export interface EnumValueDefinition {
+  /** Human-readable value description retained in generated contracts. */
+  readonly description: string,
+  /** Deterministic PascalCase TypeScript enum member name. */
+  readonly member: string,
+  /** Persisted string value. */
+  readonly value: string,
+}
+
+/** One named reusable Graph enum. */
+export interface EnumDefinition {
+  /** Exact PascalCase enum name. */
+  readonly name: string,
+  /** Declared values in authored order. */
+  readonly values: readonly EnumValueDefinition[],
+}
+
+/** One named enum field persisted as text with an allowed-value check. */
+export interface EnumFieldDefinition {
+  /** Default persisted value, when present. */
+  readonly default?: string,
+  /** Referenced enum name. */
+  readonly enum: string,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Enum,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
+}
+
+/** One singular entity-reference field. */
+export interface EntityReferenceFieldDefinition {
+  /** Derived physical column name, always `field + '.id'`. */
+  readonly column: string,
+  /** Default referenced identity, when present. */
+  readonly default?: string,
+  /** Derived collection name exposed on the target entity. */
+  readonly inverse?: string,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether the reference accepts NULL; omitted preserves optional-reference behavior. */
+  readonly nullable?: boolean,
+  /** Referenced entity name. */
+  readonly target: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Entity,
+  /** Whether this reference requires a unique index. */
+  readonly unique?: true,
+}
+
+/** Supported reciprocal navigation cardinalities. */
+export type InverseCardinality = 'Many' | 'One'
+
+/** One derived collection navigation declared on an entity. */
+export interface CollectionFieldDefinition {
+  /** Logical navigation name used by entity-rooted queries. */
+  readonly name: string,
+  /** Entity or relationship record type returned by the collection. */
+  readonly target: string,
+  /** Navigation-only discriminator. */
+  readonly type: FieldType.Collection,
+  /** Owner-relative Graph path resolved by the query compiler. */
+  readonly via: string,
+}
+
+/** One navigation-only reciprocal field. */
+export interface InverseFieldDefinition {
+  /** Cardinality exposed by this reverse navigation. */
+  readonly cardinality: InverseCardinality,
+  /** Forward field name on the target entity. */
+  readonly inverse: string,
+  /** Logical navigation name used by entity-rooted queries. */
+  readonly name: string,
+  /** Entity declaring the forward field. */
+  readonly target: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Inverse,
+}
+
+/** One opaque JSON field. */
+export interface JSONFieldDefinition {
+  /** Default JSON value, when present. */
+  readonly default?: unknown,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.JSON,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
+}
+
+/** One native scalar-array field. */
+export interface ArrayFieldDefinition {
+  /** Default array value, when present. */
+  readonly default?: readonly unknown[],
+  /** Scalar element descriptor. */
+  readonly items: ScalarArrayElementDefinition,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Array,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
+}
+
+/** A scalar, enum, native array, or opaque JSON field usable in a predicate. */
+export type QueryFieldDefinition =
+  | ArrayFieldDefinition
+  | EnumFieldDefinition
+  | JSONFieldDefinition
+  | ScalarFieldDefinition
+
+/** One logical entity field. */
+export type FieldDefinition =
+  | ArrayFieldDefinition
+  | EnumFieldDefinition
+  | JSONFieldDefinition
+  | ScalarFieldDefinition
+  | CollectionFieldDefinition
+  | EntityReferenceFieldDefinition
+  | InverseFieldDefinition
+
+/** One endpoint of a named relationship. */
+export interface RelationshipEndpointDefinition {
+  /** Local endpoint column name, in camelCase. */
+  readonly field: string,
+  /** Optional legacy navigation name exposed on the target entity. */
+  readonly inverse?: string,
+  /** Referenced entity or supported ancestor. */
+  readonly target: string,
+}
+
+/** A property owned by a named relationship rather than either endpoint. */
+export type RelationshipFieldDefinition =
+  | ArrayFieldDefinition
+  | EnumFieldDefinition
+  | JSONFieldDefinition
+  | ScalarFieldDefinition
+
+/** One named, first-class many-to-many relationship. */
+export interface RelationshipDefinition {
+  /** The endpoint descriptors in authored order. */
+  readonly between: readonly RelationshipEndpointDefinition[],
+  /** Declarative constraints owned by this relationship. */
+  readonly constraints: readonly ConstraintDefinition[],
+  /** Properties owned by the relationship itself. */
+  readonly fields: readonly RelationshipFieldDefinition[],
+  /** Relationship name, in PascalCase. */
+  readonly name: string,
+}
+
+/** One validated reciprocal Entity/Inverse association. */
+export interface AssociationDefinition {
+  /** Cardinality exposed by the inverse navigation. */
+  readonly cardinality: InverseCardinality,
+  /** Stored forward reference field. */
+  readonly forward: EntityReferenceFieldDefinition,
+  /** Entity declaring the forward reference. */
+  readonly forwardOwner: string,
+  /** Navigation-only inverse field. */
+  readonly inverse: InverseFieldDefinition,
+  /** Entity declaring the inverse field. */
+  readonly inverseOwner: string,
+}
+
+/** A collection navigation derived from an inverse reference. */
+export interface InverseDerivedCollectionDefinition {
+  /** Validated reciprocal association. */
+  readonly association: AssociationDefinition,
+  /** Derivation-kind discriminator. */
+  readonly kind: 'inverse',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The singular forward reference that owns this navigation. */
+  readonly reference: EntityReferenceFieldDefinition,
+  /** Entity type returned by the navigation. */
+  readonly target: string,
+}
+
+/** A singular navigation derived from a reciprocal One inverse. */
+export interface DerivedSingularDefinition {
+  /** Validated reciprocal association. */
+  readonly association: AssociationDefinition,
+  /** Derivation-kind discriminator. */
+  readonly kind: 'inverse-one',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The singular forward reference that owns this navigation. */
+  readonly reference: EntityReferenceFieldDefinition,
+  /** Entity type returned by the navigation. */
+  readonly target: string,
+}
+
+/** A collection navigation derived from one relationship endpoint. */
+export interface RelationshipDerivedCollectionDefinition {
+  /** Authored endpoint index that owns this navigation. */
+  readonly endpoint: 0 | 1,
+  /** Derivation-kind discriminator. */
+  readonly kind: 'relationship',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The named relationship that owns this navigation. */
+  readonly relationship: RelationshipDefinition,
+  /** Entity type returned by the navigation. */
+  readonly target: string,
+}
+
+/** An explicit collection declared as an Entity field and resolved through `via`. */
+export interface ExplicitCollectionDefinition {
+  /** Derivation-kind discriminator. */
+  readonly kind: 'explicit',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** Entity that authored the field. */
+  readonly owner: string,
+  /** Endpoint whose value is compared with the owning entity identity. */
+  readonly ownerEndpoint: RelationshipEndpointDefinition,
+  /** Relationship table traversed by the navigation. */
+  readonly relationship: RelationshipDefinition,
+  /** Declared collection target. */
+  readonly target: string,
+  /** Target endpoint when the collection projects an entity, absent for records. */
+  readonly targetEndpoint?: RelationshipEndpointDefinition,
+  /** Authored owner-relative Graph path. */
+  readonly via: string,
+  /** Additional relationship-record predicate declared inside `via`. */
+  readonly viaFilter?: Filter,
+  /** Default page size declared inside `via`. */
+  readonly viaLimit?: number | null,
+  /** Default page offset declared inside `via`. */
+  readonly viaOffset?: number,
+  /** Default ordering declared inside `via`. */
+  readonly viaOrderBy?: OrderBy,
+}
+
+/** One collection navigation available in the query model. */
+export type DerivedCollectionDefinition =
+  | ExplicitCollectionDefinition
+  | InverseDerivedCollectionDefinition
+  | RelationshipDerivedCollectionDefinition
+
+/** One effective physical field and its owning entity table. */
+export type EffectiveFieldDefinition =
+  Exclude<FieldDefinition, CollectionFieldDefinition | InverseFieldDefinition> & {
+    /** Entity table that physically owns this field. */
+    readonly owner: string,
+  }
+
+/** One normalized declarative structural constraint. */
+export interface StructuralConstraintDefinition {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Canonical logical fields covered by the constraint. */
+  readonly fields: readonly string[],
+  /** Deterministic physical unique-index name. */
+  readonly index: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Owning entity or relationship name. */
+  readonly owner: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Structural,
+}
+
+/** One normalized declarative validation constraint. */
+export interface ValidationConstraintDefinition {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Owning entity or relationship name. */
+  readonly owner: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Validation,
+  /** Graph-managed SECURITY DEFINER Boolean validity helper. */
+  readonly validator?: string,
+  /** Canonical positive valid-state predicate. */
+  readonly where: Filter,
+}
+
+/** One normalized declarative constraint. */
+export type ConstraintDefinition = StructuralConstraintDefinition | ValidationConstraintDefinition
+
+/** One entity definition. */
+export interface EntityDefinition {
+  /** Whether this entity has descendants and cannot be a concrete leaf. */
+  readonly abstract: boolean,
+  /** Derived inverse and relationship collection navigations exposed on this entity. */
+  readonly collections: readonly DerivedCollectionDefinition[],
+  /** Locally owned declarative constraints. */
+  readonly constraints: readonly ConstraintDefinition[],
+  /** Effective inherited and locally owned physical fields. */
+  readonly effectiveFields: readonly EffectiveFieldDefinition[],
+  /** Declared parent entity, when present. */
+  readonly extends?: string,
+  /** Locally owned fields plus the generated shared `id` field. */
+  readonly fields: readonly FieldDefinition[],
+  /** Effective inherited ID format. */
+  readonly idFormat?: IdentityFormat,
+  /** Effective inherited and locally owned reciprocal navigation fields. */
+  readonly inverseFields: readonly InverseFieldDefinition[],
+  /** Entity type name, in PascalCase. */
+  readonly name: string,
+  /** Parent entity name, or the system `Entity` root. */
+  readonly parent: string,
+  /** Effective singular inverse navigations exposed on this entity. */
+  readonly singularNavigations: readonly DerivedSingularDefinition[],
+}
+
+/** One physical table column compiled from canonical or system metadata. */
+interface TableColumn {
+  /** Element type for native array columns. */
+  readonly arrayType?: ScalarFieldType,
+  /** Default SQL expression, when present. */
+  readonly default?: string,
+  /** Physical column name. */
+  readonly name: string,
+  /** Whether this column accepts NULL. */
+  readonly nullable?: boolean,
+  /** Whether this column is the table's primary key. */
+  readonly primaryKey?: boolean,
+  /** Physical column type. */
+  readonly type: ScalarFieldType | FieldType.Array | FieldType.JSON,
+}
+
+/** One physical table index. */
+interface TableIndex {
+  /** Indexed columns, in order. */
+  readonly columns: readonly string[],
+  /** Optional non-default index method. */
+  readonly method?: 'gin',
+  /** Index name. */
+  readonly name: string,
+  /** Optional operator class applied to every column. */
+  readonly opclass?: string,
+  /** Whether adding or replacing this index requires review. */
+  readonly review?: boolean,
+  /** Whether the index enforces uniqueness. */
+  readonly unique?: boolean,
+}
+
+/** Internal physical table metadata shared by system and model-owned tables. */
+interface TableDefinition {
+  /** Table-level check constraints. */
+  readonly checks?: readonly TableCheck[],
+  /** Columns in physical order. */
+  readonly columns: readonly TableColumn[],
+  /** Table indexes, created after the table. */
+  readonly indexes?: readonly TableIndex[],
+  /** Physical table name. */
+  readonly name: string,
+  /** Table-level composite primary key columns, when not a single column key. */
+  readonly primaryKey?: readonly string[],
+}
+
+/** One table-level check constraint. */
+interface TableCheck {
+  /** Checked column for a named enum check. */
+  readonly column?: string,
+  /** SQL boolean expression. */
+  readonly expression: string,
+  /** Constraint name. */
+  readonly name: string,
+  /** Canonical allowed values for a named enum check. */
+  readonly values?: readonly string[],
+}
+
+/** One lifecycle function that must exist and match its canonical body. */
+interface LifecycleFunction {
+  /** Function body between the dollar quotes. */
+  readonly body: string,
+  /** Function name. */
+  readonly name: string,
+  /** Full CREATE OR REPLACE statement. */
+  readonly statement: string,
+}
+
+/** One lifecycle constraint trigger that must exist and match. */
+interface LifecycleTrigger {
+  /** UPDATE OF columns, when declared. */
+  readonly columns?: readonly string[],
+  /** Whether this is a constraint trigger. */
+  readonly constraint: boolean,
+  /** Whether this is deferrable. */
+  readonly deferrable: boolean,
+  /** Function name. */
+  readonly function: string,
+  /** Whether this is initially deferred. */
+  readonly initDeferred: boolean,
+  /** Trigger name. */
+  readonly name: string,
+  /** Full CREATE TRIGGER statement. */
+  readonly statement: string,
+  /** Owning table. */
+  readonly table: string,
+  /** Trigger bitmask. */
+  readonly type: number,
+}
+
+/** Canonical UUID identity pattern. */
+export const UUID_IDENTITY_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+/** Canonical signed 64-bit decimal identity pattern. */
+export const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
+/** Canonical signed 64-bit decimal bounds. */
+const SNOWFLAKE_MIN_TEXT = '-9223372036854775808'
+const SNOWFLAKE_MAX_TEXT = '9223372036854775807'
+
+/** Root-owned field names that ordinary entities cannot redeclare. */
+const ROOT_FIELD_NAMES = new Set<string>([
+  'entity',
+  'name',
+])
+
+/** Formats accepted by canonical `id` refinements. */
+const IDENTITY_FORMATS = new Set<string>([
+  'Snowflake',
+  'UUID',
+])
+
+/** Scalar field type names accepted by the entity definitions. */
+const SCALAR_FIELD_TYPES = new Set<string>([
+  FieldType.Boolean,
+  FieldType.Date,
+  FieldType.ID,
+  FieldType.Number,
+  FieldType.String,
+  FieldType.Timestamp,
+])
+
+/**
+ * Whether a value is a canonical lowercase UUID identity.
+ * @param value - Candidate identity text.
+ * @returns `true` for a canonical UUID.
+ */
+export function isCanonicalUUID(value: string): boolean {
+  return new RegExp(UUID_IDENTITY_PATTERN).test(value)
+}
+
+/**
+ * Whether a value is a canonical signed 64-bit decimal identity.
+ * @param value - Candidate identity text.
+ * @returns `true` for a canonical Snowflake-format value.
+ */
+export function isCanonicalSnowflake(value: string): boolean {
+  if (value.length > 20 || !new RegExp(SNOWFLAKE_IDENTITY_PATTERN).test(value)) return false
+  const numeric = BigInt(value)
+  return numeric >= BigInt(SNOWFLAKE_MIN_TEXT) && numeric <= BigInt(SNOWFLAKE_MAX_TEXT)
+}
+
+/**
+ * Resolve the effective identity format for every entity.
+ * @param seeds - Parsed seeds by name.
+ * @returns Effective formats by entity name.
+ */
+function effectiveFormats(seeds: ReadonlyMap<string, EntitySeed>): ReadonlyMap<string, IdentityFormat | undefined> {
+  const result = new Map<string, IdentityFormat | undefined>()
+  for (const seed of seeds.values()) {
+    const chain: EntitySeed[] = []
+    let current: EntitySeed | undefined = seed
+    while (current) {
+      chain.unshift(current)
+      current = current.extends ? seeds.get(current.extends) : undefined
+    }
+    let format: IdentityFormat | undefined
+    for (const part of chain) {
+      if (!part.idFormat) continue
+      if (format && format !== part.idFormat) {
+        throw invalid(
+          `id format conflict in entity "${seed.name}": ` +
+          `inherited "${format}", redeclared "${part.idFormat}"`,
+        )
+      }
+      format = part.idFormat
+    }
+    result.set(seed.name, format)
+  }
+  return result
+}
+
+/**
+ * Resolve direct children for every entity.
+ * @param seeds - Parsed seeds.
+ * @returns Child names by parent entity.
+ */
+function childrenByEntity(seeds: readonly EntitySeed[]): ReadonlyMap<string, readonly string[]> {
+  const children = new Map<string, string[]>()
+  for (const seed of seeds) {
+    if (!seed.extends) continue
+    const list = children.get(seed.extends) ?? []
+    list.push(seed.name)
+    children.set(seed.extends, list)
+  }
+  return children
+}
+
+/**
+ * Build root-owned effective fields.
+ * @param format - Effective identity format.
+ * @returns Root id, name and entity fields.
+ */
+function rootFields(format: IdentityFormat | undefined): readonly EffectiveFieldDefinition[] {
+  return [
+    { ...(format ? { format } : {}), name: 'id', owner: 'Entity', type: FieldType.ID },
+    { name: 'name', owner: 'Entity', type: FieldType.String },
+    { name: 'entity', owner: 'Entity', type: FieldType.String },
+    {
+      column: 'lastUpdatedBy.id',
+      name: 'lastUpdatedBy',
+      nullable: true,
+      owner: 'Entity',
+      target: 'User',
+      type: FieldType.Entity,
+    },
+    { name: 'lastUpdatedAt', nullable: true, owner: 'Entity', type: FieldType.Timestamp },
+  ]
+}
+
+/**
+ * Create a synthetic definition for the universal identity root.
+ * @returns Canonical root identity metadata.
+ */
+export function identityDefinition(): EntityDefinition {
+  return {
+    abstract: false,
+    collections: [],
+    constraints: [],
+    effectiveFields: rootFields(undefined),
+    fields: [],
+    inverseFields: [],
+    name: 'Entity',
+    parent: 'Entity',
+    singularNavigations: [],
+  }
+}
+
+/**
+ * Build the system-owned universal identity root.
+ * @param entities - Validated entity definitions.
+ * @returns The physical identity-root table.
+ */
+function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
+  const leaves = entities.filter(entity => !entity.abstract).map(entity => quoteLiteral(entity.name))
+  const leafCheck = leaves.length === 0 ? 'false' : `"entity" in (${leaves.join(', ')})`
+  return {
+    checks: [
+      {
+        expression: identityCheck('id', undefined),
+        name: 'Entity_id_format_check',
+      },
+      {
+        expression: leafCheck,
+        name: 'Entity_entity_check',
+      },
+    ],
+    columns: [
+      { name: 'id', primaryKey: true, type: FieldType.ID },
+      { name: 'name', type: FieldType.String },
+      { name: 'entity', type: FieldType.String },
+      { name: 'lastUpdatedBy.id', nullable: true, type: FieldType.String },
+      { name: 'lastUpdatedAt', nullable: true, type: FieldType.Timestamp },
+    ],
+    indexes: [
+      { columns: ['name', 'id'], name: 'Entity_name_id_idx' },
+      {
+        columns: ['name'],
+        method: 'gin',
+        name: 'Entity_name_trgm_idx',
+        opclass: 'public.gin_trgm_ops',
+      },
+    ],
+    name: 'Entity',
+  }
+}
+
+/** Parsed and validated canonical entity definitions. */
+export class EntityDefinitions {
+  /** Validated reciprocal associations in declaration order. */
+  readonly associations: readonly AssociationDefinition[]
+  /** Named reusable Graph enums in declaration order. */
+  readonly enums: readonly EnumDefinition[]
+  /** Entities in their declared order. */
+  readonly entities: readonly EntityDefinition[]
+  /** Named first-class relationships in their declared order. */
+  readonly relationships: readonly RelationshipDefinition[]
+  /** Derived collection navigations exposed by the universal identity root. */
+  readonly #rootCollections: readonly DerivedCollectionDefinition[]
+  /** Derived singular navigations exposed by the universal identity root. */
+  readonly #rootSingularNavigations: readonly DerivedSingularDefinition[]
+  /** Canonical ancestry by entity name. */
+  readonly #ancestryByName: ReadonlyMap<string, readonly string[]>
+  /** Concrete descendants by ancestor name. */
+  readonly #descendantNames: ReadonlyMap<string, readonly string[]>
+
+  /**
+   * Validate one JSON-compatible authored document.
+   * @param value - Parsed authored document.
+   * @returns The validated entity definitions.
+   * @throws {Error} When the document is invalid.
+   */
+  static fromDocument(value: unknown): EntityDefinitions {
+    const document = parseEntityDocument(value)
+    return new EntityDefinitions(
+      document.associations,
+      document.entities,
+      document.enums,
+      document.relationships,
+      document.rootCollections,
+      document.rootSingularNavigations,
+    )
+  }
+
+  /**
+   * Parse and validate canonical entity JSON.
+   * @param source - Canonical JSON text.
+   * @returns The validated entity definitions.
+   * @throws {Error} When the JSON or entity definitions are invalid.
+   */
+  static load(source: string): EntityDefinitions {
+    let value: unknown
+    try {
+      value = JSON.parse(source)
+    } catch (error) {
+      throw new Error('Invalid entity JSON', { cause: error })
+    }
+    return EntityDefinitions.fromDocument(value)
+  }
+
+  /**
+   * Creates entity definitions from already-validated definitions.
+   * @param associations - Validated reciprocal associations.
+   * @param entities - Validated entity definitions.
+   * @param enums - Named reusable Graph enums.
+   * @param relationships - Named relationship definitions.
+   * @param rootCollections - Collection navigations exposed by the universal identity root.
+   * @param rootSingularNavigations - Singular navigations exposed by the universal identity root.
+   */
+  private constructor(
+    associations: readonly AssociationDefinition[],
+    entities: readonly EntityDefinition[],
+    enums: readonly EnumDefinition[],
+    relationships: readonly RelationshipDefinition[],
+    rootCollections: readonly DerivedCollectionDefinition[],
+    rootSingularNavigations: readonly DerivedSingularDefinition[],
+  ) {
+    this.associations = associations
+    this.entities = entities
+    this.enums = enums
+    this.relationships = relationships
+    this.#rootCollections = rootCollections
+    this.#rootSingularNavigations = rootSingularNavigations
+    const ancestry = new Map<string, readonly string[]>()
+    const descendants = new Map<string, string[]>([['Entity', []]])
+    const byName = new Map(entities.map(entity => [entity.name, entity]))
+    for (const entity of entities) {
+      const chain: string[] = []
+      let current: EntityDefinition | undefined = entity
+      while (current && current.name !== 'Entity') {
+        chain.push(current.name)
+        current = byName.get(current.parent)
+      }
+      chain.push('Entity')
+      ancestry.set(entity.name, chain)
+      if (!entity.abstract) {
+        for (const ancestor of chain) {
+          const values = descendants.get(ancestor) ?? []
+          values.push(entity.name)
+          descendants.set(ancestor, values)
+        }
+      }
+    }
+    this.#ancestryByName = ancestry
+    this.#descendantNames = descendants
+  }
+
+  /**
+   * Return one entity's ancestry, including itself and the universal root.
+   * @param name - Entity name.
+   * @returns Ancestry from the entity toward `Entity`.
+   * @throws {Error} When the entity is unknown.
+   */
+  ancestry(name: string): readonly string[] {
+    if (name === 'Entity') return ['Entity']
+    const value = this.#ancestryByName.get(name)
+    if (!value) throw new Error(`Unknown entity "${name}"`)
+    return value
+  }
+
+  /**
+   * Whether one entity is compatible with an ancestor.
+   * @param name - Entity name.
+   * @param ancestor - Ancestor name.
+   * @returns `true` when the entity is the ancestor or descends from it.
+   */
+  isA(name: string, ancestor: string): boolean {
+    if (name === 'Entity') return ancestor === 'Entity'
+    return this.#ancestryByName.get(name)?.includes(ancestor) === true
+  }
+
+  /**
+   * Return concrete types compatible with one ancestor.
+   * @param name - Entity or `Entity` name.
+   * @returns Concrete descendants in declaration order.
+   * @throws {Error} When the entity is unknown.
+   */
+  concreteDescendants(name: string): readonly EntityDefinition[] {
+    const values = this.#descendantNames.get(name)
+    if (!values) throw new Error(`Unknown entity "${name}"`)
+    return values.map(value => this.entity(value) as EntityDefinition)
+  }
+
+  /**
+   * Return every authored declarative constraint with its owner.
+   * @returns Canonical constraints in entity then relationship order.
+   */
+  get constraints(): readonly ConstraintDefinition[] {
+    return [
+      ...this.entities.flatMap(entity => entity.constraints),
+      ...this.relationships.flatMap(relationship => relationship.constraints),
+    ]
+  }
+
+  /**
+   * Return every normalized validation constraint applying to one entity or relationship.
+   *
+   * Entity constraints apply to the entity and all of its descendants.
+   * @param name - Exact entity or relationship name.
+   * @returns Validation constraints in ancestry order.
+   */
+  validationConstraints(name: string): readonly ValidationConstraintDefinition[] {
+    const relationship = this.relationship(name)
+    if (relationship) {
+      return relationship.constraints.filter(isValidationConstraint)
+    }
+    if (!this.entity(name)) return []
+    return this.ancestry(name).flatMap(ancestor => (
+      (this.entity(ancestor)?.constraints ?? []).filter(isValidationConstraint)
+    ))
+  }
+
+  /**
+   * Compile the canonical physical schema shared by planning and introspection.
+   *
+   * Security roles, grants, functions, and policies are compiled by {@link Graph}.
+   * This method emits only the canonical model's tables and lifecycle objects.
+   * @returns The typed desired physical schema.
+   */
+  physicalSchema(): PhysicalSchema {
+    const tables: PhysicalTable[] = this.tables.map(table => ({
+      checks: (table.checks ?? []).map(check => ({
+        ...(check.column ? { column: check.column } : {}),
+        name: check.name,
+        sql: addCheckSql(table.name, check),
+        ...(check.values ? { values: check.values } : {}),
+      })) satisfies PhysicalCheck[],
+      columns: table.columns.map(column => ({
+        ...(column.default === undefined ? {} : { default: column.default }),
+        name: column.name,
+        nullable: column.nullable === true,
+        primaryKey: column.primaryKey === true,
+        sqlType: columnType(column),
+      })),
+      forceRowSecurity: false,
+      indexes: (table.indexes ?? []).map(index => ({
+        columns: index.columns,
+        method: index.method ?? 'btree',
+        name: index.name,
+        operatorClasses: index.opclass === undefined ? [] : [index.opclass],
+        review: index.review === true,
+        sql: createIndex(table, index),
+        table: table.name,
+        unique: index.unique === true,
+      })),
+      name: table.name,
+      primaryKey: table.primaryKey ?? table.columns.filter(column => column.primaryKey).map(column => column.name),
+      rowSecurity: false,
+      sql: createTable(table),
+    }))
+    const updateOwnerConstraint = this.entities.some(entity => entity.name === 'User')
+      ? [{
+        column: 'lastUpdatedBy.id',
+        definition: constraintDefinition(
+          'alter table "Entity" add constraint "Entity_lastUpdatedBy_fkey" ' +
+            'foreign key ("lastUpdatedBy.id") references "User" ("id") deferrable initially immediate',
+        ),
+        name: 'Entity_lastUpdatedBy_fkey',
+        sql: 'alter table "Entity" add constraint "Entity_lastUpdatedBy_fkey" ' +
+            'foreign key ("lastUpdatedBy.id") references "User" ("id") deferrable initially immediate',
+        table: 'Entity',
+        target: 'User',
+        targetColumn: 'id',
+      }] satisfies PhysicalConstraint[]
+      : []
+    const constraints: PhysicalConstraint[] = [
+      ...updateOwnerConstraint,
+      ...this.entities.map(entity => ({
+        column: 'id',
+        definition: constraintDefinition(addParentConstraint(entity)),
+        name: parentConstraintName(entity),
+        sql: addParentConstraint(entity),
+        table: entity.name,
+        target: entity.parent,
+        targetColumn: 'id',
+      })),
+      ...this.entities.flatMap(entity => entity.fields
+        .filter(isReferenceField)
+        .map(field => ({
+          column: field.column,
+          definition: constraintDefinition(addConstraint(entity, field)),
+          name: constraintName(entity, field),
+          sql: addConstraint(entity, field),
+          table: entity.name,
+          target: field.target,
+          targetColumn: 'id',
+        }))),
+      ...this.relationships.flatMap(relationship => relationshipForeignKeyDefinitions(relationship)
+        .map(definition => ({
+          column: definition.column,
+          definition: constraintDefinition(definition.statement),
+          name: definition.name,
+          sql: definition.statement,
+          table: relationship.name,
+          target: definition.target,
+          targetColumn: 'id',
+        }))),
+    ]
+    const lifecycle = lifecycleDefinitions(this.entities)
+    return {
+      constraints,
+      extensions: ['pg_trgm'],
+      functions: lifecycle.functions.map(fn => ({
+        body: fn.body,
+        lifecycle: true,
+        name: fn.name,
+        required: [fn.name],
+        securityDefiner: false,
+        sql: fn.statement,
+      })),
+      policies: [],
+      tables,
+      triggers: lifecycle.triggers.map(trigger => ({
+        columns: trigger.columns,
+        constraint: trigger.constraint,
+        deferrable: trigger.deferrable,
+        functionName: trigger.function,
+        initDeferred: trigger.initDeferred,
+        name: trigger.name,
+        sql: trigger.statement,
+        table: trigger.table,
+        type: trigger.type,
+      })),
+    }
+  }
+
+  /**
+   * Resolve the physical tables for the identity root, entities and relationships.
+   * @returns System-owned root followed by model-owned tables in order.
+   */
+  private get tables(): readonly TableDefinition[] {
+    const inverseIndexes = inverseReferenceIndexes(this.associations)
+    return [
+      identityRoot(this.entities),
+      ...this.entities.map(entity => entityTable(entity, inverseIndexes.get(entity.name) ?? [], this.enums)),
+      ...this.relationships.map(relationship => relationshipTable(relationship, this.enums)),
+    ]
+  }
+
+  /**
+   * Resolve derived collection navigations exposed by one entity.
+   * @param name - Exact entity name, or `Entity` for the universal root.
+   * @returns Derived navigations in canonical order.
+   */
+  collections(name: string): readonly DerivedCollectionDefinition[] {
+    return name === 'Entity'
+      ? this.#rootCollections
+      : this.entity(name)?.collections ?? []
+  }
+
+  /**
+   * Resolve effective singular inverse navigations exposed by one entity.
+   * @param name - Exact entity name, or `Entity` for the universal root.
+   * @returns Effective singular navigations in canonical order.
+   */
+  singularNavigations(name: string): readonly DerivedSingularDefinition[] {
+    return name === 'Entity'
+      ? this.#rootSingularNavigations
+      : this.entity(name)?.singularNavigations ?? []
+  }
+
+  /**
+   * Find the reciprocal association for one stored forward reference.
+   * @param owner - Entity owning the physical forward field.
+   * @param field - Forward field name.
+   * @returns The association, or undefined for an independent forward-only reference.
+   */
+  association(owner: string, field: string): AssociationDefinition | undefined {
+    return this.associations.find(candidate => (
+      candidate.forwardOwner === owner && candidate.forward.name === field
+    ))
+  }
+
+  /**
+   * Find an entity by name.
+   * @param name - Exact entity name.
+   * @returns The entity, or undefined when absent.
+   */
+  entity(name: string): EntityDefinition | undefined {
+    return this.entities.find(entity => entity.name === name)
+  }
+
+  /**
+   * Find a named Graph enum.
+   * @param name - Exact enum name.
+   * @returns The enum, or undefined when absent.
+   */
+  enum(name: string): EnumDefinition | undefined {
+    return this.enums.find(enumeration => enumeration.name === name)
+  }
+
+  /**
+   * Find a named relationship.
+   * @param name - Exact relationship name.
+   * @returns The relationship, or undefined when absent.
+   */
+  relationship(name: string): RelationshipDefinition | undefined {
+    return this.relationships.find(relationship => relationship.name === name)
+  }
+
+  /**
+   * Deterministic PostgreSQL DDL for the identity root and declared entities.
+   *
+   * Every table, column and index is listed first, in declaration order;
+   * foreign-key constraints and lifecycle checks follow. This is a read-only
+   * projection for inspection and consumers; installation and upgrades use
+   * the reviewed `DDL.plan -> review -> apply` path.
+   * @returns The complete ordered DDL sequence.
+   */
+  get ddl(): readonly string[] {
+    const schema = this.physicalSchema()
+    return [
+      IDENTITY_EXTENSION_DDL,
+      ...schema.tables.flatMap(table => [
+        table.sql,
+        ...table.indexes.map(index => index.sql),
+      ]),
+      ...schema.constraints.map(constraint => constraint.sql),
+      ...schema.functions.map(fn => fn.sql),
+      ...schema.triggers.map(trigger => trigger.sql),
+    ]
+  }
+
+}
+
+/**
+ * Extract the bare constraint definition from an ALTER TABLE statement.
+ * @param statement - Canonical add-constraint SQL.
+ * @returns The catalog-comparable definition.
+ */
+function constraintDefinition(statement: string): string {
+  return statement.replace(/^alter table\s+\S+\s+add constraint\s+"[^"]+"\s+/iu, '')
+}
+
+/** Parsed canonical document, including derived navigations. */
+interface ParsedEntityDocument {
+  /** Validated reciprocal associations. */
+  readonly associations: readonly AssociationDefinition[],
+  /** Resolved entities in declaration order. */
+  readonly entities: readonly EntityDefinition[],
+  /** Named reusable Graph enums in declaration order. */
+  readonly enums: readonly EnumDefinition[],
+  /** Named relationships in declaration order. */
+  readonly relationships: readonly RelationshipDefinition[],
+  /** Derived collection navigations exposed by the universal identity root. */
+  readonly rootCollections: readonly DerivedCollectionDefinition[],
+  /** Derived singular navigations exposed by the universal identity root. */
+  readonly rootSingularNavigations: readonly DerivedSingularDefinition[],
+}
+
+/**
+ * Validate the authored Graph enum dictionary.
+ * @param value - Authored `enums` value.
+ * @returns Named enum definitions keyed by exact name.
+ */
+function parseEnums(value: unknown): ReadonlyMap<string, EnumDefinition> {
+  const enums = new Map<string, EnumDefinition>()
+  if (value === undefined) return enums
+  if (!isRecord(value)) throw invalid('enums must be an object keyed by enum name')
+  for (const [name, definition] of Object.entries(value)) {
+    if (!/^[A-Z][A-Za-z0-9]*$/.test(name)) {
+      throw invalid(`enum "${name}" name must be a PascalCase identifier`)
+    }
+    if (name === 'Entity') throw invalid('enum name "Entity" is reserved for the universal identity root')
+    if (name === 'Reference') throw invalid('enum name "Reference" is reserved for generated contracts')
+    if (enums.has(name)) throw invalid(`duplicate enum "${name}"`)
+    if (!isRecord(definition)) {
+      throw invalid(`enum "${name}" must be an object mapping persisted values to descriptions`)
+    }
+    const entries = Object.entries(definition)
+    if (entries.length === 0) throw invalid(`enum "${name}" must declare at least one value`)
+    const values: EnumValueDefinition[] = []
+    const members = new Set<string>()
+    const persisted = new Set<string>()
+    for (const [enumValue, description] of entries) {
+      if (enumValue.length === 0) throw invalid(`enum "${name}" values must be non-empty strings`)
+      if (persisted.has(enumValue)) throw invalid(`enum "${name}" has duplicate value "${enumValue}"`)
+      if (typeof description !== 'string' || description.trim().length === 0) {
+        throw invalid(`enum "${name}.${enumValue}" must have a non-empty description`)
+      }
+      const member = enumMemberName(name, enumValue)
+      if (members.has(member)) {
+        throw invalid(`enum "${name}" values produce an ambiguous member name "${member}"`)
+      }
+      members.add(member)
+      persisted.add(enumValue)
+      values.push({ description, member, value: enumValue })
+    }
+    enums.set(name, { name, values })
+  }
+  return enums
+}
+
+/**
+ * Derive the deterministic PascalCase TypeScript member for one persisted value.
+ * @param enumName - Owning enum name.
+ * @param value - Persisted string value.
+ * @returns The generated member name.
+ * @throws {Error} When the value cannot produce an unambiguous identifier.
+ */
+function enumMemberName(enumName: string, value: string): string {
+  const parts = value.split(/[^A-Za-z0-9]+/u).filter(part => part.length > 0)
+  const member = parts
+    .map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+    .join('')
+  if (!/^[A-Z][A-Za-z0-9]*$/.test(member)) {
+    throw invalid(`enum "${enumName}" value "${value}" cannot produce a TypeScript member name`)
+  }
+  return member
+}
+
+/**
+ * Validate the parsed entity document root.
+ * @param value - Parsed JSON value.
+ * @returns Validated entities, relationships and navigations.
+ */
+function parseEntityDocument(value: unknown): ParsedEntityDocument {
+  if (!isRecord(value)) throw invalid('entity definitions must be an object')
+  assertKnownKeys(value, ['entities', 'enums', 'relationships'], 'top-level')
+  if (!Array.isArray(value.entities) || value.entities.length === 0) {
+    throw invalid('entities must be a non-empty array')
+  }
+
+  const enums = parseEnums(value.enums)
+  const seeds = value.entities.map(candidate => parseEntity(candidate, enums))
+  const byName = new Map<string, EntitySeed>()
+  for (const seed of seeds) {
+    if (byName.has(seed.name)) throw invalid(`duplicate entity "${seed.name}"`)
+    byName.set(seed.name, seed)
+  }
+  for (const enumeration of enums.values()) {
+    if (byName.has(enumeration.name)) {
+      throw invalid(`enum "${enumeration.name}" conflicts with an entity name`)
+    }
+  }
+  validateAncestry(seeds, byName)
+  for (const seed of seeds) {
+    for (const field of seed.fields) {
+      if (field.type !== FieldType.Entity && field.type !== FieldType.Inverse) continue
+      if (field.target !== 'Entity' && !byName.has(field.target)) {
+        throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
+      }
+    }
+  }
+  const formats = effectiveFormats(byName)
+  const children = childrenByEntity(seeds)
+  const resolved = seeds.map(seed => resolveEntity(seed, byName, formats, children))
+  const relationships = parseRelationships(value.relationships, byName, enums)
+  validateRelationshipPhysicalNames(relationships)
+  validateConstraintNames(resolved, relationships)
+  const associations = resolveAssociations(resolved)
+  const navigations = deriveNavigations(resolved, relationships, associations)
+  const identity = {
+    ...identityDefinition(),
+    collections: navigations.collections.get('Entity') ?? [],
+    singularNavigations: navigations.singular.get('Entity') ?? [],
+  }
+  const entities = resolved.map(entity => ({
+    ...entity,
+    collections: navigations.collections.get(entity.name) ?? [],
+    singularNavigations: navigations.singular.get(entity.name) ?? [],
+  }))
+  validateDescendantContracts(entities)
+  const byResolved = new Map<string, EntityDefinition>(entities.map(entity => [entity.name, entity]))
+  byResolved.set('Entity', identity)
+  return {
+    associations,
+    entities: entities.map(entity => ({
+      ...entity,
+      constraints: normalizeConstraintList(entity, byResolved),
+    })),
+    enums: [...enums.values()],
+    relationships: relationships.map(relationship => {
+      const owner = relationshipView(relationship)
+      return {
+        ...relationship,
+        constraints: normalizeConstraintList(owner, byResolved),
+      }
+    }),
+    rootCollections: navigations.collections.get('Entity') ?? [],
+    rootSingularNavigations: navigations.singular.get('Entity') ?? [],
+  }
+}
+
+/**
+ * Build the row-shaped entity view used to normalize relationship constraints.
+ * @param relationship - Named relationship definition.
+ * @returns Endpoint and relationship-owned fields as one entity view.
+ */
+export function relationshipView(relationship: RelationshipDefinition): EntityDefinition {
+  const fields: EffectiveFieldDefinition[] = [
+    ...relationship.between.map(endpoint => ({
+      column: `${endpoint.field}.id`,
+      name: endpoint.field,
+      owner: relationship.name,
+      target: endpoint.target,
+      type: FieldType.Entity as const,
+    })),
+    ...relationship.fields.map(field => ({ ...field, owner: relationship.name })),
+  ]
+  return {
+    abstract: false,
+    collections: [],
+    constraints: relationship.constraints,
+    effectiveFields: fields,
+    fields: fields as unknown as FieldDefinition[],
+    inverseFields: [],
+    name: relationship.name,
+    parent: 'Entity',
+    singularNavigations: [],
+  }
+}
+
+/**
+ * Whether one constraint is a validation predicate.
+ * @param constraint - Normalized constraint.
+ * @returns `true` for validation constraints.
+ */
+function isValidationConstraint(
+  constraint: ConstraintDefinition,
+): constraint is ValidationConstraintDefinition {
+  return constraint.type === Constraint.Validation
+}
+
+/**
+ * Normalize every validation constraint owned by one entity view.
+ * @param owner - Entity or relationship view.
+ * @param entities - Resolved entities keyed by name, including `Entity`.
+ * @returns Constraints with canonical predicates.
+ */
+function normalizeConstraintList(
+  owner: EntityDefinition,
+  entities: ReadonlyMap<string, EntityDefinition>,
+): readonly ConstraintDefinition[] {
+  return owner.constraints.map(constraint => {
+    if (constraint.type !== Constraint.Validation) return constraint
+    const collection = (name: string): CollectionFilterScope | undefined => (
+      constraintCollection(owner, entities, name)
+    )
+    const resolve = (name: string) => constraintField(owner, entities, name)
+    const array = (name: string) => constraintArray(owner, name)
+    const raw = constraint.where as unknown as Filter | Readonly<Record<string, unknown>> | string
+    const where = typeof raw === 'string'
+      ? QueryNormalizer.normalize(owner, raw, resolve, collection, array)
+      : Predicate.normalize(owner, raw, resolve, collection, array)
+    if (!where) {
+      throw invalid(`validation constraint "${constraint.name}" must declare a non-empty where`)
+    }
+    validateConstraintFilter(owner, entities, where)
+    return { ...constraint, validator: validationFunctionName(owner.name, constraint.name, where), where }
+  })
+}
+
+/**
+ * Build the deterministic Graph-managed validity helper name for one constraint.
+ * @param owner - Constraint owner.
+ * @param name - Constraint name.
+ * @param where - Canonical predicate.
+ * @returns A length-safe `basis.validate_*` function name.
+ */
+function validationFunctionName(owner: string, name: string, where: Filter): string {
+  const hash = createHash('sha256')
+    .update(JSON.stringify({ name, owner, where }))
+    .digest('hex')
+    .slice(0, 16)
+  return `validate_${hash}`
+}
+
+/**
+ * Validate field-reference operands inside one normalized constraint predicate.
+ * @param entity - Occurrence where the predicate is evaluated.
+ * @param entities - Resolved entities keyed by name, including `Entity`.
+ * @param filter - Normalized predicate.
+ * @param member - Collection member scope, when the predicate is nested.
+ * @throws {Error} When a referenced path is unknown or type-incompatible.
+ */
+function validateConstraintFilter(
+  entity: EntityDefinition,
+  entities: ReadonlyMap<string, EntityDefinition>,
+  filter: Filter,
+  member?: CollectionFilterScope,
+): void {
+  if ('filters' in filter) {
+    if ('field' in filter) {
+      const collection = member
+        ? member.collection?.(filter.field)
+        : constraintCollection(entity, entities, filter.field)
+      if (collection) {
+        for (const child of filter.filters) {
+          validateConstraintFilter(collection.definition, entities, child, collection)
+        }
+        return
+      }
+      const array = member
+        ? member.array?.(filter.field)
+        : constraintArray(entity, filter.field)
+      if (!array) {
+        throw invalid(`validation collection or array "${entity.name}.${filter.field}" is not declared`)
+      }
+      const arrayMember = arrayMemberField(array.member)
+      const arrayEntity = arrayMemberEntity(array.field, arrayMember)
+      const scope: CollectionFilterScope = {
+        definition: arrayEntity,
+        field: name => arrayMemberResolver(name, arrayMember),
+      }
+      for (const child of filter.filters) {
+        validateConstraintFilter(arrayEntity, entities, child, scope)
+      }
+      return
+    }
+    for (const child of filter.filters) {
+      validateConstraintFilter(entity, entities, child, member)
+    }
+    return
+  }
+  const resolve = (name: string): QueryFieldDefinition => {
+    if (name === ACTOR_FIELD_NAME) return ACTOR_FIELD
+    if (member) return member.field(name)
+    return constraintField(entity, entities, name)
+  }
+  const left = resolve(filter.field)
+  if (!isFieldOperand(filter.value)) return
+  const right = resolve(filter.value.$field)
+  if (comparableFieldType(left.type) !== comparableFieldType(right.type)) {
+    throw invalid(
+      'validation constraint references incompatible fields ' +
+      `"${filter.field}" and "${filter.value.$field}"`,
+    )
+  }
+}
+
+/**
+ * Resolve one logical field or reference path for a validation constraint.
+ * @param entity - Occurrence where traversal starts.
+ * @param entities - Resolved entities keyed by name, including `Entity`.
+ * @param name - Logical field or dotted reference path.
+ * @returns The terminal field definition.
+ */
+function constraintField(
+  entity: EntityDefinition,
+  entities: ReadonlyMap<string, EntityDefinition>,
+  name: string,
+): QueryFieldDefinition {
+  if (name === ACTOR_FIELD_NAME) return ACTOR_FIELD
+  const resolved = resolveFieldPath(entity, name, { resolve: value => entities.get(value) })
+  if ('kind' in resolved) {
+    if (resolved.kind === 'unknown') {
+      const segment = name.split('.').pop() ?? name
+      throw invalid(`validation path "${entity.name}.${name}" has unknown field "${segment}"`)
+    }
+    if (resolved.kind === 'non-reference') {
+      throw invalid(
+        `validation path "${entity.name}.${name}" traverses non-reference field "${resolved.segment}"`,
+      )
+    }
+    throw invalid(`validation path "${entity.name}.${name}" exceeds the maximum depth`)
+  }
+  return resolved.identity ? { name, type: FieldType.ID } : resolved.field
+}
+
+/**
+ * Resolve one collection navigation for a validation constraint.
+ * @param entity - Occurrence owning the collection.
+ * @param entities - Resolved entities keyed by name, including `Entity`.
+ * @param name - Collection navigation name.
+ * @returns The member scope, or undefined when the name is not a collection.
+ */
+function constraintCollection(
+  entity: EntityDefinition,
+  entities: ReadonlyMap<string, EntityDefinition>,
+  name: string,
+): CollectionFilterScope | undefined {
+  if (entity.effectiveFields.some(field => field.name === name && field.type === FieldType.Array)) {
+    return undefined
+  }
+  const resolved = resolveCollectionPath(entity, name, { resolve: value => entities.get(value) })
+  if (!resolved) return undefined
+  if ('kind' in resolved) {
+    throw invalid(`validation collection "${entity.name}.${name}" is not a valid collection path`)
+  }
+  const target = entities.get(resolved.collection.target)
+  if (!target) throw invalid(`validation collection "${name}" has unknown target`)
+  return {
+    array: path => constraintArray(target, path),
+    collection: nested => constraintCollection(target, entities, nested),
+    definition: target,
+    field: path => constraintCollectionField(resolved.collection, target, entities, path),
+  }
+}
+
+/**
+ * Resolve one member field inside a validation collection.
+ * @param collection - Collection metadata.
+ * @param target - Collection target entity view.
+ * @param entities - Resolved entities keyed by name.
+ * @param path - Member path or relationship-owned property.
+ * @returns The member field definition.
+ */
+function constraintCollectionField(
+  collection: DerivedCollectionDefinition,
+  target: EntityDefinition,
+  entities: ReadonlyMap<string, EntityDefinition>,
+  path: string,
+): QueryFieldDefinition {
+  const resolved = resolveCollectionMember(collection, target, path, {
+    resolve: value => entities.get(value),
+  })
+  if ('kind' in resolved) {
+    throw invalid(`validation collection "${collection.name}" has unknown field "${path}"`)
+  }
+  return resolved.field
+}
+
+/**
+ * Resolve one native array navigation for a validation constraint.
+ * @param entity - Occurrence owning the array.
+ * @param name - Native array field name.
+ * @returns The array member scope, or undefined when the name is not an array.
+ */
+function constraintArray(entity: EntityDefinition, name: string) {
+  const field = entity.effectiveFields.find(candidate => (
+    candidate.name === name && candidate.type === FieldType.Array
+  ))
+  if (field?.type !== FieldType.Array) return undefined
+  return {
+    field,
+    member: { ...(field.items.format ? { format: field.items.format } : {}), name: field.name, type: field.items.type },
+  }
+}
+
+/**
+ * Validate reciprocal Entity/Inverse declarations and build associations.
+ * @param entities - Resolved entity graph.
+ * @returns Validated associations in declaration order.
+ */
+function resolveAssociations(
+  entities: readonly EntityDefinition[],
+): readonly AssociationDefinition[] {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const associations: AssociationDefinition[] = []
+  const byForward = new Map<string, AssociationDefinition>()
+  for (const entity of entities) {
+    for (const inverse of entity.fields.filter(field => field.type === FieldType.Inverse)) {
+      const target = byName.get(inverse.target)
+      if (!target) {
+        throw invalid(`inverse field "${entity.name}.${inverse.name}" targets unknown entity "${inverse.target}"`)
+      }
+      const candidates = target.effectiveFields.filter(field => (
+        field.type === FieldType.Entity && field.name === inverse.inverse
+      ))
+      if (candidates.length !== 1) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" requires one forward ` +
+          `"${inverse.target}.${inverse.inverse}" reference, found ${candidates.length}`,
+        )
+      }
+      const forward = candidates[0] as EffectiveFieldDefinition & EntityReferenceFieldDefinition
+      if (forward.inverse !== inverse.name) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" and forward ` +
+          `"${forward.owner}.${forward.name}" do not name each other`,
+        )
+      }
+      if (inverse.target !== forward.owner) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" target "${inverse.target}" ` +
+          `must be the forward owner "${forward.owner}"`,
+        )
+      }
+      if (!isSameOrDescendant(entities, forward.target, entity.name)) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" must be declared on ` +
+          `forward target "${forward.target}" or an ancestor`,
+        )
+      }
+      const key = `${forward.owner}\u0000${forward.name}`
+      if (byForward.has(key)) {
+        throw invalid(
+          `forward reference "${forward.owner}.${forward.name}" has more than one inverse navigation`,
+        )
+      }
+      const association: AssociationDefinition = {
+        cardinality: inverse.cardinality,
+        forward,
+        forwardOwner: forward.owner,
+        inverse,
+        inverseOwner: entity.name,
+      }
+      byForward.set(key, association)
+      associations.push(association)
+    }
+  }
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Entity || field.inverse === undefined) continue
+      const key = `${entity.name}\u0000${field.name}`
+      if (!byForward.has(key)) {
+        throw invalid(
+          `forward reference "${entity.name}.${field.name}" names inverse ` +
+          `"${field.inverse}" on "${field.target}" but no reciprocal Inverse field was declared`,
+        )
+      }
+    }
+  }
+  return associations
+}
+
+/**
+ * Whether an entity is the ancestor or a descendant of another entity.
+ * @param entities - Resolved entity graph.
+ * @param entityName - Candidate descendant.
+ * @param ancestor - Candidate ancestor.
+ * @returns `true` when the ancestor covers the entity.
+ */
+function isSameOrDescendant(
+  entities: readonly EntityDefinition[],
+  entityName: string,
+  ancestor: string,
+): boolean {
+  let current: string | undefined = entityName
+  while (current !== undefined) {
+    if (current === ancestor) return true
+    current = entities.find(entity => entity.name === current)?.parent
+    if (current === 'Entity') return ancestor === 'Entity'
+  }
+  return false
+}
+
+/** Effective collection and singular navigation maps. */
+interface DerivedNavigations {
+  /** Effective collection navigations by entity. */
+  readonly collections: ReadonlyMap<string, readonly DerivedCollectionDefinition[]>,
+  /** Effective singular navigations by entity. */
+  readonly singular: ReadonlyMap<string, readonly DerivedSingularDefinition[]>,
+}
+
+/**
+ * Validate named relationships against the resolved entity graph.
+ * @param value - Optional relationship array.
+ * @param byName - Parsed entities by name.
+ * @param enums - Named Graph enums.
+ * @returns Validated relationship definitions.
+ */
+function parseRelationships(
+  value: unknown,
+  byName: ReadonlyMap<string, EntitySeed>,
+  enums: ReadonlyMap<string, EnumDefinition>,
+): readonly RelationshipDefinition[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw invalid('relationships must be an array')
+  const names = new Set<string>()
+  return value.map(candidate => {
+    const relationship = parseRelationship(candidate, byName, enums)
+    if (relationship.name === 'Entity' || byName.has(relationship.name)) {
+      throw invalid(`relationship "${relationship.name}" conflicts with an entity name`)
+    }
+    if (names.has(relationship.name)) {
+      throw invalid(`duplicate relationship "${relationship.name}"`)
+    }
+    names.add(relationship.name)
+    return relationship
+  })
+}
+
+/**
+ * Reject colliding generated relationship index and constraint identifiers.
+ * @param relationships - Validated named relationships.
+ */
+function validateRelationshipPhysicalNames(
+  relationships: readonly RelationshipDefinition[],
+): void {
+  const indexes = new Set<string>()
+  const constraints = new Set<string>()
+  for (const relationship of relationships) {
+    for (const endpoint of relationship.between) {
+      const index = `${relationship.name}_${endpoint.field}_idx`
+      if (indexes.has(index)) {
+        throw invalid(`relationship physical index "${index}" is not unique`)
+      }
+      indexes.add(index)
+      const constraint = `${relationship.name}_${endpoint.field}_fkey`
+      if (constraints.has(constraint)) {
+        throw invalid(`relationship physical constraint "${constraint}" is not unique`)
+      }
+      constraints.add(constraint)
+    }
+  }
+}
+
+/**
+ * Validate human-readable constraint names and deterministic index names globally.
+ * @param entities - Resolved entities.
+ * @param relationships - Named relationships.
+ */
+function validateConstraintNames(
+  entities: readonly EntityDefinition[],
+  relationships: readonly RelationshipDefinition[],
+): void {
+  const names = new Set<string>()
+  const indexes = new Set<string>()
+  const all = [
+    ...entities.flatMap(entity => entity.constraints),
+    ...relationships.flatMap(relationship => relationship.constraints),
+  ]
+  for (const constraint of all) {
+    if (names.has(constraint.name)) {
+      throw invalid(`duplicate constraint name "${constraint.name}"`)
+    }
+    names.add(constraint.name)
+    if (constraint.type !== Constraint.Structural) continue
+    if (indexes.has(constraint.index)) {
+      throw invalid(`duplicate constraint index "${constraint.index}"`)
+    }
+    indexes.add(constraint.index)
+  }
+}
+
+/**
+ * Validate one named relationship.
+ * @param value - Relationship candidate.
+ * @param byName - Parsed entities by name.
+ * @param enums - Named Graph enums.
+ * @returns The validated relationship.
+ */
+function parseRelationship(
+  value: unknown,
+  byName: ReadonlyMap<string, EntitySeed>,
+  enums: ReadonlyMap<string, EnumDefinition>,
+): RelationshipDefinition {
+  if (!isRecord(value)) throw invalid('relationship must be an object')
+  assertKnownKeys(value, ['between', 'constraints', 'fields', 'name'], 'relationship')
+  if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
+    throw invalid('relationship name must be a PascalCase identifier')
+  }
+  const name = value.name
+  validatePhysicalIdentifier(name, 'relationship table')
+  if (!Array.isArray(value.between) || value.between.length < 2) {
+    throw invalid(`relationship "${name}" between must contain at least two endpoints`)
+  }
+  const endpoints = value.between.map(candidate => parseRelationshipEndpoint(name, candidate, byName))
+  const endpointFields = new Set<string>()
+  const inverseNames = new Set<string>()
+  for (const endpoint of endpoints) {
+    if (endpointFields.has(endpoint.field)) {
+      throw invalid(`relationship "${name}" endpoint fields must differ`)
+    }
+    endpointFields.add(endpoint.field)
+    if (endpoint.inverse !== undefined) {
+      if (endpoints.length !== 2) {
+        throw invalid(`relationship "${name}" inverse navigations require exactly two endpoints`)
+      }
+      if (inverseNames.has(endpoint.inverse)) {
+        throw invalid(`relationship "${name}" endpoint inverse names must differ`)
+      }
+      inverseNames.add(endpoint.inverse)
+    }
+  }
+  if (!Array.isArray(value.fields)) {
+    throw invalid(`relationship "${name}" must define a fields array`)
+  }
+  const fieldNames = new Set<string>()
+  const fields = value.fields.map(candidate => {
+    const field = parseRelationshipField(name, candidate, enums)
+    if (fieldNames.has(field.name)) {
+      throw invalid(`duplicate field "${name}.${field.name}"`)
+    }
+    fieldNames.add(field.name)
+    validatePhysicalIdentifier(field.name, `relationship "${name}" field`)
+    return field
+  })
+  const columns = new Map<string, string>()
+  for (const endpoint of endpoints) columns.set(endpoint.field, `${endpoint.field}.id`)
+  for (const field of fields) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  const constraints = [
+    ...fieldConstraints(name, fields),
+    ...parseConstraints(name, value.constraints, columns),
+  ]
+  return { between: endpoints, constraints, fields, name }
+}
+
+/**
+ * Validate one relationship endpoint.
+ * @param relationshipName - Owning relationship name.
+ * @param value - Endpoint candidate.
+ * @param byName - Parsed entities by name.
+ * @returns The validated endpoint.
+ */
+function parseRelationshipEndpoint(
+  relationshipName: string,
+  value: unknown,
+  byName: ReadonlyMap<string, EntitySeed>,
+): RelationshipEndpointDefinition {
+  if (!isRecord(value)) {
+    throw invalid(`relationship "${relationshipName}" endpoint must be an object`)
+  }
+  assertKnownKeys(value, ['field', 'inverse', 'target'], 'relationship endpoint')
+  if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
+    throw invalid(`relationship "${relationshipName}" endpoint field must be a camelCase identifier`)
+  }
+  if (
+    value.inverse !== undefined
+    && (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse))
+  ) {
+    throw invalid(`relationship "${relationshipName}" endpoint inverse must be a camelCase identifier`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`relationship "${relationshipName}" endpoint target must be a PascalCase entity name`)
+  }
+  if (value.target !== 'Entity' && !byName.has(value.target)) {
+    throw invalid(
+      `unknown target entity "${value.target}" for relationship "${relationshipName}" ` +
+      `endpoint "${value.field}"`,
+    )
+  }
+  validatePhysicalIdentifier(`${value.field}.id`, `relationship "${relationshipName}" endpoint column`)
+  validatePhysicalIdentifier(`${relationshipName}_${value.field}_fkey`, `relationship "${relationshipName}" constraint`)
+  validatePhysicalIdentifier(`${relationshipName}_${value.field}_idx`, `relationship "${relationshipName}" index`)
+  return {
+    field: value.field,
+    ...(value.inverse === undefined ? {} : { inverse: value.inverse as string }),
+    target: value.target,
+  }
+}
+
+/**
+ * Validate one property owned by a named relationship.
+ * @param relationshipName - Owning relationship name.
+ * @param value - Field candidate.
+ * @param enums - Named Graph enums.
+ * @returns The validated relationship field.
+ */
+function parseRelationshipField(
+  relationshipName: string,
+  value: unknown,
+  enums: ReadonlyMap<string, EnumDefinition>,
+): RelationshipFieldDefinition {
+  const parsed = parseField(relationshipName, value, enums)
+  if ('idRefinement' in parsed) {
+    throw invalid(`relationship "${relationshipName}" may not declare an id refinement`)
+  }
+  if (
+    parsed.field.type === FieldType.Collection
+    || parsed.field.type === FieldType.Entity
+    || parsed.field.type === FieldType.Inverse
+  ) {
+    throw invalid(
+      `relationship field "${relationshipName}.${parsed.field.name}" must be a scalar, enum, array or JSON field`,
+    )
+  }
+  if (parsed.field.name === 'id') {
+    throw invalid(`relationship "${relationshipName}" may not declare a field named "id"`)
+  }
+  return parsed.field
+}
+
+/**
+ * Normalize one full `via` filter expression against a relationship record view.
+ * @param owner - Entity declaring the collection.
+ * @param field - Collection field.
+ * @param relationship - Relationship traversed by the collection.
+ * @param source - Authored filter text.
+ * @param requireOwner - Whether the filter must contain exactly one `@` owner comparison.
+ * @returns The normalized predicate and owner endpoint when required.
+ */
+function normalizeViaPredicate(
+  owner: string,
+  field: CollectionFieldDefinition,
+  relationship: RelationshipDefinition,
+  source: string,
+  requireOwner: boolean,
+): { filter?: Filter, ownerEndpoint?: RelationshipEndpointDefinition } {
+  const view = relationshipView(relationship)
+  const resolve = (name: string): QueryFieldDefinition => {
+    if (name === '@' || name === '@.id') {
+      return { name, type: FieldType.ID }
+    }
+    const candidate = view.effectiveFields.find(fieldDefinition => fieldDefinition.name === name)
+    if (!candidate) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via references unknown field ` +
+        `"${relationship.name}.${name}"`,
+      )
+    }
+    return candidate.type === FieldType.Entity
+      ? { name: candidate.name, type: FieldType.ID }
+      : candidate
+  }
+  let normalized: Filter | undefined
+  try {
+    normalized = QueryNormalizer.normalize(
+      view,
+      source,
+      resolve,
+      () => undefined,
+      () => undefined,
+    ) ?? undefined
+  } catch (error) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" has an invalid via filter: ` +
+      `${(error as Error).message}`,
+    )
+  }
+  if (!requireOwner) {
+    if (normalized !== undefined && containsOwnerField(normalized)) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via alias filter cannot repeat @`,
+      )
+    }
+    return normalized === undefined ? {} : { filter: normalized }
+  }
+  if (normalized === undefined) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" via filter must identify its owner endpoint with @`,
+    )
+  }
+  const extracted = extractViaOwner(normalized, relationship)
+  if (extracted.owners.length !== 1 || extracted.ownerEndpoint === undefined) {
+    throw invalid(
+      `collection field "${owner}.${field.name}" via filter must identify exactly one ` +
+      'owner endpoint with @',
+    )
+  }
+  return {
+    ...(extracted.filter === undefined ? {} : { filter: extracted.filter }),
+    ownerEndpoint: extracted.ownerEndpoint,
+  }
+}
+
+/**
+ * Combine two optional via predicates.
+ * @param left - Existing predicate.
+ * @param right - Added predicate.
+ * @returns The combined predicate, or undefined.
+ */
+function combineViaFilters(left: Filter | undefined, right: Filter | undefined): Filter | undefined {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return { filters: [left, right], operator: Operator.Logical.And }
+}
+
+/**
+ * Remove the owner-identity comparison from a normalized via filter.
+ * @param filter - Normalized filter.
+ * @param relationship - Relationship traversed by the collection.
+ * @returns The owner endpoint and remaining record filter.
+ */
+function extractViaOwner(
+  filter: Filter,
+  relationship: RelationshipDefinition,
+): { filter?: Filter, ownerEndpoint?: RelationshipEndpointDefinition, owners: readonly string[] } {
+  const owners: string[] = []
+  const direct = ownerEndpointOf(filter, relationship)
+  if (direct !== undefined) return { ownerEndpoint: direct, owners: [direct.field] }
+  if ('filters' in filter && filter.operator === Operator.Logical.And) {
+    const remaining: Filter[] = []
+    let ownerEndpoint: RelationshipEndpointDefinition | undefined
+    for (const child of filter.filters) {
+      const result = extractViaOwner(child, relationship)
+      owners.push(...result.owners)
+      if (result.ownerEndpoint !== undefined) {
+        if (ownerEndpoint !== undefined) {
+          throw invalid('collection via filter must contain exactly one owner identity comparison')
+        }
+        ownerEndpoint = result.ownerEndpoint
+      }
+      if (result.filter !== undefined) remaining.push(result.filter)
+    }
+    const rest = remaining.length === 0
+      ? undefined
+      : remaining.length === 1
+        ? remaining[0]
+        : { filters: remaining, operator: Operator.Logical.And }
+    return {
+      ...(rest === undefined ? {} : { filter: rest }),
+      ...(ownerEndpoint === undefined ? {} : { ownerEndpoint }),
+      owners,
+    }
+  }
+  if (containsOwnerField(filter)) {
+    throw invalid('collection via @ must appear in a top-level $and owner identity comparison')
+  }
+  return { filter, owners }
+}
+
+/**
+ * Resolve a direct owner-identity comparison.
+ * @param filter - Candidate filter.
+ * @param relationship - Relationship traversed by the collection.
+ * @returns Matching endpoint, when the filter compares it with `@`.
+ */
+function ownerEndpointOf(
+  filter: Filter,
+  relationship: RelationshipDefinition,
+): RelationshipEndpointDefinition | undefined {
+  if (!('field' in filter) || !('value' in filter)
+    || filter.operator !== Operator.Comparison.Equal) return undefined
+  const value = filter.value
+  if (isFieldOperand(value)) {
+    const path = value.$field
+    if (path === '@' || path === '@.id') {
+      return relationship.between.find(endpoint => endpoint.field === filter.field)
+    }
+    const endpoint = relationship.between.find(candidate => candidate.field === path)
+    if (endpoint && (filter.field === '@' || filter.field === '@.id')) return endpoint
+  }
+  return undefined
+}
+
+/**
+ * Whether a filter contains a remaining `@` field operand.
+ * @param filter - Candidate filter.
+ * @returns `true` when `@` remains outside a direct owner comparison.
+ */
+function containsOwnerField(filter: Filter): boolean {
+  if ('field' in filter) {
+    if (filter.field === '@' || filter.field === '@.id') return true
+    return 'value' in filter
+      && isFieldOperand(filter.value)
+      && (filter.value.$field === '@' || filter.value.$field === '@.id')
+  }
+  if ('filters' in filter) return filter.filters.some(containsOwnerField)
+  return false
+}
+
+/**
+ * Derive reciprocal and relationship navigations from canonical metadata.
+ * @param entities - Resolved entity graph.
+ * @param relationships - Named relationships.
+ * @param associations - Validated reciprocal associations.
+ * @returns Effective collection and singular navigations by entity name.
+ */
+function deriveNavigations(
+  entities: readonly EntityDefinition[],
+  relationships: readonly RelationshipDefinition[],
+  associations: readonly AssociationDefinition[],
+): DerivedNavigations {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const fields = new Map<string, Set<string>>([
+    ['Entity', new Set(['id', 'name', 'entity'])],
+  ])
+  for (const entity of entities) {
+    fields.set(entity.name, new Set(entity.effectiveFields.map(field => field.name)))
+  }
+  const directCollections = new Map<string, DerivedCollectionDefinition[]>()
+  const directSingular = new Map<string, DerivedSingularDefinition[]>()
+  const directNames = new Map<string, Set<string>>()
+  const addDirect = (owner: string, navigation: DerivedCollectionDefinition | DerivedSingularDefinition): void => {
+    const names = fields.get(owner)
+    if (!names) throw invalid(`derived navigation target entity "${owner}" is not declared`)
+    if (names.has(navigation.name)) {
+      throw invalid(`derived navigation "${owner}.${navigation.name}" conflicts with a field`)
+    }
+    const used = directNames.get(owner) ?? new Set<string>()
+    if (used.has(navigation.name)) {
+      throw invalid(`duplicate derived navigation "${owner}.${navigation.name}"`)
+    }
+    used.add(navigation.name)
+    directNames.set(owner, used)
+    if (navigation.kind === 'inverse-one') {
+      const existing = directSingular.get(owner) ?? []
+      existing.push(navigation)
+      directSingular.set(owner, existing)
+    } else {
+      const existing = directCollections.get(owner) ?? []
+      existing.push(navigation)
+      directCollections.set(owner, existing)
+    }
+  }
+  const byAssociation = new Map<string, AssociationDefinition>()
+  for (const association of associations) {
+    byAssociation.set(`${association.inverseOwner}\u0000${association.inverse.name}`, association)
+  }
+  for (const entity of entities) {
+    for (const inverse of entity.fields.filter(field => field.type === FieldType.Inverse)) {
+      const association = byAssociation.get(`${entity.name}\u0000${inverse.name}`)
+      if (!association) {
+        throw invalid(`inverse field "${entity.name}.${inverse.name}" has no validated association`)
+      }
+      if (inverse.cardinality === 'One') {
+        addDirect(entity.name, {
+          association,
+          kind: 'inverse-one',
+          name: inverse.name,
+          reference: association.forward,
+          target: association.forwardOwner,
+        })
+      } else {
+        addDirect(entity.name, {
+          association,
+          kind: 'inverse',
+          name: inverse.name,
+          reference: association.forward,
+          target: association.forwardOwner,
+        })
+      }
+    }
+  }
+  for (const relationship of relationships) {
+    const endpoints = relationship.between
+    for (const index of [0, 1] as const) {
+      const endpoint = endpoints[index]
+      if (endpoint?.inverse === undefined) continue
+      const remote = endpoints[index === 0 ? 1 : 0]
+      addDirect(endpoint.target, {
+        endpoint: index,
+        kind: 'relationship',
+        name: endpoint.inverse,
+        relationship,
+        target: remote.target,
+      })
+    }
+  }
+
+  const relationshipsByName = new Map(
+    relationships.map(relationship => [relationship.name, relationship]),
+  )
+  const declaredCollection = (owner: string, name: string) => {
+    let current = byName.get(owner)
+    while (current) {
+      const field = current.fields.find(candidate => (
+        candidate.type === FieldType.Collection && candidate.name === name
+      ))
+      if (field?.type === FieldType.Collection) return { field, owner: current.name }
+      current = current.extends ? byName.get(current.extends) : undefined
+    }
+    return undefined
+  }
+  const isRelatedEntity = (left: string, right: string): boolean => {
+    if (left === right || right === 'Entity') return true
+    let current = byName.get(left)
+    while (current) {
+      if (current.name === right) return true
+      current = current.extends ? byName.get(current.extends) : undefined
+    }
+    current = byName.get(right)
+    while (current) {
+      if (current.name === left) return true
+      current = current.extends ? byName.get(current.extends) : undefined
+    }
+    return false
+  }
+  const validateOwnerEndpoint = (
+    declaredOwner: string,
+    field: CollectionFieldDefinition,
+    endpoint: RelationshipEndpointDefinition,
+    relationship: RelationshipDefinition,
+  ): void => {
+    if (isRelatedEntity(declaredOwner, endpoint.target)) return
+    throw invalid(
+      `collection field "${declaredOwner}.${field.name}" owner type is incompatible with ` +
+      `relationship "${relationship.name}" endpoint "${endpoint.field}" target "${endpoint.target}"`,
+    )
+  }
+  const resolvedCollections = new Map<string, ExplicitCollectionDefinition>()
+  const resolvingCollections = new Set<string>()
+  const resolveCollection = (
+    owner: string,
+    field: CollectionFieldDefinition,
+  ): ExplicitCollectionDefinition => {
+    const cacheKey = `${owner}\u0000${field.name}`
+    const cached = resolvedCollections.get(cacheKey)
+    if (cached) return cached
+    if (resolvingCollections.has(cacheKey)) {
+      throw invalid(`collection field "${owner}.${field.name}" has a cyclic via path`)
+    }
+    resolvingCollections.add(cacheKey)
+    let segments
+    try {
+      segments = splitFieldPath(field.via).map(segment => parseCollectionDirectives(segment))
+    } catch (error) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" has an invalid via path: ` +
+        `${(error as Error).message}`,
+      )
+    }
+    const first = segments[0]
+    if (!first) throw invalid(`collection field "${owner}.${field.name}" via path is empty`)
+    let relationship: RelationshipDefinition
+    let ownerEndpoint: RelationshipEndpointDefinition
+    let projection: readonly string[]
+    let viaLimit = first.limit
+    let viaOffset = first.offset
+    let viaOrderBy = first.orderBy
+    const directRelationship = relationshipsByName.get(first.name)
+    let viaFilter: Filter | undefined
+    if (directRelationship) {
+      if (first.filter === undefined) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via relationship must identify its owner endpoint with @`,
+        )
+      }
+      const parsedFilter = normalizeViaPredicate(
+        owner,
+        field,
+        directRelationship,
+        first.filter,
+        true,
+      )
+      validateOwnerEndpoint(owner, field, parsedFilter.ownerEndpoint, directRelationship)
+      relationship = directRelationship
+      ownerEndpoint = parsedFilter.ownerEndpoint
+      viaFilter = parsedFilter.filter
+      projection = segments.slice(1).map(segment => {
+        if (segment.filter !== undefined || segment.limit !== undefined
+          || segment.offset !== undefined || segment.orderBy !== undefined) {
+          throw invalid(`collection field "${owner}.${field.name}" via projection cannot carry directives`)
+        }
+        return segment.name
+      })
+    } else {
+      const source = declaredCollection(owner, first.name)
+      if (!source) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via references unknown relationship ` +
+          `or collection "${first.name}"`,
+        )
+      }
+      const resolvedSource = resolveCollection(source.owner, source.field)
+      if (first.filter !== undefined) {
+        viaFilter = combineViaFilters(
+          resolvedSource.viaFilter,
+          normalizeViaPredicate(
+            owner,
+            field,
+            resolvedSource.relationship,
+            first.filter,
+            false,
+          ).filter,
+        )
+      } else {
+        viaFilter = resolvedSource.viaFilter
+      }
+      viaLimit = first.limit !== undefined ? first.limit : resolvedSource.viaLimit
+      viaOffset = first.offset !== undefined ? first.offset : resolvedSource.viaOffset
+      viaOrderBy = first.orderBy ?? resolvedSource.viaOrderBy
+      validateOwnerEndpoint(owner, field, resolvedSource.ownerEndpoint, resolvedSource.relationship)
+      relationship = resolvedSource.relationship
+      ownerEndpoint = resolvedSource.ownerEndpoint
+      if (resolvedSource.targetEndpoint) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via cannot traverse projected collection ` +
+          `"${source.owner}.${source.field.name}"`,
+        )
+      }
+      projection = segments.slice(1).map(segment => {
+        if (segment.filter !== undefined || segment.limit !== undefined
+          || segment.offset !== undefined || segment.orderBy !== undefined) {
+          throw invalid(`collection field "${owner}.${field.name}" via projection cannot carry directives`)
+        }
+        return segment.name
+      })
+    }
+    if (projection.length > 1) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" via may have at most one projection endpoint; ` +
+        `got "${projection.join('.')}"`,
+      )
+    }
+    let targetEndpoint: RelationshipEndpointDefinition | undefined
+    for (const segment of projection) {
+      const endpoint = relationship.between.find(candidate => candidate.field === segment)
+      if (!endpoint) {
+        throw invalid(
+          `collection field "${owner}.${field.name}" via projects unknown endpoint ` +
+          `"${segment}" on relationship "${relationship.name}"`,
+        )
+      }
+      targetEndpoint = endpoint
+    }
+    const target = targetEndpoint?.target ?? relationship.name
+    if (target !== field.target) {
+      throw invalid(
+        `collection field "${owner}.${field.name}" target "${field.target}" does not match ` +
+        `via result "${target}"`,
+      )
+    }
+    const resolved: ExplicitCollectionDefinition = {
+      kind: 'explicit',
+      name: field.name,
+      owner,
+      ownerEndpoint,
+      relationship,
+      ...(targetEndpoint === undefined ? {} : { targetEndpoint }),
+      target,
+      via: field.via,
+      ...(viaFilter === undefined ? {} : { viaFilter }),
+      ...(viaLimit === undefined ? {} : { viaLimit }),
+      ...(viaOffset === undefined ? {} : { viaOffset }),
+      ...(viaOrderBy === undefined ? {} : { viaOrderBy }),
+    }
+    resolvingCollections.delete(cacheKey)
+    resolvedCollections.set(cacheKey, resolved)
+    return resolved
+  }
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Collection) continue
+      addDirect(entity.name, resolveCollection(entity.name, field))
+    }
+  }
+
+  const collections = new Map<string, readonly DerivedCollectionDefinition[]>()
+  const singular = new Map<string, readonly DerivedSingularDefinition[]>()
+  const rootCollections = directCollections.get('Entity') ?? []
+  const rootSingular = directSingular.get('Entity') ?? []
+  validateEffectiveNavigations('Entity', fields.get('Entity') ?? new Set(), rootCollections, rootSingular)
+  collections.set('Entity', rootCollections)
+  singular.set('Entity', rootSingular)
+  for (const entity of entities) {
+    const chain: EntityDefinition[] = []
+    let current: string | undefined = entity.name
+    while (current !== undefined && current !== 'Entity') {
+      const definition = byName.get(current)
+      if (!definition) break
+      chain.unshift(definition)
+      current = definition.parent
+    }
+    const entityCollections = [
+      ...rootCollections,
+      ...chain.flatMap(definition => directCollections.get(definition.name) ?? []),
+    ]
+    const entitySingular = [
+      ...rootSingular,
+      ...chain.flatMap(definition => directSingular.get(definition.name) ?? []),
+    ]
+    validateEffectiveNavigations(
+      entity.name,
+      fields.get(entity.name) ?? new Set(),
+      entityCollections,
+      entitySingular,
+    )
+    collections.set(entity.name, entityCollections)
+    singular.set(entity.name, entitySingular)
+  }
+  return { collections, singular }
+}
+
+/**
+ * Validate effective navigations against fields and each other.
+ * @param entityName - Exposing entity name.
+ * @param fields - Effective field names.
+ * @param collections - Inherited and local collection navigations.
+ * @param singular - Inherited and local singular navigations.
+ */
+function validateEffectiveNavigations(
+  entityName: string,
+  fields: ReadonlySet<string>,
+  collections: readonly DerivedCollectionDefinition[],
+  singular: readonly DerivedSingularDefinition[],
+): void {
+  const names = new Set<string>()
+  for (const navigation of [...collections, ...singular]) {
+    if (fields.has(navigation.name)) {
+      throw invalid(
+        `derived navigation "${entityName}.${navigation.name}" ` +
+        'conflicts with an inherited navigation or field',
+      )
+    }
+    if (names.has(navigation.name)) {
+      throw invalid(`duplicate derived navigation "${entityName}.${navigation.name}"`)
+    }
+    names.add(navigation.name)
+  }
+}
+
+/** A parsed entity before reference targets are resolved. */
+interface EntitySeed {
+  /** Declarative constraints owned by this entity. */
+  readonly constraints: readonly ConstraintDefinition[],
+  /** Declared parent entity, when present. */
+  readonly extends?: string,
+  /** Locally owned fields, excluding the `id` refinement. */
+  readonly fields: readonly FieldDefinition[],
+  /** Declared ID format refinement on this entity. */
+  readonly idFormat?: IdentityFormat,
+  /** Entity type name. */
+  readonly name: string,
+}
+
+/**
+ * Validate parent references, cycles and field ownership.
+ * @param seeds - Parsed seeds.
+ * @param byName - Seeds by name.
+ */
+function validateAncestry(
+  seeds: readonly EntitySeed[],
+  byName: ReadonlyMap<string, EntitySeed>,
+): void {
+  for (const seed of seeds) {
+    if (seed.extends !== undefined) {
+      if (seed.extends === 'Entity') throw invalid('extends "Entity" is implicit and cannot be authored')
+      if (!byName.has(seed.extends)) throw invalid(`unknown parent entity "${seed.extends}"`)
+    }
+  }
+
+  for (const seed of seeds) {
+    const seen = new Set<string>()
+    let current: string | undefined = seed.name
+    while (current !== undefined) {
+      if (seen.has(current)) throw invalid(`ancestry cycle detected at entity "${current}"`)
+      seen.add(current)
+      current = byName.get(current)?.extends
+    }
+  }
+
+  for (const seed of seeds) {
+    const names = new Map<string, string>()
+    const columns = new Map<string, string>()
+    let parentName = seed.extends
+    while (parentName !== undefined) {
+      const parent = byName.get(parentName)
+      if (!parent) break
+      for (const field of parent.fields) {
+        names.set(field.name, parent.name)
+        if (field.type !== FieldType.Inverse) columns.set(fieldColumn(field), parent.name)
+      }
+      parentName = parent.extends
+    }
+    for (const field of seed.fields) {
+      const owner = names.get(field.name)
+      if (owner) throw invalid(`field "${seed.name}.${field.name}" is already owned by "${owner}"`)
+      if (field.type === FieldType.Inverse) continue
+      const column = fieldColumn(field)
+      const columnOwner = columns.get(column)
+      if (columnOwner) {
+        throw invalid(`physical column "${column}" is already owned by "${columnOwner}"`)
+      }
+    }
+  }
+}
+
+/** One logical field source compared across concrete descendants. */
+export type LogicalFieldSource =
+  | DerivedCollectionDefinition
+  | DerivedSingularDefinition
+  | EffectiveFieldDefinition
+  | InverseFieldDefinition
+
+/**
+ * Return one field's logical contract, excluding physical ownership and source details.
+ * @param source - Effective field or derived navigation.
+ * @returns A deterministic contract signature.
+ */
+export function logicalFieldContract(source: LogicalFieldSource): string {
+  if ('kind' in source) {
+    if (source.kind === 'inverse-one') return `singular:${source.target}`
+    const resultKind = source.kind === 'explicit' && source.targetEndpoint === undefined
+      ? 'record'
+      : 'entity'
+    return `collection:${resultKind}:${source.target}`
+  }
+  if (source.type === FieldType.Inverse) {
+    return source.cardinality === 'One'
+      ? `singular:${source.target}`
+      : `collection:entity:${source.target}`
+  }
+  if (source.type === FieldType.Entity) {
+    return `reference:${source.target}:${referenceNullability(source)}`
+  }
+  if (source.type === FieldType.Array) {
+    return `array:${source.items.type}:${source.items.format ?? ''}:${scalarNullability(source)}`
+  }
+  if (source.type === FieldType.JSON) return `json:${scalarNullability(source)}`
+  if (source.type === FieldType.Enum) {
+    return `enum:${source.enum}:${scalarNullability(source)}`
+  }
+  return `scalar:${source.type}:${source.format ?? ''}:${scalarNullability(source)}`
+}
+
+/**
+ * Return one entity's effective logical contracts by field name.
+ * @param entity - Concrete entity.
+ * @returns Contract signatures keyed by logical field name.
+ */
+function entityFieldContracts(entity: EntityDefinition): ReadonlyMap<string, string> {
+  const contracts = new Map<string, string>()
+  for (const field of entity.effectiveFields) {
+    if (field.owner === 'Entity') continue
+    contracts.set(field.name, logicalFieldContract(field))
+  }
+  for (const collection of entity.collections) {
+    if (!contracts.has(collection.name)) {
+      contracts.set(collection.name, logicalFieldContract(collection))
+    }
+  }
+  for (const singular of entity.singularNavigations) {
+    if (!contracts.has(singular.name)) {
+      contracts.set(singular.name, logicalFieldContract(singular))
+    }
+  }
+  for (const inverse of entity.inverseFields) {
+    if (!contracts.has(inverse.name)) {
+      contracts.set(inverse.name, logicalFieldContract(inverse))
+    }
+  }
+  return contracts
+}
+
+/**
+ * Normalize scalar field nullability.
+ * @param field - Scalar-like field.
+ * @param field.nullable - Whether the field accepts null.
+ * @returns `nullable` or `required`.
+ */
+function scalarNullability(field: { readonly nullable?: boolean }): string {
+  return field.nullable === true ? 'nullable' : 'required'
+}
+
+/**
+ * Normalize reference nullability; references are optional when unspecified.
+ * @param field - Entity reference field.
+ * @param field.nullable - Whether the reference accepts null.
+ * @returns `nullable` or `required`.
+ */
+function referenceNullability(field: EntityReferenceFieldDefinition): string {
+  return (field.nullable ?? true) ? 'nullable' : 'required'
+}
+
+/**
+ * Return one entity's authored ancestry depth.
+ * @param entity - Entity being measured.
+ * @param byName - Resolved entities by name.
+ * @returns Number of authored ancestors.
+ */
+function entityDepth(
+  entity: EntityDefinition,
+  byName: ReadonlyMap<string, EntityDefinition>,
+): number {
+  let depth = 0
+  let current = entity
+  while (current.parent !== 'Entity') {
+    const parent = byName.get(current.parent)
+    if (!parent) break
+    depth += 1
+    current = parent
+  }
+  return depth
+}
+
+/**
+ * Whether an entity is one ancestor or descends from it.
+ * @param entity - Candidate concrete entity.
+ * @param ancestor - Authored ancestor name.
+ * @param byName - Resolved entities by name.
+ * @returns `true` when the entity belongs to the hierarchy.
+ */
+function isDescendantOrSelf(
+  entity: EntityDefinition,
+  ancestor: string,
+  byName: ReadonlyMap<string, EntityDefinition>,
+): boolean {
+  let current: EntityDefinition | undefined = entity
+  while (current !== undefined && current.name !== 'Entity') {
+    if (current.name === ancestor) return true
+    current = byName.get(current.parent)
+  }
+  return false
+}
+
+/**
+ * Reject incompatible same-named field contracts inside one authored hierarchy.
+ *
+ * The synthetic universal `Entity` root is not an authored hierarchy. Unrelated
+ * top-level entity families may reuse a field name with different contracts.
+ * @param entities - Resolved entities with effective fields and navigations.
+ * @throws {Error} When concrete descendants disagree on one logical contract.
+ */
+function validateDescendantContracts(entities: readonly EntityDefinition[]): void {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const concrete = entities.filter(entity => !entity.abstract)
+  const ancestors = entities
+    .map((entity, index) => ({ depth: entityDepth(entity, byName), entity, index }))
+    .sort((left, right) => right.depth - left.depth || left.index - right.index)
+
+  for (const { entity: ancestor } of ancestors) {
+    const descendants = concrete.filter(entity => (
+      isDescendantOrSelf(entity, ancestor.name, byName)
+    ))
+    if (descendants.length < 2) continue
+
+    const byField = new Map<string, Map<string, string[]>>()
+    for (const descendant of descendants) {
+      for (const [name, contract] of entityFieldContracts(descendant)) {
+        const variants = byField.get(name) ?? new Map<string, string[]>()
+        const owners = variants.get(contract) ?? []
+        owners.push(descendant.name)
+        variants.set(contract, owners)
+        byField.set(name, variants)
+      }
+    }
+
+    for (const name of [...byField.keys()].sort()) {
+      const variants = byField.get(name) as Map<string, string[]>
+      if (variants.size < 2) continue
+      const details = [...variants.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([contract, owners]) => `${owners.join(', ')} declares ${contract}`)
+        .join('; ')
+      throw invalid(
+        `incompatible field contract "${name}" in hierarchy "${ancestor.name}": ${details}`,
+      )
+    }
+  }
+}
+
+/**
+ * Validate one entity definition.
+ * @param value - Parsed entity candidate.
+ * @param enums - Named Graph enums.
+ * @returns The validated entity seed.
+ */
+function parseEntity(
+  value: unknown,
+  enums: ReadonlyMap<string, EnumDefinition>,
+): EntitySeed {
+  if (!isRecord(value)) throw invalid('entity must be an object')
+  assertKnownKeys(value, ['constraints', 'extends', 'fields', 'name'], 'entity')
+  if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
+    throw invalid('entity name must be a PascalCase identifier')
+  }
+  validatePhysicalIdentifier(value.name, 'entity table')
+  if (value.name === 'Entity') throw invalid('entity name "Entity" is reserved for the universal identity root')
+  if (value.name === 'Reference') {
+    throw invalid('entity name "Reference" is reserved for generated contracts')
+  }
+  if (
+    value.extends !== undefined
+    && (typeof value.extends !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.extends))
+  ) {
+    throw invalid(`entity "${value.name}" extends must be a PascalCase entity name`)
+  }
+  if (!Array.isArray(value.fields)) {
+    throw invalid(`entity "${value.name}" must define a fields array`)
+  }
+
+  const names = new Set<string>()
+  const fields: FieldDefinition[] = []
+  let idFormat: IdentityFormat | undefined
+  for (const candidate of value.fields) {
+    const parsed = parseField(value.name, candidate, enums)
+    if ('idRefinement' in parsed) {
+      if (idFormat) throw invalid(`duplicate id refinement in entity "${value.name}"`)
+      idFormat = parsed.idFormat
+      continue
+    }
+    const field = parsed.field
+    if (names.has(field.name)) throw invalid(`duplicate field "${value.name}.${field.name}"`)
+    names.add(field.name)
+    fields.push(field)
+  }
+  const columns = new Map<string, string>()
+  for (const field of fields.filter(isPhysicalField)) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  const constraints = [
+    ...fieldConstraints(value.name, fields.filter(isPhysicalField)),
+    ...parseConstraints(value.name, value.constraints, columns),
+  ]
+  return {
+    constraints,
+    extends: value.extends as string | undefined,
+    fields,
+    idFormat,
+    name: value.name,
+  }
+}
+
+/** Parsed field result, including the special `id` refinement. */
+type ParsedFieldResult =
+  | { readonly field: FieldDefinition }
+  | { readonly idFormat: IdentityFormat, readonly idRefinement: true }
+
+/**
+ * Validate one optional unique-field shorthand.
+ * @param entityName - Owning entity or relationship name.
+ * @param fieldName - Field name.
+ * @param value - Field candidate.
+ * @returns True when the field requires uniqueness.
+ */
+function parseUnique(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): true | undefined {
+  if (value.unique === undefined) return undefined
+  if (value.unique !== true) {
+    throw invalid(`field "${entityName}.${fieldName}" unique must be true`)
+  }
+  return true
+}
+
+/**
+ * Build the deterministic physical index name for a unique constraint.
+ * @param owner - Owning entity or relationship.
+ * @param name - Human-readable constraint name.
+ * @returns Physical index name.
+ */
+function uniqueIndexName(owner: string, name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/gu, '_').replace(/^_+|_+$/gu, '')
+  const index = `${owner}_${slug || 'unique'}`
+  validatePhysicalIdentifier(index, 'unique constraint index')
+  return index
+}
+
+/**
+ * Validate one optional nullability declaration.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Field name.
+ * @param value - Field candidate.
+ * @returns The declared boolean, or undefined when omitted.
+ */
+function parseNullable(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): boolean | undefined {
+  if (value.nullable === undefined) return undefined
+  if (typeof value.nullable !== 'boolean') {
+    throw invalid(`field "${entityName}.${fieldName}" nullable must be a boolean`)
+  }
+  return value.nullable
+}
+
+/** Canonical scalar bounds. */
+interface FieldBounds {
+  /** Maximum string length. */
+  readonly maxLength?: number,
+  /** Inclusive numeric maximum. */
+  readonly maximum?: number,
+  /** Minimum string length. */
+  readonly minLength?: number,
+  /** Inclusive numeric minimum. */
+  readonly minimum?: number,
+}
+
+/**
+ * Validate one scalar field's declarative bounds.
+ * @param entityName - Owning entity or relationship name.
+ * @param fieldName - Field name.
+ * @param type - Declared field type.
+ * @param value - Field candidate.
+ * @returns Its canonical bounds.
+ */
+function parseBounds(
+  entityName: string,
+  fieldName: string,
+  type: ScalarFieldType,
+  value: Readonly<Record<string, unknown>>,
+): FieldBounds {
+  const label = `field "${entityName}.${fieldName}"`
+  const numberBounds = type === FieldType.Number
+  if (!numberBounds && (value.minimum !== undefined || value.maximum !== undefined)) {
+    throw invalid(`${label} numeric bounds are only valid on Number fields`)
+  }
+  if (type !== FieldType.String && (value.minLength !== undefined || value.maxLength !== undefined)) {
+    throw invalid(`${label} length bounds are only valid on String fields`)
+  }
+  const minimum = parseFiniteBound(label, 'minimum', value.minimum)
+  const maximum = parseFiniteBound(label, 'maximum', value.maximum)
+  const minLength = parseLengthBound(label, 'minLength', value.minLength)
+  const maxLength = parseLengthBound(label, 'maxLength', value.maxLength)
+  if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
+    throw invalid(`${label} minimum must not exceed maximum`)
+  }
+  if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) {
+    throw invalid(`${label} minLength must not exceed maxLength`)
+  }
+  return {
+    ...(maximum === undefined ? {} : { maximum }),
+    ...(maxLength === undefined ? {} : { maxLength }),
+    ...(minimum === undefined ? {} : { minimum }),
+    ...(minLength === undefined ? {} : { minLength }),
+  }
+}
+
+/**
+ * Validate one finite numeric bound.
+ * @param label - Field diagnostic label.
+ * @param name - Bound name.
+ * @param value - Bound candidate.
+ * @returns The finite bound, or undefined.
+ */
+function parseFiniteBound(label: string, name: string, value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw invalid(`${label} ${name} must be a finite number`)
+  }
+  return value
+}
+
+/**
+ * Validate one non-negative integer length bound.
+ * @param label - Field diagnostic label.
+ * @param name - Bound name.
+ * @param value - Bound candidate.
+ * @returns The length bound, or undefined.
+ */
+function parseLengthBound(label: string, name: string, value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw invalid(`${label} ${name} must be a non-negative integer`)
+  }
+  return value as number
+}
+
+/**
+ * Validate one optional field default against its declared type.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Field name.
+ * @param type - Declared field type.
+ * @param value - Field candidate.
+ * @param items - Array item type, when applicable.
+ * @returns The default value, or undefined when omitted.
+ */
+function parseDefault(
+  entityName: string,
+  fieldName: string,
+  type: ScalarFieldType | FieldType.Array | FieldType.JSON | FieldType.Entity,
+  value: Readonly<Record<string, unknown>>,
+  items?: ScalarFieldType,
+): unknown {
+  if (value.default === undefined) return undefined
+  const defaultValue = value.default
+  const invalidDefault = (): never => {
+    throw invalid(`field "${entityName}.${fieldName}" default must be a valid ${type} value`)
+  }
+  if (type === FieldType.Boolean) {
+    if (typeof defaultValue !== 'boolean') invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.Number) {
+    if (typeof defaultValue !== 'number' || !Number.isFinite(defaultValue)) invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.String) {
+    if (typeof defaultValue !== 'string') invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.Date || type === FieldType.Timestamp) {
+    if (!(defaultValue instanceof Date) && (typeof defaultValue !== 'string' || defaultValue.length === 0)) {
+      invalidDefault()
+    }
+    return defaultValue
+  }
+  if (type === FieldType.Entity) {
+    if (typeof defaultValue !== 'string' || defaultValue.length === 0) invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.JSON) {
+    try {
+      if (JSON.stringify(defaultValue) === undefined) invalidDefault()
+    } catch {
+      invalidDefault()
+    }
+    return defaultValue
+  }
+  if (type === FieldType.Array) {
+    if (!Array.isArray(defaultValue)) invalidDefault()
+    for (const item of defaultValue as readonly unknown[]) {
+      if (
+        (items === FieldType.Boolean && typeof item !== 'boolean')
+        || (items === FieldType.Number && (typeof item !== 'number' || !Number.isFinite(item)))
+        || (items === FieldType.String && typeof item !== 'string')
+        || (items === FieldType.ID && typeof item !== 'string')
+        || ((items === FieldType.Date || items === FieldType.Timestamp)
+          && !(item instanceof Date) && (typeof item !== 'string' || item.length === 0))
+      ) {
+        invalidDefault()
+      }
+    }
+    return defaultValue
+  }
+  invalidDefault()
+  return undefined
+}
+
+/**
+ * Validate authored declarative constraints against physical fields.
+ * @param owner - Owning entity or relationship name.
+ * @param value - Constraint list.
+ * @param columns - Logical and physical field names mapped to columns.
+ * @returns Normalized constraints.
+ */
+function parseConstraints(
+  owner: string,
+  value: unknown,
+  columns: ReadonlyMap<string, string>,
+): readonly ConstraintDefinition[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw invalid(`constraints for "${owner}" must be an array`)
+  const names = new Set<string>()
+  return value.map(candidate => {
+    if (!isRecord(candidate)) throw invalid(`constraint for "${owner}" must be an object`)
+    if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) {
+      throw invalid(`constraint for "${owner}" must have a non-empty name`)
+    }
+    if (typeof candidate.description !== 'string' || candidate.description.trim().length === 0) {
+      throw invalid(`constraint "${candidate.name}" must have a non-empty description`)
+    }
+    if (names.has(candidate.name)) throw invalid(`duplicate constraint "${owner}.${candidate.name}"`)
+    names.add(candidate.name)
+    if (candidate.type === Constraint.Validation) {
+      assertKnownKeys(candidate, ['description', 'name', 'type', 'where'], 'validation constraint')
+      if (candidate.where === undefined || candidate.where === null) {
+        throw invalid(`validation constraint "${candidate.name}" must declare a non-empty where`)
+      }
+      if (typeof candidate.where !== 'string' && !isRecord(candidate.where)) {
+        throw invalid(`validation constraint "${candidate.name}" where must be a string or predicate object`)
+      }
+      return {
+        description: candidate.description,
+        name: candidate.name,
+        owner,
+        type: Constraint.Validation,
+        where: candidate.where as unknown as Filter,
+      }
+    }
+    assertKnownKeys(candidate, ['description', 'fields', 'name', 'type'], 'constraint')
+    if (candidate.type !== Constraint.Structural) {
+      throw invalid(`constraint "${candidate.name}" type must be Structural or Validation`)
+    }
+    if (!Array.isArray(candidate.fields) || candidate.fields.length === 0) {
+      throw invalid(`constraint "${candidate.name}" must have a non-empty fields array`)
+    }
+    const fields = candidate.fields.map(field => {
+      if (typeof field !== 'string' || field.length === 0) {
+        throw invalid(`constraint "${candidate.name}" fields must be non-empty strings`)
+      }
+      if (!columns.has(field)) {
+        throw invalid(`constraint "${candidate.name}" references unknown physical field "${field}"`)
+      }
+      return field
+    })
+    if (new Set(fields).size !== fields.length) {
+      throw invalid(`constraint "${candidate.name}" fields must be distinct`)
+    }
+    return {
+      description: candidate.description,
+      fields,
+      index: uniqueIndexName(owner, candidate.name),
+      name: candidate.name,
+      owner,
+      type: Constraint.Structural,
+    }
+  })
+}
+
+/**
+ * Build shorthand constraints from fields marked unique.
+ * @param owner - Owning entity or relationship name.
+ * @param fields - Physical fields.
+ * @returns Field-level uniqueness constraints.
+ */
+function fieldConstraints(
+  owner: string,
+  fields: readonly PhysicalFieldDefinition[],
+): readonly ConstraintDefinition[] {
+  return fields
+    .filter(field => field.unique === true)
+    .map(field => {
+      const fieldName = field.name
+      const name = `${owner} ${fieldName} must be unique`
+      return {
+        description: `Each ${owner} must have a unique ${fieldName}.`,
+        fields: [fieldName],
+        index: uniqueIndexName(owner, `${fieldName} unique`),
+        name,
+        owner,
+        type: Constraint.Structural,
+      }
+    })
+}
+
+/**
+ * Validate one field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @param enums - Named Graph enums.
+ * @returns The parsed field or id refinement.
+ */
+function parseField(
+  entityName: string,
+  value: unknown,
+  enums: ReadonlyMap<string, EnumDefinition>,
+): ParsedFieldResult {
+  if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
+  if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
+    throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
+  }
+  validatePhysicalIdentifier(value.field, `field "${entityName}.${value.field}"`)
+  if (typeof value.type !== 'string' && value.field !== 'id') {
+    throw invalid(`field "${entityName}.${value.field}" type must be a string`)
+  }
+
+  if (value.type === FieldType.Array) {
+    return { field: parseArrayField(entityName, value) }
+  }
+
+  if (value.type === FieldType.Enum) {
+    return { field: parseEnumField(entityName, value, enums) }
+  }
+
+  if (value.type === FieldType.Collection) {
+    return { field: parseCollectionField(entityName, value) }
+  }
+
+  if (value.type === FieldType.Inverse) {
+    return { field: parseInverseField(entityName, value) }
+  }
+
+  if (value.type === FieldType.JSON) {
+    return { field: parseJSONField(entityName, value) }
+  }
+
+  if (value.type === FieldType.Entity) {
+    assertKnownKeys(value, ['default', 'field', 'inverse', 'nullable', 'target', 'type', 'unique'], 'field')
+    if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
+      throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
+    }
+    if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+      throw invalid(`reference field "${entityName}.${value.field}" target must be a PascalCase entity name`)
+    }
+    if (
+      value.inverse !== undefined
+      && (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse))
+    ) {
+      throw invalid(`reference field "${entityName}.${value.field}" inverse must be a camelCase identifier`)
+    }
+    validatePhysicalIdentifier(`${value.field}.id`, `reference field "${entityName}.${value.field}" column`)
+    const nullable = parseNullable(entityName, value.field, value)
+    const defaultValue = parseDefault(entityName, value.field, FieldType.Entity, value)
+    const unique = parseUnique(entityName, value.field, value)
+    return {
+      field: {
+        column: `${value.field}.id`,
+        ...(value.inverse !== undefined ? { inverse: value.inverse as string } : {}),
+        ...(defaultValue === undefined ? {} : { default: defaultValue as string }),
+        name: value.field,
+        ...(nullable === undefined ? {} : { nullable }),
+        target: value.target,
+        ...(unique === undefined ? {} : { unique }),
+        type: FieldType.Entity,
+      },
+    }
+  }
+
+  if (value.field === 'id') {
+    assertKnownKeys(value, ['field', 'format'], 'field')
+    if (typeof value.format !== 'string' || !IDENTITY_FORMATS.has(value.format)) {
+      throw invalid(`id refinement in "${entityName}" must specify format UUID or Snowflake`)
+    }
+    return { idFormat: value.format as IdentityFormat, idRefinement: true }
+  }
+
+  if (ROOT_FIELD_NAMES.has(value.field)) {
+    throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
+  }
+  assertKnownKeys(value, [
+    'default',
+    'field',
+    'format',
+    'maximum',
+    'maxLength',
+    'minimum',
+    'minLength',
+    'nullable',
+    'type',
+    'unique',
+  ], 'field')
+  const type = value.type as string
+  if (!SCALAR_FIELD_TYPES.has(type) || type === FieldType.ID) {
+    throw invalid(`unsupported field type "${String(type)}" in "${entityName}.${value.field}"`)
+  }
+  if (value.format !== undefined) {
+    throw invalid(`field "${entityName}.${value.field}" format is only valid on type ID`)
+  }
+  const nullable = parseNullable(entityName, value.field, value)
+  const defaultValue = parseDefault(entityName, value.field, type as ScalarFieldType, value)
+  const bounds = parseBounds(entityName, value.field, type as ScalarFieldType, value)
+  const unique = parseUnique(entityName, value.field, value)
+  return {
+    field: {
+      ...(defaultValue === undefined ? {} : { default: defaultValue }),
+      ...bounds,
+      name: value.field,
+      ...(nullable === undefined ? {} : { nullable }),
+      type: type as ScalarFieldType,
+      ...(unique === undefined ? {} : { unique }),
+    },
+  }
+}
+
+/**
+ * Validate one derived Collection navigation descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated collection field.
+ */
+function parseCollectionField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): CollectionFieldDefinition {
+  assertKnownKeys(value, ['field', 'target', 'type', 'via'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`collection field "${entityName}.${name}" target must be a PascalCase name`)
+  }
+  if (typeof value.via !== 'string' || value.via.trim().length === 0) {
+    throw invalid(`collection field "${entityName}.${name}" via must be a non-empty Graph path`)
+  }
+  return {
+    name,
+    target: value.target,
+    type: FieldType.Collection,
+    via: value.via.trim(),
+  }
+}
+
+/**
+ * Validate one reciprocal navigation field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated inverse field.
+ */
+function parseInverseField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): InverseFieldDefinition {
+  assertKnownKeys(value, ['cardinality', 'field', 'inverse', 'target', 'type'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`inverse field "${entityName}.${name}" target must be a PascalCase entity name`)
+  }
+  if (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse)) {
+    throw invalid(`inverse field "${entityName}.${name}" inverse must be a camelCase identifier`)
+  }
+  if (value.cardinality !== 'One' && value.cardinality !== 'Many') {
+    throw invalid(`inverse field "${entityName}.${name}" cardinality must be One or Many`)
+  }
+  return {
+    cardinality: value.cardinality,
+    inverse: value.inverse,
+    name,
+    target: value.target,
+    type: FieldType.Inverse,
+  }
+}
+
+/**
+ * Validate one named enum field descriptor.
+ * @param entityName - Owning entity or relationship name.
+ * @param value - Field candidate.
+ * @param enums - Named Graph enums.
+ * @returns The validated enum field.
+ */
+function parseEnumField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+  enums: ReadonlyMap<string, EnumDefinition>,
+): EnumFieldDefinition {
+  assertKnownKeys(value, ['default', 'enum', 'field', 'nullable', 'type', 'unique'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.enum !== 'string' || value.enum.length === 0) {
+    throw invalid(`enum field "${entityName}.${name}" must name a Graph enum`)
+  }
+  const enumeration = enums.get(value.enum)
+  if (!enumeration) {
+    throw invalid(`enum field "${entityName}.${name}" references unknown enum "${value.enum}"`)
+  }
+  const nullable = parseNullable(entityName, name, value)
+  let defaultValue: string | undefined
+  if (value.default !== undefined) {
+    if (typeof value.default !== 'string') {
+      throw invalid(`field "${entityName}.${name}" default must be a valid Enum value`)
+    }
+    if (!enumeration.values.some(candidate => candidate.value === value.default)) {
+      throw invalid(
+        `field "${entityName}.${name}" default "${value.default}" is not a value of enum "${enumeration.name}"`,
+      )
+    }
+    defaultValue = value.default
+  }
+  const unique = parseUnique(entityName, name, value)
+  return {
+    ...(defaultValue === undefined ? {} : { default: defaultValue }),
+    enum: enumeration.name,
+    name,
+    ...(nullable === undefined ? {} : { nullable }),
+    type: FieldType.Enum,
+    ...(unique === undefined ? {} : { unique }),
+  }
+}
+
+/**
+ * Validate one opaque JSON field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated JSON field.
+ */
+function parseJSONField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): JSONFieldDefinition {
+  assertKnownKeys(value, ['default', 'field', 'nullable', 'type', 'unique'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  const nullable = parseNullable(entityName, name, value)
+  const defaultValue = parseDefault(entityName, name, FieldType.JSON, value)
+  const unique = parseUnique(entityName, name, value)
+  return {
+    ...(defaultValue === undefined ? {} : { default: defaultValue }),
+    name,
+    ...(nullable === undefined ? {} : { nullable }),
+    type: FieldType.JSON,
+    ...(unique === undefined ? {} : { unique }),
+  }
+}
+
+/**
+ * Validate one native scalar-array field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated array field.
+ */
+function parseArrayField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): ArrayFieldDefinition {
+  assertKnownKeys(value, ['default', 'field', 'items', 'nullable', 'type', 'unique'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (!isRecord(value.items)) {
+    throw invalid(`array field "${entityName}.${name}" items must be an object`)
+  }
+  const items = value.items
+  if (typeof items.type !== 'string' || !SCALAR_FIELD_TYPES.has(items.type)) {
+    throw invalid(`array field "${entityName}.${name}" items must be a scalar type`)
+  }
+  if (items.type === FieldType.ID) {
+    assertKnownKeys(items, ['format', 'type'], 'array item')
+    if (items.format !== undefined && (typeof items.format !== 'string' || !IDENTITY_FORMATS.has(items.format))) {
+      throw invalid(`array field "${entityName}.${name}" ID format must be UUID or Snowflake`)
+    }
+    const nullable = parseNullable(entityName, name, value)
+    const defaultValue = parseDefault(entityName, name, FieldType.Array, value, FieldType.ID)
+    const unique = parseUnique(entityName, name, value)
+    return {
+      ...(defaultValue === undefined ? {} : { default: defaultValue as readonly unknown[] }),
+      items: {
+        ...(items.format !== undefined ? { format: items.format as IdentityFormat } : {}),
+        type: FieldType.ID,
+      },
+      name,
+      ...(nullable === undefined ? {} : { nullable }),
+      type: FieldType.Array,
+      ...(unique === undefined ? {} : { unique }),
+    }
+  }
+  assertKnownKeys(items, ['type'], 'array item')
+  const nullable = parseNullable(entityName, name, value)
+  const defaultValue = parseDefault(
+    entityName,
+    name,
+    FieldType.Array,
+    value,
+    items.type as ScalarFieldType,
+  )
+  const unique = parseUnique(entityName, name, value)
+  return {
+    ...(defaultValue === undefined ? {} : { default: defaultValue as readonly unknown[] }),
+    items: { type: items.type as ScalarFieldType },
+    name,
+    ...(nullable === undefined ? {} : { nullable }),
+    type: FieldType.Array,
+    ...(unique === undefined ? {} : { unique }),
+  }
+}
+
+/**
+ * Validate generated PostgreSQL identifier length.
+ * @param value - Generated identifier.
+ * @param context - Diagnostic label.
+ */
+function validatePhysicalIdentifier(value: string, context: string): void {
+  if (new TextEncoder().encode(value).length > 63) {
+    throw invalid(`${context} "${value}" exceeds PostgreSQL's 63-byte identifier limit`)
+  }
+}
+
+/**
+ * Resolve one entity against its complete ancestry.
+ * @param seed - Validated entity seed.
+ * @param byName - Seeds by name.
+ * @param formats - Effective ID formats.
+ * @param children - Direct children by parent.
+ * @returns The resolved entity.
+ */
+function resolveEntity(
+  seed: EntitySeed,
+  byName: ReadonlyMap<string, EntitySeed>,
+  formats: ReadonlyMap<string, IdentityFormat | undefined>,
+  children: ReadonlyMap<string, readonly string[]>,
+): EntityDefinition {
+  const effective: EffectiveFieldDefinition[] = [...rootFields(formats.get(seed.name))]
+  const inverseFields: InverseFieldDefinition[] = []
+  const ancestors: EntitySeed[] = []
+  let current = seed.extends ? byName.get(seed.extends) : undefined
+  while (current) {
+    ancestors.unshift(current)
+    current = current.extends ? byName.get(current.extends) : undefined
+  }
+  for (const ancestor of ancestors) {
+    for (const field of ancestor.fields) {
+      if (field.type === FieldType.Inverse) inverseFields.push(field)
+      else if (field.type !== FieldType.Collection) effective.push({ ...field, owner: ancestor.name })
+    }
+  }
+  for (const field of seed.fields) {
+    if (field.type === FieldType.Inverse) inverseFields.push(field)
+    else if (field.type !== FieldType.Collection) effective.push({ ...field, owner: seed.name })
+  }
+  const idField: ScalarFieldDefinition = {
+    ...(formats.get(seed.name) ? { format: formats.get(seed.name) } : {}),
+    name: 'id',
+    type: FieldType.ID,
+  }
+  return {
+    abstract: (children.get(seed.name)?.length ?? 0) > 0,
+    collections: [],
+    constraints: seed.constraints,
+    effectiveFields: effective,
+    ...(seed.extends ? { extends: seed.extends } : {}),
+    fields: [idField, ...seed.fields],
+    inverseFields,
+    ...(formats.get(seed.name) ? { idFormat: formats.get(seed.name) } : {}),
+    name: seed.name,
+    parent: seed.extends ?? 'Entity',
+    singularNavigations: [],
+  }
+}
+
+/**
+ * Build one entity table from locally owned fields.
+ * @param entity - Validated entity.
+ * @param indexes - Additional indexes derived from inverse references.
+ * @param enums - Named Graph enums.
+ * @returns Its physical table metadata.
+ */
+function entityTable(
+  entity: EntityDefinition,
+  indexes: readonly TableIndex[] = [],
+  enums: readonly EnumDefinition[] = [],
+): TableDefinition {
+  const columns = new Map<string, string>()
+  for (const field of entity.fields.filter(isPhysicalField)) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  return {
+    checks: [
+      {
+        expression: identityCheck('id', entity.idFormat),
+        name: `${entity.name}_id_format_check`,
+      },
+      ...boundChecks(entity.name, entity.fields.filter(isPhysicalField)),
+      ...enumChecks(entity.name, entity.fields.filter(isPhysicalField), enums),
+    ],
+    columns: entity.fields.filter(isPhysicalField).map(fieldTableColumn),
+    ...(indexes.length + entity.constraints.length > 0
+      ? { indexes: validatedIndexes(entity.name, [...indexes, ...uniqueIndexes(entity.constraints, columns)]) }
+      : {}),
+    name: entity.name,
+  }
+}
+
+/** One authored field that owns PostgreSQL storage. */
+type PhysicalFieldDefinition = Exclude<
+  FieldDefinition,
+  CollectionFieldDefinition | InverseFieldDefinition
+>
+
+/**
+ * Whether a field owns physical storage.
+ * @param field - Authored field.
+ * @returns `true` for scalar, array, JSON or forward-reference fields.
+ */
+function isPhysicalField(field: FieldDefinition): field is PhysicalFieldDefinition {
+  return field.type !== FieldType.Collection && field.type !== FieldType.Inverse
+}
+
+/**
+ * Build physical check constraints for declared scalar bounds.
+ * @param owner - Owning entity or relationship table.
+ * @param fields - Physical fields.
+ * @returns Bound checks in field order.
+ */
+function boundChecks(
+  owner: string,
+  fields: readonly PhysicalFieldDefinition[],
+): readonly TableCheck[] {
+  const checks: TableCheck[] = []
+  for (const field of fields) {
+    const expressions: string[] = []
+    const column = quoteIdentifier(fieldColumn(field))
+    if (field.type === FieldType.Number) {
+      if (field.minimum !== undefined) expressions.push(`${column} >= ${String(field.minimum)}`)
+      if (field.maximum !== undefined) expressions.push(`${column} <= ${String(field.maximum)}`)
+    }
+    if (field.type === FieldType.String) {
+      if (field.minLength !== undefined) {
+        expressions.push(`char_length(${column}) >= ${String(field.minLength)}`)
+      }
+      if (field.maxLength !== undefined) {
+        expressions.push(`char_length(${column}) <= ${String(field.maxLength)}`)
+      }
+    }
+    if (expressions.length === 0) continue
+    const name = `${owner}_${field.name}_bounds_check`
+    validatePhysicalIdentifier(name, 'bounds check')
+    checks.push({
+      expression: `(${column} IS NULL OR (${expressions.join(' AND ')}))`,
+      name,
+    })
+  }
+  return checks
+}
+
+/**
+ * Build physical allowed-value checks for named enum fields.
+ * @param owner - Owning entity or relationship table.
+ * @param fields - Physical fields.
+ * @param enums - Named Graph enums.
+ * @returns Enum checks in field order.
+ */
+function enumChecks(
+  owner: string,
+  fields: readonly PhysicalFieldDefinition[],
+  enums: readonly EnumDefinition[],
+): readonly TableCheck[] {
+  const checks: TableCheck[] = []
+  for (const field of fields) {
+    if (field.type !== FieldType.Enum) continue
+    const enumeration = enums.find(candidate => candidate.name === field.enum)
+    if (!enumeration) throw invalid(`enum field "${owner}.${field.name}" has no enum "${field.enum}"`)
+    const column = quoteIdentifier(fieldColumn(field))
+    const values = enumeration.values.map(candidate => quoteLiteral(candidate.value)).join(', ')
+    const name = `${owner}_${field.name}_enum_check`
+    validatePhysicalIdentifier(name, 'enum check')
+    checks.push({
+      column: fieldColumn(field),
+      expression: `(${column} IS NULL OR ${column} IN (${values}))`,
+      name,
+      values: enumeration.values.map(candidate => candidate.value),
+    })
+  }
+  return checks
+}
+
+/**
+ * Build one physical table column from a scalar, enum, array, JSON or reference field.
+ * @param field - Logical physical field.
+ * @returns Physical column metadata.
+ */
+function fieldTableColumn(field: PhysicalFieldDefinition): TableColumn {
+  const defaultValue = field.default === undefined ? {} : { default: defaultSQL(field) }
+  if (field.type === FieldType.Entity) {
+    return {
+      ...defaultValue,
+      name: field.column,
+      nullable: field.nullable ?? true,
+      type: FieldType.String,
+    }
+  }
+  if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
+  if (field.type === FieldType.Enum) {
+    return {
+      ...defaultValue,
+      name: field.name,
+      nullable: field.nullable === true,
+      type: FieldType.String,
+    }
+  }
+  if (field.type === FieldType.Array) {
+    return {
+      ...defaultValue,
+      arrayType: field.items.type,
+      name: field.name,
+      nullable: field.nullable === true,
+      type: FieldType.Array,
+    }
+  }
+  return { ...defaultValue, name: field.name, nullable: field.nullable === true, type: field.type }
+}
+
+/**
+ * Build a PostgreSQL default expression for one physical field.
+ * @param field - Physical field with a declared default.
+ * @returns SQL default expression.
+ */
+function defaultSQL(field: PhysicalFieldDefinition): string {
+  const value = field.default
+  if (value === null) return 'NULL'
+  if (field.type === FieldType.Entity) return quoteLiteral(String(value))
+  if (field.type === FieldType.Enum) return quoteLiteral(String(value))
+  if (field.type === FieldType.JSON) return `${quoteLiteral(JSON.stringify(value))}::jsonb`
+  if (field.type === FieldType.Array) {
+    const items = field.items.type
+    const elements = value as readonly unknown[]
+    if (elements.length === 0) return `ARRAY[]::${postgresScalarType(items)}[]`
+    return `ARRAY[${elements.map(item => scalarDefault(item, items)).join(', ')}]`
+  }
+  return scalarDefault(value, field.type)
+}
+
+/**
+ * Build one scalar PostgreSQL default literal.
+ * @param value - Default value.
+ * @param type - Scalar field type.
+ * @returns SQL literal.
+ */
+function scalarDefault(value: unknown, type: ScalarFieldType): string {
+  if (value === null) return 'NULL'
+  if (type === FieldType.Boolean) return value === true ? 'true' : 'false'
+  if (type === FieldType.Number) return String(value)
+  if (type === FieldType.Date) {
+    return `${quoteLiteral(value instanceof Date ? value.toISOString().slice(0, 10) : String(value))}::date`
+  }
+  if (type === FieldType.Timestamp) {
+    return `${quoteLiteral(value instanceof Date ? value.toISOString() : String(value))}::timestamptz`
+  }
+  return quoteLiteral(String(value))
+}
+
+/**
+ * Build unique indexes from declarative constraints.
+ * @param constraints - Constraints owned by one table.
+ * @param columns - Logical and physical field names mapped to columns.
+ * @returns Unique index metadata.
+ */
+function uniqueIndexes(
+  constraints: readonly ConstraintDefinition[],
+  columns: ReadonlyMap<string, string>,
+): readonly TableIndex[] {
+  return constraints
+    .filter((constraint): constraint is StructuralConstraintDefinition => (
+      constraint.type === Constraint.Structural
+    ))
+    .map(constraint => ({
+      columns: constraint.fields.map(field => {
+        const column = columns.get(field)
+        if (!column) throw invalid(`constraint "${constraint.name}" has no physical column "${field}"`)
+        return column
+      }),
+      name: constraint.index,
+      review: true,
+      unique: true,
+    }))
+}
+
+/**
+ * Combine generated and declared indexes while rejecting duplicate names.
+ * @param owner - Owning table.
+ * @param indexes - Candidate indexes.
+ * @returns Combined indexes.
+ */
+function validatedIndexes(owner: string, indexes: readonly TableIndex[]): readonly TableIndex[] {
+  const names = new Set<string>()
+  for (const index of indexes) {
+    if (names.has(index.name)) throw invalid(`duplicate physical index "${owner}.${index.name}"`)
+    names.add(index.name)
+  }
+  return indexes
+}
+
+/**
+ * Derive indexes for physical forward FKs used by reciprocal navigations.
+ * @param associations - Validated reciprocal associations.
+ * @returns Deduplicated indexes by owning entity table.
+ */
+function inverseReferenceIndexes(
+  associations: readonly AssociationDefinition[],
+): ReadonlyMap<string, readonly TableIndex[]> {
+  const result = new Map<string, TableIndex[]>()
+  const seen = new Set<string>()
+  for (const association of associations) {
+    const field = association.forward
+    const key = `${association.forwardOwner}\u0000${field.column}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const indexes = result.get(association.forwardOwner) ?? []
+    indexes.push({
+      columns: [field.column],
+      name: `${association.forwardOwner}_${field.name}_fk_idx`,
+      ...(association.cardinality === 'One' ? { unique: true } : {}),
+    })
+    result.set(association.forwardOwner, indexes)
+  }
+  return result
+}
+
+/** One foreign-key definition for a relationship table. */
+interface RelationshipForeignKeyDefinition {
+  /** Local column. */
+  readonly column: string,
+  /** Deterministic constraint name. */
+  readonly name: string,
+  /** CREATE ALTER statement. */
+  readonly statement: string,
+  /** Referenced entity table. */
+  readonly target: string,
+}
+
+/**
+ * Build one physical relationship table.
+ * @param relationship - Named relationship definition.
+ * @param enums - Named Graph enums.
+ * @returns Its table metadata.
+ */
+function relationshipTable(
+  relationship: RelationshipDefinition,
+  enums: readonly EnumDefinition[] = [],
+): TableDefinition {
+  const endpointColumns = relationship.between.map(endpoint => ({
+    name: `${endpoint.field}.id`,
+    type: FieldType.String,
+  })) satisfies TableColumn[]
+  const columns = new Map<string, string>()
+  for (const endpoint of relationship.between) columns.set(endpoint.field, `${endpoint.field}.id`)
+  for (const field of relationship.fields) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  const indexes = [
+    ...relationship.between.map(endpoint => ({
+      columns: [`${endpoint.field}.id`],
+      name: `${relationship.name}_${endpoint.field}_idx`,
+    })),
+    ...uniqueIndexes(relationship.constraints, columns),
+  ]
+  return {
+    checks: [
+      ...boundChecks(relationship.name, relationship.fields),
+      ...enumChecks(relationship.name, relationship.fields, enums),
+    ],
+    columns: [...endpointColumns, ...relationship.fields.map(fieldTableColumn)],
+    indexes: validatedIndexes(relationship.name, indexes),
+    name: relationship.name,
+    primaryKey: endpointColumns.map(column => column.name),
+  }
+}
+
+/**
+ * Build foreign-key metadata for one relationship table.
+ * @param relationship - Named relationship definition.
+ * @returns Endpoint foreign-key definitions in authored order.
+ */
+function relationshipForeignKeyDefinitions(
+  relationship: RelationshipDefinition,
+): readonly RelationshipForeignKeyDefinition[] {
+  return relationship.between.map(endpoint => (
+    relationshipForeignKey(relationship, endpoint)
+  ))
+}
+
+/**
+ * Build one relationship endpoint foreign-key definition.
+ * @param relationship - Named relationship definition.
+ * @param endpoint - Authored endpoint descriptor.
+ * @returns Foreign-key metadata.
+ */
+function relationshipForeignKey(
+  relationship: RelationshipDefinition,
+  endpoint: RelationshipEndpointDefinition,
+): RelationshipForeignKeyDefinition {
+  const column = `${endpoint.field}.id`
+  const name = `${relationship.name}_${endpoint.field}_fkey`
+  return {
+    column,
+    name,
+    statement: `alter table ${quoteIdentifier(relationship.name)} ` +
+      `add constraint ${quoteIdentifier(name)} ` +
+      `foreign key (${quoteIdentifier(column)}) ` +
+      `references ${quoteIdentifier(endpoint.target)} ("id") deferrable initially immediate`,
+    target: endpoint.target,
+  }
+}
+
+/**
+ * Build one identity-format SQL predicate.
+ * @param column - Physical identity column.
+ * @param format - Effective format, or undefined for either format.
+ * @returns A PostgreSQL boolean expression.
+ */
+function identityCheck(column: string, format: IdentityFormat | undefined): string {
+  const identifier = quoteIdentifier(column)
+  const uuid = `${identifier} ~ '${UUID_IDENTITY_PATTERN}'`
+  if (format === 'UUID') return uuid
+  const snowflake = `case
+    when ${identifier} ~ '${SNOWFLAKE_IDENTITY_PATTERN}' and length(${identifier}) <= 20
+      then ${identifier}::numeric between ${SNOWFLAKE_MIN_TEXT} and ${SNOWFLAKE_MAX_TEXT}
+    else false
+  end`
+  if (format === 'Snowflake') return snowflake
+  return `(${uuid} or ${snowflake})`
+}
+
+/**
+ * Build one reviewable add-check statement for an existing table.
+ * @param table - Owning table name.
+ * @param check - Table-level check.
+ * @returns Complete ALTER TABLE statement.
+ */
+function addCheckSql(table: string, check: TableCheck): string {
+  return `alter table ${quoteIdentifier(table)} add constraint ${quoteIdentifier(check.name)} ` +
+    `check (${check.expression})`
+}
+
+/**
+ * Build one physical table statement.
+ * @param table - Physical table metadata.
+ * @returns The PostgreSQL DDL statement.
+ */
+function createTable(table: TableDefinition): string {
+  const columns = table.columns.map(column => {
+    const nullability = column.primaryKey ? ' primary key' : column.nullable ? '' : ' not null'
+    const defaultSql = column.default === undefined ? '' : ` default ${column.default}`
+    return `${quoteIdentifier(column.name)} ${columnType(column)}${nullability}${defaultSql}`
+  })
+  const checks = (table.checks ?? []).map(check => (
+    `constraint ${quoteIdentifier(check.name)} check (${check.expression})`
+  ))
+  const primaryKey = table.primaryKey
+    ? [`primary key (${table.primaryKey.map(quoteIdentifier).join(', ')})`]
+    : []
+  return `create table ${quoteIdentifier(table.name)} (\n${[...columns, ...primaryKey, ...checks].join(',\n')}\n)`
+}
+
+/**
+ * Build one physical table index.
+ * @param table - Owning table.
+ * @param index - Index metadata.
+ * @returns The create-index statement.
+ */
+function createIndex(table: TableDefinition, index: TableIndex): string {
+  const method = index.method ? ` using ${index.method}` : ''
+  const columns = index.columns.map(column => (
+    `${quoteIdentifier(column)}${index.opclass ? ` ${index.opclass}` : ''}`
+  ))
+  const unique = index.unique ? 'unique ' : ''
+  return `create ${unique}index if not exists ${quoteIdentifier(index.name)} ` +
+    `on ${quoteIdentifier(table.name)}${method} (${columns.join(', ')})`
+}
+
+/**
+ * Build one MTI parent foreign-key statement.
+ * @param entity - Owning entity.
+ * @returns The alter-table statement.
+ */
+function addParentConstraint(entity: EntityDefinition): string {
+  return `alter table ${quoteIdentifier(entity.name)} ` +
+    `add constraint ${quoteIdentifier(parentConstraintName(entity))} ` +
+    'foreign key ("id") references ' +
+    `${quoteIdentifier(entity.parent)} ("id") deferrable initially immediate`
+}
+
+/**
+ * Build one reference foreign-key statement.
+ * @param entity - Owning entity.
+ * @param field - Reference field.
+ * @returns The alter-table statement.
+ */
+function addConstraint(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
+  return `alter table ${quoteIdentifier(entity.name)} ` +
+    `add constraint ${quoteIdentifier(constraintName(entity, field))} ` +
+    `foreign key (${quoteIdentifier(field.column)}) ` +
+    `references ${quoteIdentifier(field.target)} ("id") deferrable initially immediate`
+}
+
+/**
+ * Build deterministic parent constraint name.
+ * @param entity - Owning entity.
+ * @returns Constraint name.
+ */
+function parentConstraintName(entity: EntityDefinition): string {
+  return `${entity.name}_${entity.parent}_mti_fkey`
+}
+
+/**
+ * Build deterministic reference constraint name.
+ * @param entity - Owning entity.
+ * @param field - Reference field.
+ * @returns Constraint name.
+ */
+function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
+  return `${entity.name}_${field.name}_fkey`
+}
+
+/**
+ * Build lifecycle function and trigger metadata.
+ * @param entities - Validated entities.
+ * @returns Functions and triggers in dependency order.
+ */
+function lifecycleDefinitions(entities: readonly EntityDefinition[]): {
+  readonly functions: readonly LifecycleFunction[],
+  readonly triggers: readonly LifecycleTrigger[],
+} {
+  const concrete = entities.filter(entity => !entity.abstract)
+  const leafChecks = concrete.map(entity => `when ${quoteLiteral(entity.name)} then
+        if not exists (select 1 from ${quoteIdentifier(entity.name)} where "id" = root_id) then
+          raise exception 'incomplete root row % for entity %', root_id, root_entity;
+        end if;`)
+  const rootBody = `
+declare
+  root_id text;
+  root_entity text;
+begin
+  root_id := new."id";
+  select "entity" into root_entity from "Entity" where "id" = root_id;
+  if not found then
+    return null;
+  end if;
+  case root_entity
+    ${leafChecks.join('\n    ')}
+    else
+      raise exception 'unknown concrete entity %', root_entity;
+  end case;
+  return new;
+end
+`
+  const leafBody = `
+declare
+  key text;
+  root_entity text;
+  leaf_present integer;
+begin
+  if tg_op = 'UPDATE'
+    and to_jsonb(old)->>'id' is distinct from to_jsonb(new)->>'id' then
+    raise exception 'leaf row identity is immutable';
+  end if;
+  if tg_op = 'DELETE' then
+    key := to_jsonb(old)->>'id';
+  else
+    key := to_jsonb(new)->>'id';
+  end if;
+  execute format('select 1 from %I where "id" = $1', tg_table_name)
+    into leaf_present using key;
+  if leaf_present is not null then
+    select "entity" into root_entity from "Entity" where "id" = key;
+    if not found then
+      raise exception 'leaf row % has no root row', key;
+    end if;
+    if root_entity is distinct from tg_table_name then
+      raise exception 'leaf row % must match root entity %, found %',
+        key, tg_table_name, root_entity;
+    end if;
+  elsif exists (
+    select 1 from "Entity" where "id" = key and "entity" = tg_table_name
+  ) then
+    raise exception 'deleting leaf row % would leave an incomplete root row', key;
+  end if;
+  return null;
+end
+`
+  const immutableBody = `
+begin
+  if new."entity" is distinct from old."entity" then
+    raise exception 'leaf discriminator for root row % is immutable', old."id";
+  end if;
+  return new;
+end
+`
+  const functions: LifecycleFunction[] = [
+    lifecycleFunction('Entity_validate_leaf', rootBody),
+    lifecycleFunction('Entity_validate_leaf_row', leafBody),
+    lifecycleFunction('Entity_leaf_immutable', immutableBody),
+  ]
+  const triggers: LifecycleTrigger[] = [
+    {
+      constraint: true,
+      deferrable: true,
+      function: 'Entity_validate_leaf',
+      initDeferred: true,
+      name: 'Entity_leaf_check',
+      statement: 'create constraint trigger "Entity_leaf_check" after insert or update on "Entity" ' +
+        'deferrable initially deferred for each row execute function "Entity_validate_leaf"()',
+      table: 'Entity',
+      type: 21,
+    },
+    ...concrete.map(entity => ({
+      constraint: true,
+      deferrable: true,
+      function: 'Entity_validate_leaf_row',
+      initDeferred: true,
+      name: `${entity.name}_leaf_check`,
+      statement: `create constraint trigger ${quoteIdentifier(`${entity.name}_leaf_check`)} ` +
+        `after insert or update or delete on ${quoteIdentifier(entity.name)} ` +
+        'deferrable initially deferred for each row execute function "Entity_validate_leaf_row"()',
+      table: entity.name,
+      type: 29,
+    })),
+    {
+      columns: ['entity'],
+      constraint: false,
+      deferrable: false,
+      function: 'Entity_leaf_immutable',
+      initDeferred: false,
+      name: 'Entity_leaf_immutable',
+      statement: 'create trigger "Entity_leaf_immutable" before update of "entity" on "Entity" ' +
+        'for each row execute function "Entity_leaf_immutable"()',
+      table: 'Entity',
+      type: 19,
+    },
+  ]
+  return { functions, triggers }
+}
+
+/**
+ * Build one lifecycle function definition.
+ * @param name - Function name.
+ * @param body - Function body.
+ * @returns Function metadata.
+ */
+function lifecycleFunction(name: string, body: string): LifecycleFunction {
+  return {
+    body,
+    name,
+    statement: `create or replace function ${quoteIdentifier(name)}() ` +
+      `returns trigger language plpgsql as $$${body}$$`,
+  }
+}
+
+/**
+ * Resolve the physical PostgreSQL type for a table column.
+ * @param column - Physical column metadata.
+ * @returns Column type declaration.
+ */
+function columnType(column: TableColumn): string {
+  if (column.type === FieldType.Array) {
+    if (!column.arrayType) throw new Error(`Array column "${column.name}" has no element type`)
+    return `${postgresScalarType(column.arrayType)}[]`
+  }
+  if (column.type === FieldType.JSON) return 'jsonb'
+  return postgresScalarType(column.type)
+}
+
+/**
+ * Whether a field is an entity reference.
+ * @param field - Logical field.
+ * @returns `true` for reference fields.
+ */
+function isReferenceField(field: FieldDefinition): field is EntityReferenceFieldDefinition {
+  return field.type === FieldType.Entity
+}
+
+/**
+ * Return the physical column for a logical field.
+ * @param field - Logical field.
+ * @returns Column name.
+ */
+function fieldColumn(field: FieldDefinition): string {
+  return field.type === FieldType.Entity ? field.column : field.name
+}
+
+/**
+ * Quote a PostgreSQL identifier.
+ * @param identifier - Identifier.
+ * @returns Quoted identifier.
+ */
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`
+}
+
+/**
+ * Quote a PostgreSQL string literal.
+ * @param value - Literal value.
+ * @returns Quoted literal.
+ */
+function quoteLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+/**
+ * Whether a value is a plain object.
+ * @param value - Candidate.
+ * @returns `true` for a non-array object.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Reject unknown properties.
+ * @param value - Object being validated.
+ * @param allowed - Allowed keys.
+ * @param context - Diagnostic label.
+ */
+function assertKnownKeys(value: Record<string, unknown>, allowed: readonly string[], context: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) throw invalid(`unknown ${context} property "${key}"`)
+  }
+}
+
+/**
+ * Build an invalid-definition error.
+ * @param message - Specific failure.
+ * @returns Error.
+ */
+function invalid(message: string): Error {
+  return new Error(`Invalid entity definitions: ${message}`)
+}

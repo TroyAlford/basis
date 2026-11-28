@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 /*
  * Lifecycle proof for `useApplication`.
@@ -18,41 +18,42 @@ const preload = join(repoRoot, 'libraries', 'testing', 'bun.ts')
 const application = join(repoRoot, 'libraries', 'testing', 'application.ts')
 
 /** The fixture server: appends `boot`/`stop` (with pid) to `$ACTIVITY_LOG`. */
-const APP_SOURCE = [
-  "import { appendFileSync } from 'node:fs'",
-  '',
-  'const log = process.env.ACTIVITY_LOG',
-  'const record = (event: string): void => {',
-  '  if (log) appendFileSync(log, `${event} ${process.pid}\\n`)',
-  '}',
-  '',
-  "record('boot')",
-  'Bun.serve({',
-  "  hostname: process.env.HOST ?? '127.0.0.1',",
-  '  port: Number(process.env.PORT ?? 0),',
-  "  routes: { '/api/health': () => new Response('ok') },",
-  '})',
-  '',
-  'const stop = (): void => {',
-  "  record('stop')",
-  '  process.exit(0)',
-  '}',
-  '',
-  "process.on('SIGTERM', stop)",
-  "process.on('SIGINT', stop)",
-].join('\n')
+const APP_SOURCE = `
+import { appendFileSync } from 'node:fs'
+
+const log = process.env.ACTIVITY_LOG
+const record = (event: string): void => {
+  if (log) appendFileSync(log, \`\${event} \${process.pid}\\n\`)
+}
+
+record('boot')
+record(\`temp \${process.env.TMPDIR ?? ''}\`)
+Bun.serve({
+  hostname: process.env.HOST ?? '127.0.0.1',
+  port: Number(process.env.PORT ?? 0),
+  routes: { '/api/health': () => new Response('ok') },
+})
+
+const stop = (): void => {
+  record('stop')
+  process.exit(0)
+}
+
+process.on('SIGTERM', stop)
+process.on('SIGINT', stop)
+`.trim()
 
 /**
  * A test file that imports the fixture helpers.
  * @param body - The test declarations to include.
  * @returns The test module source.
  */
-const suite = (body: string): string => [
-  "import { expect, test } from 'bun:test'",
-  `import { stopApplications, useApplication } from '${application}'`,
-  '',
-  body,
-].join('\n')
+const suite = (body: string): string => `
+import { expect, test } from 'bun:test'
+import { stopApplications, useApplication } from '${application}'
+
+${body}
+`.trim()
 
 /**
  * A minimal test file that boots the same app.
@@ -73,11 +74,11 @@ function eagerPreload(entry: string, timeoutMs?: number): string {
   const options = timeoutMs === undefined
     ? `{ entry: '${entry}' }`
     : `{ entry: '${entry}', timeoutMs: ${timeoutMs} }`
-  return [
-    `import { useApplication } from '${application}'`,
-    `await useApplication(${options})`,
-    '',
-  ].join('\n')
+  return `
+import { useApplication } from '${application}'
+await useApplication(${options})
+
+  `.trim()
 }
 
 /** One fixture directory and its activity log. */
@@ -183,12 +184,22 @@ interface RunResult {
  * @param target - The fixture to run.
  * @param args - Extra `bun test` arguments (for example a single file).
  * @param signal - A signal to send once the fixture server has booted.
+ * @param env - Extra child-process environment.
  * @returns The exit code, activity, and output.
  */
-async function run(target: Fixture, args: string[] = [], signal?: NodeJS.Signals): Promise<RunResult> {
+async function run(
+  target: Fixture,
+  args: string[] = [],
+  signal?: NodeJS.Signals,
+  env: Record<string, string> = {},
+): Promise<RunResult> {
   const proc = Bun.spawn([process.execPath, 'test', ...args], {
     cwd: target.dir,
-    env: { ...process.env, ACTIVITY_LOG: target.activity },
+    env: {
+      ...process.env,
+      ACTIVITY_LOG: target.activity,
+      ...env,
+    },
     stderr: 'pipe',
     stdout: 'pipe',
   })
@@ -219,7 +230,27 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
+
+  test('keeps environment and persistence identities distinct', async () => {
+    const target = fixture({
+      'a.test.ts': suite(
+        "test('identities', async () => {\n" +
+        '  const [first, second, third] = await Promise.all([\n' +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'a' } }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'b' } }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'a' } }),\n" +
+        '  ])\n' +
+        '  expect(first).not.toBe(second)\n' +
+        '  expect(first).toBe(third)\n' +
+        '})',
+      ),
+    })
+    const { activity, code } = await run(target)
+    expect(code).toBe(0)
+    expect(activity.boot).toBe(2)
+    expect(activity.stops).toBe(2)
+  })
 
   test('allows two genuinely different entries to boot separately', async () => {
     const target = fixture({
@@ -238,7 +269,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(2)
     expect(activity.stops).toBe(2)
-  }, 30_000)
+  })
 
   test('shares one boot across concurrent callers', async () => {
     const target = fixture({
@@ -256,7 +287,25 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
+
+  test('boots a fresh application after a caller stops the shared handle', async () => {
+    const target = fixture({
+      'a.test.ts': suite(
+        "test('reuse', async () => {\n" +
+        "  const first = await useApplication({ entry: './app.ts' })\n" +
+        '  await first.stop()\n' +
+        "  const second = await useApplication({ entry: './app.ts' })\n" +
+        '  expect(second).not.toBe(first)\n' +
+        '  await second.stop()\n' +
+        '})',
+      ),
+    })
+    const { activity, code } = await run(target)
+    expect(code).toBe(0)
+    expect(activity.boot).toBe(2)
+    expect(activity.stops).toBe(2)
+  })
 
   test('tears down exactly once after a failing assertion', async () => {
     const target = fixture({
@@ -271,7 +320,7 @@ describe('useApplication lifecycle', () => {
     expect(code).not.toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('tears down exactly once after a thrown error', async () => {
     const target = fixture({
@@ -286,7 +335,7 @@ describe('useApplication lifecycle', () => {
     expect(code).not.toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('boots once and tears down once for a filtered single-file run', async () => {
     const target = fixture({
@@ -297,7 +346,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('tears down exactly once and leaves nothing alive on SIGINT', async () => {
     const target = fixture({
@@ -314,7 +363,7 @@ describe('useApplication lifecycle', () => {
     expect(activity.stops).toBe(1)
     expect(activity.pid).not.toBeNull()
     if (activity.pid !== null) expect(isAlive(activity.pid)).toBe(false)
-  }, 30_000)
+  })
 
   test('tears down exactly once and leaves nothing alive on SIGTERM', async () => {
     const target = fixture({
@@ -331,7 +380,7 @@ describe('useApplication lifecycle', () => {
     expect(activity.stops).toBe(1)
     expect(activity.pid).not.toBeNull()
     if (activity.pid !== null) expect(isAlive(activity.pid)).toBe(false)
-  }, 30_000)
+  })
 
   test('tears down at most once when stop is called repeatedly', async () => {
     const target = fixture({
@@ -347,7 +396,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('boots eagerly from a preload and reuses that boot lazily', async () => {
     const eager = 'eager-preload.ts'
@@ -367,7 +416,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('fails the run at startup when an eager preload cannot boot', async () => {
     const eager = 'eager-preload.ts'
@@ -386,7 +435,7 @@ describe('useApplication lifecycle', () => {
     expect(code).not.toBe(0)
     expect(activity.boot).toBe(0)
     expect(output).not.toContain('the suite should never run')
-  }, 30_000)
+  })
 
   test('treats equivalent cwd/entry spellings as one application', async () => {
     const target = fixture({
@@ -406,7 +455,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('rejects useApplication after teardown instead of leaking a server', async () => {
     const target = fixture({
@@ -422,5 +471,5 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 })

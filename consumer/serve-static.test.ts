@@ -37,19 +37,19 @@ describe('ensureServeStaticConfig', () => {
     expect(second.text).toBe(first.text)
   })
 
-  test('replaces a stale fenced block', () => {
-    const stale = [
-      '# >>> basis:development-server >>>',
-      '[serve.static]',
-      'plugins = ["./old.ts"]',
-      '# <<< basis:development-server <<<',
-      '',
-    ].join('\n')
-    const { changed, text } = ensureServeStaticConfig(stale)
+  test('preserves a customized fenced block', () => {
+    const custom = `
+# >>> basis:development-server >>>
+[serve.static]
+plugins = ["./custom-serve.ts"]
+# <<< basis:development-server <<<
 
-    expect(changed).toBe(true)
-    expect(plugins(text)).toEqual([SERVE_STATIC_PLUGIN])
-    expect(text).not.toContain('./old.ts')
+    `.trim()
+    const { changed, text } = ensureServeStaticConfig(custom)
+
+    expect(changed).toBe(false)
+    expect(plugins(text)).toEqual(['./custom-serve.ts'])
+    expect(text.trimEnd()).toBe(custom)
   })
 
   test('leaves a document that already names the plugin alone', () => {

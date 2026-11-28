@@ -1,5 +1,7 @@
+import { tempDirectory } from 'basis/testing'
+import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -10,6 +12,11 @@ interface Job {
   'permissions'?: Record<string, string>,
   'runs-on'?: string,
   'steps'?: Step[],
+  'strategy'?: {
+    matrix?: {
+      os?: string[],
+    },
+  },
 }
 
 interface Step {
@@ -46,21 +53,62 @@ function loadWorkflow(path: string): Workflow {
  * Run a workflow gate script with a synthetic `needs` context.
  * @param script - The gate script.
  * @param needs - The synthetic needs object.
+ * @param extra - Additional environment values.
  * @returns The process exit code and output.
  */
-function runGate(script: string, needs: Record<string, { result: string }>): {
+function runGate(
+  script: string,
+  needs: Record<string, { result: string }>,
+  extra: Record<string, string> = {},
+): {
   code: number,
   output: string,
 } {
-  const process = Bun.spawnSync(['bash', '-c', script], {
-    env: { ...Bun.env, NEEDS: JSON.stringify(needs) },
-    stderr: 'pipe',
-    stdout: 'pipe',
+  const process = run('bash', ['-c', script], {
+    env: {
+      DECISION: '{"decision":true}',
+      DECISION_HASH: 'hash',
+      LANES: JSON.stringify({
+        database: false,
+        docs: false,
+        e2e: false,
+        lifecycle: false,
+        unit: false,
+      }),
+      NEEDS: JSON.stringify(needs),
+      ...extra,
+    },
   })
 
   return {
-    code: process.exitCode ?? -1,
-    output: `${new TextDecoder().decode(process.stdout)}${new TextDecoder().decode(process.stderr)}`,
+    code: process.exitCode,
+    output: `${process.stdout}${process.stderr}`,
+  }
+}
+
+/**
+ * Run the actual lane-decision shell step against a synthetic decision file.
+ * @param decision - Decision JSON written to `impact-decision.json`.
+ * @returns The process exit code and output.
+ */
+function runLaneStep(decision: unknown): { code: number, output: string } {
+  const step = code.jobs?.impact?.steps?.find(entry => entry.name === 'Derive test-lane decisions')
+  if (!step?.run) throw new Error('lane decision step is missing')
+  const directory = tempDirectory('basis-impact-lanes')
+  const outputFile = join(directory, 'github-output')
+  try {
+    writeFileSync(join(directory, 'impact-decision.json'), JSON.stringify(decision))
+    writeFileSync(outputFile, '')
+    const process = run('bash', ['-c', step.run], {
+      cwd: directory,
+      env: { GITHUB_OUTPUT: outputFile, POLICY_PRESENT: 'true' },
+    })
+    return {
+      code: process.exitCode,
+      output: `${process.stdout}${process.stderr}` + readFileSync(outputFile, 'utf8'),
+    }
+  } finally {
+    rmSync(directory, { force: true, recursive: true })
   }
 }
 
@@ -77,10 +125,37 @@ function gateScript(workflow: Workflow): string {
 const code = loadWorkflow('.github/workflows/ci.yml')
 const metadata = loadWorkflow('.github/workflows/pr-metadata.yml')
 
+/** Every impact lane the Basis workflow reports. */
+const laneNames = ['unit', 'database', 'e2e', 'lifecycle', 'docs']
+
+/** Test-suite lanes consolidated into one scheduled job. */
+const laneGroups: Record<string, string[]> = {
+  database: ['database'],
+  e2e: ['e2e'],
+  lifecycle: ['lifecycle'],
+  unit: ['unit', 'docs'],
+}
+
+/** Every code job the required gate judges. */
+const workflowJobs = [
+  'compliance', 'impact', 'toolchain', 'production-hmr', 'unit', 'database', 'e2e',
+  'lifecycle', 'knip', 'consumer-install',
+]
+
+/**
+ * Find whether one job runs a command.
+ * @param id - Workflow job id.
+ * @param command - Command text.
+ * @returns True when a step runs the command.
+ */
+function runs(id: string, command: string): boolean {
+  return code.jobs?.[id]?.steps?.some(step => step.run?.includes(command)) ?? false
+}
+
 describe('Basis Code CI', () => {
-  test('runs only the code events and never metadata edits', () => {
+  test('runs only the code events on main and epic branches', () => {
     expect(code.name).toBe('Code CI')
-    expect(code.on?.pull_request?.branches).toEqual(['main'])
+    expect(code.on?.pull_request?.branches).toEqual(['main', 'epic/*'])
     expect(code.on?.pull_request?.types).toEqual([
       'opened',
       'synchronize',
@@ -93,7 +168,7 @@ describe('Basis Code CI', () => {
   })
 
   test('skips every code job on drafts and has no edit skip path', () => {
-    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install', 'canary', 'required']) {
+    for (const id of [...workflowJobs, 'required']) {
       const job = code.jobs?.[id]
       expect(job).toBeDefined()
       expect(job?.if).toContain('!github.event.pull_request.draft')
@@ -102,17 +177,108 @@ describe('Basis Code CI', () => {
     expect(code.jobs?.['check-pr-title']).toBeUndefined()
   })
 
-  test('keeps the five code jobs and their core commands', () => {
-    const eslint = code.jobs?.eslint?.steps ?? []
-    expect(eslint.some(step => step.run?.includes('bun ./consumer/lint-es.ts'))).toBe(true)
-    expect(eslint.some(step => step.run?.includes('stylelint'))).toBe(true)
-    expect(eslint.some(step => step.run === 'bun run lint:md')).toBe(true)
-    expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(true)
+  test('keeps the quality jobs and every test lane command', () => {
+    expect(runs('compliance', 'bun run compliance')).toBe(true)
 
-    expect(code.jobs?.['run-tests']?.steps?.some(step => step.run === 'bun run test')).toBe(true)
-    expect(code.jobs?.['type-check']?.steps?.some(step => step.run === 'bun run lint:ts')).toBe(true)
-    expect(code.jobs?.['consumer-install']?.steps?.some(step => step.run === 'bun run test:consumer')).toBe(true)
+    const unit = code.jobs?.unit?.steps?.find(step => (
+      step.name === 'Run unit tests, screenshots and docs concurrently'
+    ))?.run ?? ''
+    expect(unit).toContain('bun run test:unit')
+    expect(unit).toContain('bun run docs:check')
+    expect(runs('database', 'bun run test:database')).toBe(true)
+    expect(runs('e2e', 'bun run test:e2e')).toBe(true)
+    expect(runs('lifecycle', 'bun run test:lifecycle')).toBe(true)
+    expect(runs('consumer-install', 'bun run test:consumer')).toBe(true)
     expect(code.jobs?.knip?.steps?.some(step => step.uses?.includes('/knip'))).toBe(true)
+  })
+
+  test('sets up the pinned Bun toolchain and frozen dependencies', () => {
+    const jobs = workflowJobs
+    for (const id of jobs) {
+      if (id === 'toolchain') continue
+      const steps = code.jobs?.[id]?.steps ?? []
+      const setup = steps.find(step => step.uses === 'jdx/mise-action@v5')
+      expect(setup).toBeDefined()
+      expect(steps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+    }
+
+    const databaseImage = loadWorkflow('.github/workflows/database-image.yml')
+    const databaseSteps = databaseImage.jobs?.publish?.steps ?? []
+    expect(databaseSteps.find(step => step.uses === 'jdx/mise-action@v5')).toBeDefined()
+    expect(databaseSteps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+
+    const mise = readFileSync(join(root, 'mise.toml'), 'utf8')
+    expect(mise).toContain('npm.package_manager = "npm"')
+    expect(mise).toContain('"npm:bun" = { version = "1.4.5-canary.20261121.1"')
+    expect(mise).toContain('allow_builds = true')
+    expect(existsSync(join(root, '.tool-versions'))).toBe(false)
+    expect(existsSync(join(root, '.github/actions/asdf-setup'))).toBe(false)
+  })
+
+  test('verifies the pinned Bun canary on Linux and macOS', () => {
+    const toolchain = code.jobs?.toolchain
+    expect(toolchain?.strategy?.matrix?.os).toEqual(['ubuntu-latest', 'macos-latest'])
+    const verify = toolchain?.steps?.find(step => step.name === 'Verify the pinned Bun canary')?.run ?? ''
+    expect(verify).toContain('bun --version')
+    expect(verify).toContain('1.4.6')
+    expect(verify).toContain('bun --revision')
+    expect(verify).toContain('1.4.6-canary.1+b15f51302')
+  })
+
+  test('runs the combined production HMR browser proof only for Ready PRs', () => {
+    const job = code.jobs?.['production-hmr']
+    expect(job?.if).toContain('!github.event.pull_request.draft')
+    const command = job?.steps?.find(step => step.name === 'Run production HMR browser tests')?.run ?? ''
+    expect(command).toContain('application.production-hmr.e2e.ts')
+    expect(command).toContain('application.production-hmr.isolated.e2e.ts')
+  })
+
+  test('preflights trusted change impact before split lane jobs', () => {
+    const preflight = code.jobs?.impact?.steps ?? []
+    const checkout = preflight.find(step => step.uses?.startsWith('actions/checkout'))
+    expect(checkout?.with?.ref).toBe('${{ github.event.pull_request.base.sha }}')
+    expect(checkout?.with?.['fetch-depth']).toBe(0)
+
+    const fetch = preflight.find(step => step.name === 'Fetch pull-request head and base')
+    expect(fetch?.env?.BASE_REF).toBe('${{ github.event.pull_request.base.ref }}')
+    expect(fetch?.env?.HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(fetch?.run).toContain('refs/pull/${PR_NUMBER}/head')
+    expect(fetch?.run).toContain('git checkout --detach refs/remotes/origin/pr-head')
+
+    const impact = preflight.find(step => step.name === 'Analyze change impact')
+    expect(impact?.uses).toBe('TroyAlford/basis/.github/actions/change-impact@v7.11.0')
+    expect(impact?.with?.['config-path']).toBe('.github/ci-impact.json')
+    expect(impact?.with?.['head-sha']).toBe('${{ github.event.pull_request.head.sha }}')
+
+    const lanes = preflight.find(step => step.name === 'Derive test-lane decisions')
+    expect(lanes?.run).toContain('impact-decision.json')
+    expect(lanes?.run).toContain('lanes=')
+    expect(code.jobs?.impact?.outputs?.lanes).toContain('steps.lanes.outputs.lanes')
+
+    for (const [job, group] of Object.entries(laneGroups)) {
+      expect(code.jobs?.[job]?.if).toContain('needs.impact.outputs.lanes')
+      for (const lane of group) {
+        expect(code.jobs?.[job]?.if).toContain(`fromJSON(needs.impact.outputs.lanes).${lane}`)
+      }
+    }
+  })
+
+  test('preserves false lane decisions and rejects malformed decisions', () => {
+    const suites = Object.fromEntries(laneNames.map(lane => [lane, { needed: lane !== 'unit' }]))
+    const valid = runLaneStep({ suites })
+    expect(valid.code).toBe(0)
+    expect(valid.output).toContain('"unit":false')
+    expect(valid.output).toContain('"database":true')
+    expect(valid.output).toContain('"lifecycle":true')
+
+    const malformed = runLaneStep({ suites: { ...suites, unit: { needed: 'yes' } } })
+    expect(malformed.code).not.toBe(0)
+    expect(malformed.output).toContain('is not a boolean')
+
+    const missing = runLaneStep({ suites: { unit: { needed: false } } })
+    expect(missing.code).toBe(0)
+    expect(missing.output).toContain('"unit":false')
+    expect(missing.output).toContain('"database":true')
   })
 
   test('uses a per-PR concurrency group that ignores the event action', () => {
@@ -128,26 +294,44 @@ describe('Basis Code CI', () => {
     expect(required?.name).toBe('required')
     expect(required?.if).toContain('always()')
     expect(required?.if).toContain('!github.event.pull_request.draft')
-    expect(required?.needs).toEqual(['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install'])
+    expect(required?.needs).toEqual([
+      'compliance', 'impact', 'toolchain', 'production-hmr', 'unit', 'database', 'e2e',
+      'lifecycle', 'knip', 'consumer-install',
+    ])
 
     const script = gateScript(code)
     expect(script).not.toContain('gh api')
     expect(script).not.toContain('REUSE_')
-    expect(script).toContain('eslint run-tests type-check knip consumer-install')
+    expect(script).toContain('compliance impact knip consumer-install toolchain production-hmr')
     expect(script).toContain('!= "success"')
+    expect(script).toContain('DECISION_HASH')
   })
 
-  test('fails the gate for every non-success or missing code job', () => {
+  test('fails required when a new proof fails or is unexpectedly skipped', () => {
     const script = gateScript(code)
-    const jobs = ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install']
+    const allSuccess = Object.fromEntries(workflowJobs.map(id => [id, { result: 'success' }]))
+
+    for (const job of ['toolchain', 'production-hmr']) {
+      expect(runGate(script, { ...allSuccess, [job]: { result: 'failure' } }).code).toBe(1)
+      expect(runGate(script, { ...allSuccess, [job]: { result: 'skipped' } }).code).toBe(1)
+    }
+  })
+
+  test('fails the gate for failures, missing jobs, malformed evidence and needed skips', () => {
+    const script = gateScript(code)
+    const jobs = workflowJobs
     const allSuccess = Object.fromEntries(jobs.map(id => [id, { result: 'success' }]))
     expect(runGate(script, allSuccess).code).toBe(0)
 
+    const groupJobs = Object.keys(laneGroups)
     for (const job of jobs) {
-      for (const result of ['failure', 'skipped', 'cancelled']) {
-        const needs = { ...allSuccess, [job]: { result } }
-        expect(runGate(script, needs).code).toBe(1)
+      for (const result of ['failure', 'cancelled']) {
+        expect(runGate(script, { ...allSuccess, [job]: { result } }).code).toBe(1)
       }
+      expect(runGate(script, {
+        ...allSuccess,
+        [job]: { result: 'skipped' },
+      }).code).toBe(groupJobs.includes(job) ? 0 : 1)
     }
 
     for (const job of jobs) {
@@ -156,6 +340,27 @@ describe('Basis Code CI', () => {
       )
       expect(runGate(script, missing).code).toBe(1)
     }
+
+    expect(runGate(script, allSuccess, { DECISION: '', DECISION_HASH: '' }).code).toBe(1)
+    expect(runGate(script, allSuccess, { LANES: 'null' }).code).toBe(1)
+    expect(runGate(script, allSuccess, {
+      LANES: JSON.stringify({ unit: true }),
+    }).code).toBe(1)
+    const needed = Object.fromEntries(laneNames.map(lane => [lane, false]))
+    needed.database = true
+    expect(runGate(script, {
+      ...allSuccess,
+      database: { result: 'skipped' },
+    }, { LANES: JSON.stringify(needed) }).code).toBe(1)
+  }, 120_000)
+})
+
+describe('Basis release workflow', () => {
+  test('uses the repository mise toolchain instead of a second Bun pin', () => {
+    const release = loadWorkflow('.github/workflows/release.yml')
+    const steps = release.jobs?.['determine-version']?.steps ?? []
+    expect(steps.find(step => step.uses === 'jdx/mise-action@v5')).toBeDefined()
+    expect(steps.some(step => step.uses === 'oven-sh/setup-bun@v2')).toBe(false)
   })
 })
 
@@ -179,7 +384,7 @@ describe('Basis PR Metadata', () => {
     expect(job?.steps?.some(step => step.uses === './.github/actions/enforce-convco')).toBe(true)
     expect(job?.steps?.some(step => step.with?.['github-token'] === '${{ secrets.GITHUB_TOKEN }}')).toBe(true)
 
-    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install']) {
+    for (const id of ['compliance', 'run-tests', 'type-check', 'knip', 'consumer-install']) {
       expect(metadata.jobs?.[id]).toBeUndefined()
     }
   })

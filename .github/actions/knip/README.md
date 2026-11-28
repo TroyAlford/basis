@@ -27,7 +27,7 @@ The check analyzes the whole repository (it is not diff-scoped). Repositories th
 
 ## Usage
 
-Run it after the toolchain is installed (for example with `asdf-setup`), which provides `bun` on `PATH`:
+Run it after Bun and dependencies are installed, so `bun` is on `PATH`:
 
 ```yaml
 jobs:
@@ -36,8 +36,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up toolchain and install dependencies
-        uses: TroyAlford/basis/.github/actions/asdf-setup@vX.Y.Z
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Knip dead-code check
         uses: TroyAlford/basis/.github/actions/knip@vX.Y.Z
@@ -45,7 +48,7 @@ jobs:
           fail-on-findings: 'false' # advisory during rollout
 ```
 
-Pin both to a released Basis tag (the release that contains this action), as with the other Basis actions.
+Pin the Basis action to a released tag that contains it, as with the other Basis actions.
 
 ## Self-test
 

@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pruneDirectory, pruneSnapshots } from './cleanup'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 /**
  * Build a throwaway snapshot directory populated with the given filenames.
@@ -54,7 +53,7 @@ describe('testing/cleanup', () => {
   })
 
   test('ignores a missing directory', () => {
-    expect(pruneDirectory(join(tmpdir(), 'basis-snapshots-missing'), new Set())).toEqual([])
+    expect(pruneDirectory(join(tempDirectory('basis-snapshots-missing'), 'missing'), new Set())).toEqual([])
   })
 
   test('never deletes a committed baseline unless updating', () => {

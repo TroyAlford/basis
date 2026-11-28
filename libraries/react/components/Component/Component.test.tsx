@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
+import { Simulate } from '../../testing/Simulate'
 import { Component } from './Component'
 
 type Tag = keyof React.JSX.IntrinsicElements
@@ -156,22 +157,88 @@ describe('Component', () => {
       expect(onKeyDown).toHaveBeenCalledTimes(1)
     })
 
-    test('suppresses native forwarding for names the component explicitly owns', async () => {
-      class OwnedComponent extends Component<{ orientation?: string, title?: React.ReactNode }> {
+    test('removes an owned onClick by overriding attributes', async () => {
+      class ClickComponent extends Component<{ onClick?: () => void }> {
+        static displayName = 'ClickComponent'
+        get attributes() {
+          const attributes = { ...super.attributes } as Record<string, unknown>
+          delete attributes.onClick
+          return attributes
+        }
+        get tag(): Tag { return 'button' }
+      }
+      const onClick = mock()
+      const { node } = await render(<ClickComponent onClick={onClick} />)
+
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+      expect(onClick).not.toHaveBeenCalled()
+    })
+
+    test('removes an owned onChange by overriding attributes', async () => {
+      class ChangeComponent extends Component<{ onChange?: () => void }> {
+        static displayName = 'ChangeComponent'
+        get attributes() {
+          const attributes = { ...super.attributes } as Record<string, unknown>
+          delete attributes.onChange
+          return attributes
+        }
+        get tag(): Tag { return 'input' }
+      }
+      const onChange = mock()
+      const { node } = await render(<ChangeComponent onChange={onChange} />)
+
+      await Simulate.change(node as HTMLInputElement, 'changed')
+
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    test('allows a component to forward onClick explicitly', async () => {
+      class ExplicitClickComponent extends Component<{ onClick?: () => void }> {
+        static displayName = 'ExplicitClickComponent'
+        get attributes() { return { ...super.attributes, onClick: this.props.onClick } }
+        get tag(): Tag { return 'button' }
+      }
+      const onClick = mock()
+      const { node } = await render(<ExplicitClickComponent onClick={onClick} />)
+
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+      expect(onClick).toHaveBeenCalledTimes(1)
+    })
+
+    test('allows a component to forward onChange explicitly', async () => {
+      class ExplicitChangeComponent extends Component<{ onChange?: () => void }> {
+        static displayName = 'ExplicitChangeComponent'
+        get attributes() { return { ...super.attributes, onChange: this.props.onChange } }
+        get tag(): Tag { return 'input' }
+      }
+      const onChange = mock()
+      const { node } = await render(<ExplicitChangeComponent onChange={onChange} />)
+
+      await Simulate.change(node as HTMLInputElement, 'changed')
+
+      expect(onChange).toHaveBeenCalledTimes(1)
+    })
+
+    test('does not forward component-specific props', async () => {
+      class OwnedComponent extends Component<{ orientation?: string }> {
         static displayName = 'OwnedComponent'
-        static ownedNativeProps = ['title']
       }
 
-      const { node } = await render(<OwnedComponent orientation="vertical" title="owned" />)
+      const { node } = await render(<OwnedComponent orientation="vertical" />)
 
-      expect(node.hasAttribute('title')).toBe(false)
       expect(node.hasAttribute('orientation')).toBe(false)
     })
 
-    test('composes native prop ownership through inheritance', async () => {
+    test('inherits an attributes override', async () => {
       class OwnedComponent extends Component<{ title?: React.ReactNode }> {
         static displayName = 'OwnedComponent'
-        static ownedNativeProps = ['title']
+        get attributes() {
+          const attributes = { ...super.attributes } as Record<string, unknown>
+          delete attributes.title
+          return attributes
+        }
       }
       class SubComponent extends OwnedComponent {
         static displayName = 'SubComponent'

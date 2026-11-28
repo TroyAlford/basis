@@ -1,4 +1,6 @@
-import { beforeAll, expect } from 'bun:test'
+import { beforeAll, expect, setDefaultTimeout } from 'bun:test'
+
+setDefaultTimeout(60_000)
 import { join } from 'node:path'
 import type { ApplicationHandle, StartApplicationOptions } from './application'
 import { useApplication } from './application'
@@ -18,15 +20,15 @@ describe('testing/application', () => {
 
   beforeAll(async () => {
     app = await useApplication(options)
-  }, 60_000)
+  })
 
   test('serves the application under test', async () => {
     await app.visit('/', async page => {
       expect(await page.locator('h1').textContent()).toBe('Application')
     })
-  }, 30_000)
+  })
 
-  test('shares one run-scoped application across concurrent callers', async () => {
+  test('shares one application across concurrent callers', async () => {
     const [first, second] = await Promise.all([
       useApplication(options),
       useApplication(options),
@@ -42,11 +44,11 @@ describe('testing/application', () => {
     }, async page => {
       expect(await page.evaluate(() => localStorage.getItem('basis:probe'))).toBe('seeded')
     })
-  }, 30_000)
+  })
 
   test('captures a deterministic element from the page', async () => {
     await app.visit('/', async page => {
       await matchScreenshot(page.locator('[data-testid="swatch"]'))
     })
-  }, 30_000)
+  })
 })

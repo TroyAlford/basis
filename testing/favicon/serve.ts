@@ -22,7 +22,6 @@ if (Bun.env.FAVICON === 'icon') {
 }
 
 server.start({
-  development: Bun.env.MODE !== 'production',
   hostname: Bun.env.HOST ?? '127.0.0.1',
   port: Number(Bun.env.PORT ?? 0),
   version: Bun.env.VERSION ?? 'development',

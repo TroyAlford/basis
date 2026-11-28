@@ -10,24 +10,30 @@ Snapshot tests pin the rendered output of a component or an application page to 
 
 A test file's suffix selects its lane. Bun's default discovery runs only `.test` and `.spec`; the screenshot and end-to-end lanes stay opt-in and run only when a command names their files explicitly.
 
-| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ------------------ |
-| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `bun test`         |
-| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual-regression contracts via `matchScreenshot`; no application mount             | No                  | `test:screenshots` |
-| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`         |
+| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ----------------- |
+| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `test:unit`       |
+| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual-regression contracts via `matchScreenshot`; no application mount             | No                  | `test:unit`       |
+| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`        |
+
+The end-to-end suffix is partitioned into a database suite and a browser suite. A `*.e2e.ts` file is not automatically a database test; its lane is the command that names it. There are four test jobs: unit/screenshots, database, browser e2e, and lifecycle.
 
 ```json
 {
   "scripts": {
-    "test": "bun test",
-    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
-    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+    "test": "bun run test:unit",
+    "test:unit": "bun test --parallel <all *.test.* and *.screenshot.* files>",
+    "test:database": "bun test --concurrent --max-concurrency=8 <database e2e files>",
+    "test:e2e": "bun test <browser e2e files>",
+    "test:lifecycle": "bun test --parallel=2 --concurrent <fixture and recovery proofs>",
+    "test:runtime-lifecycle": "bun test <snapshot runtime lifecycle proof>",
+    "test:recovery": "bun test <destructive database proofs>",
+    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:runtime-lifecycle && bun run test:recovery"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. Basis CI runs the four test jobs in parallel: `test:unit` fans test files across Bun worker processes and includes screenshots, `test:database` runs one seeded PostgreSQL instance, `test:e2e` runs the browser journeys, and `test:lifecycle` runs the small fixture/recovery proofs concurrently. `test:runtime-lifecycle` is the focused snapshot-runtime proof and is run explicitly rather than in the required CI lifecycle lane. `test:recovery` is the explicit manual lane for the expensive destructive database proofs; it is not part of the required CI feedback path. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Basis recognizes all three lanes when it attributes a caller, registers a test, and scopes orphan pruning. That recognition never makes a heavy lane a default test: Bun still discovers only `.test` and `.spec`.
 
@@ -35,18 +41,18 @@ Visual snapshots assert appearance; mounted component tests assert behavior; end
 
 A test-lane run is fast and deterministic because the expensive part — the browser — is paid for once and reused:
 
-- exactly **one Docker container** runs Chromium for the whole run;
+- one run-scoped Docker container serves Chromium for the run and is removed at teardown;
 - exactly **one browser connection** serves every capture;
 - component/JSX snapshots and `app.visit` snapshots share that one browser;
 - the runtime starts on the first capture, never per file, test, assertion, visit, or component;
-- the testing preload tears it down **once**, when the run ends.
+- the testing preload closes the browser and contexts once when the run ends and removes the container.
 
 ## Lifecycle
 
 ```mermaid
 flowchart TD
     Run["One test-lane run"] --> First["First capture"]
-    First --> Runtime["Run-scoped runtime"]
+    First --> Runtime["Process runtime + run-scoped Docker"]
     Runtime --> Container["One Docker container<br/>pinned Playwright image"]
     Container --> Server["playwright run-server<br/>published localhost port"]
     Server --> Browser["One browser<br/>chromium.connect(ws)"]
@@ -54,20 +60,22 @@ flowchart TD
     Browser --> Visit["Application captures<br/>app.visit opens a fresh context per visit"]
     Component --> Compare["Compare with the committed PNG<br/>or write it when missing or updating"]
     Visit --> Compare
-    Compare --> Teardown["Preload afterAll<br/>close the browser and remove the container once"]
+    Compare --> Teardown["Preload afterAll<br/>close browser; remove container"]
 ```
 
 The runtime is memoised on `globalThis`, so every test file in the process resolves the same instance. There is no per-file, per-test, or per-capture browser startup; a run that never captures a screenshot never starts Docker at all.
 
 ## Component captures
 
-`matchScreenshot(<Button>Save</Button>)` renders the element to a standalone document with `react-dom/server`, inlines Basis's component styles and default theme, and loads it into one reused page with `setContent`. Each capture replaces that page's document, so the page — and the browser behind it — is created once. Playwright round-trips are kept to a minimum: one `evaluate` that waits for fonts and measures the element, then one screenshot. Put these captures in `*.screenshot.tsx` and run them with `bun run test:screenshots`.
+`matchScreenshot(<Button>Save</Button>)` renders the element to a standalone document with `react-dom/server`, inlines Basis's component styles and default theme, and loads it into one reused page with `setContent`. Each capture replaces that page's document, so the page — and the browser behind it — is created once. Playwright round-trips are kept to a minimum: one `evaluate` that waits for fonts and measures the element, then one screenshot. Put these captures in `*.screenshot.tsx` and run them with `bun run test:unit`.
 
 Components whose meaningful state only exists after mount — the resolved `Await`, a rendered `Mermaid` diagram, a placed `Tooltip` — are captured live through `app.visit` in `visual.live.e2e.ts`. Everything else is a static element capture.
 
 ## Application captures
 
-`useApplication({ entry })` boots the real server once per run on a free loopback port and waits for readiness. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
+`useApplication({ entry })` starts one development server per application identity on a free loopback port, waits for readiness, and shares it across the run. The preload stops it at teardown. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
+
+`startApplication` is the low-level primitive behind `useApplication`. Its `stop()` returns the child exit code, so a framework lifecycle test can assert a clean shutdown. `readyStatus` can accept an expected error-state response, such as a fixture's deliberate 503 health result, without bypassing the application fixture.
 
 ```tsx
 // Deck.e2e.ts
@@ -82,31 +90,145 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; neither is part of the default `bun test` lane.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Docs highlighting is locally pinned through `shiki` and Mermaid uses the local SSR-capable renderer, so visual journeys do not fetch a CDN. Component appearance belongs in `*.screenshot.tsx` and runs in the unit lane; neither lane is part of the default `bun test` discovery.
+
+## Run-scoped cleanup
+
+`registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
+
+## Compiling query SQL in tests
+
+`compileEntityQuery(entities, entity, options)` returns the same compiled query that `database.query` executes, including `sql`, ordered `values`, and the row `hydrate` function. Use it when a test must assert generated SQL or replay the compiled statement directly against PostgreSQL; `database.entities` is the canonical definition set to pass. It is a compiler adapter for tests, not a second query API.
+
+```ts
+import { compileEntityQuery } from 'basis/testing'
+
+const compiled = compileEntityQuery(database.entities, 'ConsumerNote', {
+  fields: ['id', 'label'],
+  where: { id: noteId },
+})
+expect(compiled.sql).toContain('WHERE')
+const rows = await database.sql.unsafe(compiled.sql, compiled.values)
+```
+
+## Consumer database fixtures
+
+`withDatabase` is the only consumer database fixture exported by `basis/testing`. It acquires the single run-scoped PostgreSQL fixture — the same lifecycle model as `useApplication` — and runs one test transaction that always rolls back. Use it for ordinary data tests, custom Graphs, actor-scoped RLS, owner-run setup, savepoints, and expected failures. The public options are `graph` and `setup`; committed writes, owner-proof selection, fresh schemas, and internal entity definitions are not part of the consumer type and cannot be selected through `withDatabase`. Owner setup runs inside the same rollback transaction, and the public callback context does not expose privileged owner switching.
+
+```ts
+import { Graph } from 'basis/server'
+import { withDatabase } from 'basis/testing'
+
+const graph = new Graph({
+  entities: [{
+    fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],
+    name: 'ConsumerNote',
+  }],
+})
+const noteId = '00000000-0000-4000-8000-000000000001'
+
+await withDatabase('consumer-note', null, async database => {
+  expect(await database.query('ConsumerNote', { fields: ['id', 'label'] }))
+    .toEqual([{ id: noteId, label: 'Example' }])
+}, {
+  graph,
+  setup: async database => {
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${noteId}, 'ConsumerNote', 'ConsumerNote')
+    `
+    await database.sql`
+      INSERT INTO "ConsumerNote" ("id", "label")
+      VALUES (${noteId}, 'Example')
+    `
+  },
+})
+```
+
+A custom Graph is installed once per exact Graph identity in a cached disposable schema with its RLS policies and grants. The owner-run `setup` callback executes before the fixed Basis restricted role is selected, so it can seed canonical users, Workspaces, and membership rows without weakening the policies. The callback then runs as the selected actor. `database.tx` uses savepoints; expected failures roll back to the savepoint, and the outer test transaction always rolls back.
+
+Do not create a second database, schema, container, or committed-write path. Basis's own lifecycle and recovery proofs may use internal primitives, but those are not part of the consumer surface.
+
+## Database isolation
+
+`bun run test:database` is the ordinary shared-database lane. It starts **one** PostgreSQL container per runner/suite execution, from the immutable seeded test image, and runs every database test file under one Bun invocation:
+
+```sh
+BASIS_E2E_FAST=1 \
+  bun test --concurrent --max-concurrency=8 \
+  ./libraries/server/source/Database.e2e.ts \
+  ./libraries/server/source/DatabaseSeed.e2e.ts \
+  ./libraries/server/source/Migration.e2e.ts \
+  ./libraries/server/source/QueryParity.e2e.ts \
+  ./libraries/server/source/QueryPlanning.e2e.ts \
+  ./libraries/server/source/Schema.e2e.ts
+```
+
+The image already contains the 500,000-row seeded dataset in its own data directory. It is pulled once per checksum and rebuilt only when the committed fixture inputs change. The ordinary fixture runs that image without a mounted data volume and removes the container at run teardown. The seeded proof therefore reads the same database instance as every ordinary test instead of starting a second container.
+
+The concurrency bound is eight tests against a ten-connection pool, leaving headroom for the fixture's own schema and cleanup work. `--concurrent` overlaps async tests inside a file; files share the same process-wide fixture, so the database is never restarted between files. The suite does not use `--parallel`.
+
+The first run installs the canonical shared schema once and caches one migrated schema per exact entity-definition set. It also installs the single authorization schema and its deterministic seed rows; authorization tests reserve one transaction, switch to the restricted app role, and roll back, so no test starts a second server or database. Runs are run-scoped by default: the fixture makes exactly one cleanup decision and removes the container and its anonymous volume at the end; no test volume exists. Ordinary tests run inside one reserved transaction, set the cached schema transaction-locally, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Basis's internal committed-transaction proofs may use a disposable unique schema and drop it in cleanup; consumer tests use `withDatabase` and always roll back. Reserved connections used outside a transaction reset `search_path` before they return to the pool. `BASIS_TEST_FIXTURE_ROOT` overrides the fixture directory.
+
+### Database execution inventory
+
+| Lane                 | Owner of PostgreSQL                               | Connection model                                                     | Destructive container work                     | Concurrency                   | Command          |
+| -------------------- | ------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------- | ---------------- |
+| Unit and screenshots | No PostgreSQL                                     | In-process; Playwright container for screenshots                     | No                                             | Bun `--parallel` file workers | `test:unit`      |
+| Database             | One seeded PostgreSQL container per runner/suite  | Reserved connection + transaction; unique schemas for committed work | No                                             | `--concurrent`, max 8         | `test:database`  |
+| E2E                  | No PostgreSQL                                     | One application server identity; Playwright container                | No                                             | Independent journeys          | `test:e2e`       |
+| Lifecycle            | Child fixtures own short-lived installation roots | Startup, teardown and interrupted cutover recovery                   | Yes, isolated per proof                        | Files and tests overlap       | `test:lifecycle` |
+| Recovery (manual)    | Each case owns its temporary installation/service | Real owner/app roles and public schema                               | Yes: restart, replace, backup/restore, cutover | Sequential destructive proofs | `test:recovery`  |
+
+Every additional ordinary service is a regression. The fixture starts the seeded container once and every ordinary database file shares it.
+
+The destructive recovery proofs remain real, but they are an explicitly measured manual lane because replacing and restoring containers cannot share the ordinary database instance. Do not move ordinary SQL coverage there.
+
+### Golden SQL assertions
+
+Server database tests assert complete SQL statements, not fragments. Register the test-only `toMatchSQL` matcher from `libraries/server/testing/toMatchSQL.ts`:
+
+```ts
+import { expect } from 'bun:test'
+import { toMatchSQL } from '../testing/toMatchSQL'
+
+expect.extend({ toMatchSQL })
+expect(statement).toMatchSQL(`SELECT "id" FROM "Note" WHERE "id" = $1`)
+```
+
+The matcher normalizes only insignificant whitespace outside quoted text; quoting, keywords, operators, placeholders, and ordered statement arrays remain significant. Dollar-quoted string contents, backslash escapes in `E'…'` strings, and line/nested block comment text—including line-comment newlines—are preserved rather than normalized. Use complete golden statements for phased DDL and compiled queries, and assert ordered bind values separately from their SQL text.
 
 ## Docker and determinism
 
-Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container has no fixed name and no host-network assumption.
+Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container is named from the installed Playwright version and the mounted Playwright runtime identity, and uses no host-network assumption.
 
-With no fixed identity, no lock files, no reference counts, and no PID protocols, there is nothing to coordinate between runs: each run owns exactly one container and removes it when it finishes.
+The container is run-scoped: it uses a process-unique name and is removed at teardown. Browser contexts remain isolated per visit, and the component capture page remains reused within the process.
 
 ## Proving the contract
 
-`libraries/testing/runtime.lifecycle.test.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one container start, one browser connection, and one teardown** for the run, reporting the measured runtime.
+`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark, run through `test:runtime-lifecycle`. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Visual runs start and remove one run-scoped container.
 
 ## Temp directories
 
-The testing preload isolates the process temp directory: it points `TMPDIR` / `TMP` / `TEMP` at one run-scoped root, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency, or any spawned child that uses it — writes inside that root. The preload removes the root when the run ends — success, failure, thrown error, or `SIGINT` / `SIGTERM` — so a detonating test cannot leak a directory or its contents, with no per-repo configuration.
+The testing preload points `TMPDIR` / `TMP` / `TEMP` at `./.basis/tmp`, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency, or any spawned child that uses it — writes inside the project. Nothing lands in the host's `/tmp`, and one checkout's temp tree is physically separate from another's.
 
-For a fixture that wants a named directory, `tempDirectory(prefix, base?)` from `basis/testing` creates a fresh directory under the same isolated root:
+A fixture asks for a named directory with `tempDirectory(prefix)` from `basis/testing`. The name is deterministic, normally the test's own name:
 
 ```ts
 import { tempDirectory } from 'basis/testing'
 
-const directory = tempDirectory('my-fixture')
+const directory = tempDirectory('my-test') // ./.basis/tmp/my-test
 ```
 
-Plain `mkdtemp(os.tmpdir())` is captured the same way. The optional `base` places the run root elsewhere, for a fixture a tool resolves only below the working tree; a base the run created is removed again once empty.
+Reusing a name clears the previous contents, including any managed PostgreSQL container installed there. A second use of the same name in one process gets a numeric suffix (`my-test-2`) so independent fixtures never share a directory. Plain `mkdtemp(os.tmpdir())` is captured under the same root.
+
+The run removes `./.basis/tmp` when it ends — success, failure, thrown error, or `SIGINT` / `SIGTERM`. Sibling test processes share the tree, so it is removed only by the last live owner; `.basis/tmp/.owners/<pid>` records each owner and a marker from a dead process is discarded. A `SIGKILL`ed run therefore leaves its tree behind, but the next run in the same checkout reuses the deterministic paths and, as the last owner, removes the tree and its containers. Another checkout is never in scope.
+
+## Managed PostgreSQL in tests
+
+Every Basis-managed PostgreSQL container and its named volume is labeled with the installation root that owns it (`basis.install`). Because that root now lives under `./.basis/tmp/<test>`, every container belongs to exactly one checkout and one test name.
+
+Removing `./.basis/tmp` also removes every managed container and named volume installed below it, including named volumes (`docker rm -v` only removes anonymous ones). Teardown and the per-name reset in `tempDirectory` both use that same scoped sweep, so a reaped installation is always one the current checkout owned.
 
 ## Updating snapshots
 
@@ -115,11 +237,11 @@ Plain `mkdtemp(os.tmpdir())` is captured the same way. The optional `base` place
 bun test --update-snapshots
 
 # A visual or end-to-end lane
-bun run test:screenshots --update-snapshots
+bun run test:unit --update-snapshots
 bun run test:e2e --update-snapshots
 
 # Or set the environment variable for any lane
-UPDATE_SNAPSHOTS=1 bun run test:screenshots
+UPDATE_SNAPSHOTS=1 bun run test:unit
 ```
 
 A committed baseline is only rewritten when the run explicitly updates. A failed or browser-less run never mutates a committed snapshot; a comparison failure writes nothing, and any legacy `.actual` / `.diff` artefacts from an older run are cleared on the next pass. Obsolete snapshots are pruned only while updating, and only for files whose entire suite executed.

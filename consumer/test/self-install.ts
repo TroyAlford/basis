@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { assert, assertDoctorOk, assertEslintSurface, assertMarkdownSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
 
@@ -39,7 +39,39 @@ const main = (): void => {
      */
     const app = join(workspace, 'app')
     initApp(app, spec, { includeBasis: false })
+    assert(
+      !existsSync(join(app, 'mise.toml')),
+      'the clean install must not require a consumer toolchain file',
+    )
     run(['bun', 'add', '--dev', '--trust', spec], app)
+
+    mkdirSync(join(app, 'emitters'), { recursive: true })
+    writeFileSync(join(app, 'graph.ts'), `import { FieldType, Graph } from 'basis/server'
+
+export default new Graph({
+  entities: [{
+    fields: [{ field: 'title', type: FieldType.String }],
+    name: 'EmitThing',
+  }],
+})
+`)
+    writeFileSync(join(app, 'emitters', 'custom.ts'), `import { emitter } from 'basis/codegen'
+
+export default emitter({ extension: 'txt', folder: 'custom' }, graph => [{
+  content: graph.definitions.entities.map(entity => entity.name).join('\\n'),
+  name: 'summary',
+}])
+`)
+
+    const basisBinEarly = join(app, 'node_modules', '.bin', 'basis')
+    run(['bun', basisBinEarly, 'emit'], app, env)
+    assert(existsSync(join(app, 'generated', 'typescript', 'index.ts')), 'built-in TypeScript emitter ran')
+    assert(existsSync(join(app, 'generated', 'json-schema', 'schemas.json')), 'built-in JSON Schema emitter ran')
+    assert(
+      readFileSync(join(app, 'generated', 'custom', 'summary.txt'), 'utf8').includes('EmitThing'),
+      'application emitter received the constructed Graph',
+    )
+    rmSync(join(app, 'generated'), { force: true, recursive: true })
 
     assertNodeFree(app, env)
     assertEslintSurface(app, env)
@@ -63,6 +95,13 @@ const main = (): void => {
     run(['bun', basisBin, 'lint'], app, env)
 
     run(['bun', basisBin, 'typecheck'], app, env)
+    assert(
+      existsSync(join(app, 'generated', 'custom', 'summary.txt')),
+      'typecheck lifecycle automatically reran application emitters',
+    )
+
+    copyFileSync(join(import.meta.dir, 'fixtures', 'consumer-fixture.ts'), join(app, 'fixture.test.ts'))
+    run(['bun', 'test', 'fixture.test.ts', '--timeout', '120000'], app)
 
     // True clean reinstall: drop node_modules and the lockfile, install again.
     rmSync(join(app, 'node_modules'), { force: true, recursive: true })

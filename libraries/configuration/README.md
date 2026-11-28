@@ -4,13 +4,14 @@ Configuration and host-integration primitives shared by first-party applications
 
 ## Public surface
 
-Three primitives, plus the types a consumer must name to call `run`:
+Two primitives, plus their types:
 
-| Export                               | Kind                                     |
-| ------------------------------------ | ---------------------------------------- |
-| `Environment`                        | Typed reads over the process environment |
-| `secret`                             | 1Password secret reads                   |
-| `run`, `RunOptions`, `CommandResult` | Bounded subprocess runner                |
+| Export        | Kind                                     |
+| ------------- | ---------------------------------------- |
+| `Environment` | Typed reads over the process environment |
+| `secret`      | 1Password secret reads                   |
+
+Subprocess execution (`run`, `runAsync`, `RunOptions`, `CommandResult`) belongs to `basis/utilities`.
 
 Everything else is internal implementation and is deliberately not re-exported: the dotenv loading seam (`loadDotenv`), the secret reader factory (`createSecretReader`) and its injection seams, and their types. Consumers own their configuration policy — defaults, required keys, and enabling conditions — over Basis's value-reading substrate; there is no `createConfiguration`.
 
@@ -56,7 +57,3 @@ import { secret } from 'basis/configuration'
 const token = secret('op://Vault/item/field') // ambient OP_SERVICE_ACCOUNT_TOKEN
 const settings = JSON.parse(secret('op://Vault/item/settings'))
 ```
-
-## Subprocesses
-
-`run(command, args, options)` is the single bounded runner the ecosystem shares: synchronous, shell-free (an explicit argv), with `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. It returns `{ exitCode, stdout, stderr }` and logs the command line and any failure, so applications stop reimplementing it.

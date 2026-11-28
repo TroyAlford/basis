@@ -1,12 +1,20 @@
 import type { Server as BunServer, ServerWebSocket } from 'bun'
+import type { FSWatcher } from 'chokidar'
+import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
+import { pluginMarkdown, pluginSASS } from '../../bun-plugins'
+import { setVendorSpecifiers } from '../../bun-plugins/source/vendorRuntime'
 import type { Identity } from '../../oauth'
+import type { HeadCollector } from '../../react/components/Head/Head'
+import { HeadProvider } from '../../react/components/Head/Head'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
+import { styleEntries } from '../../react/utilities/style'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
-import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
+import { assertBasisServerCompatible, HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
@@ -14,29 +22,87 @@ import type { APIRoute } from '../types/APIRoute'
 import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
-import { Builder } from './Builder'
-import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
+import { runAsActor } from './ActorContext'
+import { Authorization } from './Authorization'
+import type { CookieChange } from './Cookies'
+import { Cookies, serializeCookie } from './Cookies'
+import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
+import { createDatabase, NullDatabase, openAdmin } from './Database'
+import { DEV_SHELL_ROUTE, devShellDirectory, VENDOR_MARKER, writeDevShell, writeHydrationEntry } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
+import type { Graph } from './Graph'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
+import type { MigrationArtifact } from './Schema'
+import { DDL, physicalHash } from './Schema'
 import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { normalizeMountPrefix, serveMount } from './StaticMount'
+import { internalStateRoot, isInternalStatePath, isWithinPath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
+import type { VendorBuild } from './Vendor'
+import { buildVendorBundle, discoverVendorSpecifiers } from './Vendor'
+
+/** Request-scoped data supplied to a {@link Server.context} loader. */
+export interface ContextInput<CookieSchema extends Record<string, string> = Record<string, string>> {
+  /** Parsed request cookies. */
+  readonly cookies: Cookies<CookieSchema>,
+  /** Request-scoped database capability. */
+  readonly db: Database,
+  /** Verified canonical user id, or null for anonymous. */
+  readonly identity: string | null,
+  /** Server lifecycle logger. */
+  readonly logger: ILogger,
+  /** The incoming request. */
+  readonly request: Request,
+}
+
+/** Application context plus optional response metadata. */
+export interface ContextResult<AppContext extends object> {
+  /** Application context value. */
+  readonly context: AppContext,
+  /** Response cookies. */
+  readonly cookies?: CookieChange | readonly CookieChange[],
+  /** Response headers, excluding cookies. */
+  readonly headers?: HeadersInit,
+}
+
+type ContextLoader<
+  AppContext extends object,
+  CookieSchema extends Record<string, string>,
+> = (
+  input: ContextInput<CookieSchema>,
+) => ContextResult<AppContext> | Promise<ContextResult<AppContext>>
+
+interface ResolvedContext<AppContext extends object> {
+  readonly context: AppContext,
+  readonly cookies: readonly CookieChange[],
+  readonly headers: Headers,
+}
+
+/**
+ * Whether an `If-None-Match` header matches the current strong ETag.
+ * @param header - The request header value.
+ * @param etag - The current strong ETag, including quotes.
+ * @returns Whether the client's cached representation is still current.
+ */
+function matchesETag(header: string | null, etag: string): boolean {
+  if (!header) return false
+  return header.split(',').some(value => {
+    const candidate = value.trim()
+    return candidate === '*' || candidate === etag || candidate === `W/${etag}`
+  })
+}
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
   /**
-   * Run the live-development workflow. Development delegates to Bun's dev
-   * server, which compiles from source, watches the module graph, and hot
-   * replaces changed modules (React Fast Refresh included); dependencies are
-   * bundled, so no CDN is required. When `false`, the server builds once,
-   * serves the classic-script bundle, and does not watch or hot update.
-   * Defaults to `NODE_ENV !== 'production'`.
+   * Enable Bun's live HMR server. Defaults to true outside production and
+   * false when `NODE_ENV=production`. Preview can set this explicitly while
+   * still using production React.
    */
-  development?: boolean,
+  hmr?: boolean,
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
   /**
@@ -54,6 +120,12 @@ export interface ServerOptions {
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
+   * Trusted public origin used for executable vendor script URLs, for example
+   * `https://app.example` behind a TLS-terminating reverse proxy. Defaults to
+   * `PUBLIC_ORIGIN`, then the incoming request origin.
+   */
+  publicOrigin?: string,
+  /**
    * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
    * authoritative release version from the strict semver release tag (for
@@ -67,56 +139,65 @@ export interface ServerOptions {
  * A server for building, serving, and (in development) hot reloading React
  * applications.
  *
- * One server supports two explicit modes. Development delegates to Bun's dev
- * server: the SPA shell is generated and served through an HTML route, so Bun
- * owns live compilation, file watching, hot module replacement, and React Fast
- * Refresh. A changed module is replaced in place — no document reload — and
- * only falls back to a reload when nothing accepts the update.
- * Production builds once, bundles the installed dependency graph, serves the
- * SPA and its assets, reports the release version on `/api/health`, and shuts down
- * gracefully on SIGINT/SIGTERM.
+ * The server always delegates to Bun's server and serves the SPA shell through
+ * an HTML route. Development and explicit previews enable Bun's live HMR; a
+ * normal production start uses Bun's production serving mode without HMR.
+ * Development uses React Fast Refresh with the development React runtime.
+ * Preview and production-React HMR use Basis's production class-component
+ * transform, which preserves mounted instances for supported updates and falls
+ * back to remount or reload when an update cannot be applied safely.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities.
  */
-export class Server {
+export class Server<
+  AppContext extends object = Record<string, never>,
+  CookieSchema extends Record<string, string> = Record<string, string>,
+> {
   static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
   static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
 
-  #apis = new Map<string, APIRoute>()
+  #apis = new Map<string, APIRoute<object, AppContext>>()
   #assets: string | null = null
-  #builder: Builder | null = null
-  #development = true
-  #entrypoints: [string, string][] = []
+  #authorization: Authorization | null = null
+  #graph: Graph | null = null
+  #closing: Promise<void> | null = null
+  #database: Database = new NullDatabase()
+  #databaseOptions: DatabaseOptions | null = null
+  #contextCache = new WeakMap<Request, Promise<ResolvedContext<AppContext>>>()
+  #contextLoader: ContextLoader<AppContext, CookieSchema> | null = null
+  #mainComponent: React.ComponentType<AppContext> | null = null
+  #mainComponentVersion = -1
+  #mainBuilds = new Map<number, Promise<React.ComponentType<AppContext>>>()
+  #mainPath: string | null = null
+  #mainVersion = 0
+  #ssrScope = Math.random().toString(16).slice(2)
+  #watcher: FSWatcher | null = null
   #favIcon: ResolvedFavIcon | null = null
   #favIconInput: FavIconInput | null = null
   #favIconOptions: IconOptions = {}
   #icons: IconRegistry = {}
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
-  #modules = new Map<string, string>()
   #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
+  #schemaExpectation: MigrationArtifact | null = null
   #root: string = process.cwd()
   #server: BunServer<SocketData> | null = null
   #sockets = new Map<string, SocketHandlers>()
   #sse = new Map<string, SseHandler>()
   #status: HealthStatus = 'starting'
   #title = 'Document'
+  #publicOrigin: string | null = null
   #version = 'development'
+  #vendorBuild: VendorBuild | null = null
+  #vendorRoot: string | null = null
+  #vendorScripts: readonly string[] = []
 
   constructor() {
-    this.api([HttpVerb.Get], 'health', () => this.#health())
-    this.api([HttpVerb.Get], 'ping', ping)
-  }
-
-  /**
-   * Whether the server is running the development workflow.
-   * @returns `true` when the server is in development mode.
-   */
-  get development(): boolean {
-    return this.#development
+    this.#api([HttpVerb.Get], 'health', () => this.#health(), false)
+    this.#api([HttpVerb.Get], 'ping', ping, false)
   }
 
   /**
@@ -148,6 +229,25 @@ export class Server {
   }
 
   /**
+   * The canonical authorization capability when configured.
+   * @returns The authorization service, or null.
+   */
+  get auth(): Authorization | null {
+    return this.#authorization
+  }
+
+  /**
+   * The server-owned database capability.
+   *
+   * A server always has a database capability. When {@link database} has not
+   * configured one, this is a {@link NullDatabase} whose calls fail gracefully.
+   * @returns The database capability.
+   */
+  get db(): Database {
+    return this.#database
+  }
+
+  /**
    * Immutable runtime facts embedded into the SPA shell for the client
    * application context. `SERVICE_NAME`, `VERSION`, and `GIT_SHA` are read from
    * the platform environment; unknown values are `null`.
@@ -173,6 +273,80 @@ export class Server {
   }
 
   /**
+   * Sets the application context loader for this server.
+   *
+   * The loader runs once per request and its result is available to API
+   * handlers and the server-rendered application.
+   * @param loader - Request-scoped context resolver.
+   * @returns The server, typed with the resolved context.
+   */
+  context<C extends object, S extends Record<string, string> = CookieSchema>(
+    loader: ContextLoader<C, S>,
+  ): Server<C, S> {
+    const typed = this as unknown as Server<C, S>
+    typed.#contextLoader = loader
+    return typed
+  }
+
+  /**
+   * Resolves the application context once for a request.
+   * @param request - The incoming request.
+   * @param identity - The verified canonical user id, or null.
+   * @returns The cached context promise.
+   */
+  #resolveContext(request: Request, identity: string | null): Promise<ResolvedContext<AppContext>> {
+    const cached = this.#contextCache.get(request)
+    if (cached) return cached
+
+    const loader = this.#contextLoader
+    const resolved = (async () => {
+      if (!loader) {
+        return { context: {} as AppContext, cookies: [], headers: new Headers() }
+      }
+
+      const value: unknown = await loader({
+        cookies: new Cookies<CookieSchema>(request.headers.get('cookie')),
+        db: this.#database,
+        identity,
+        logger: this.#logger,
+        request,
+      })
+      if (!isContextResult<AppContext>(value)) {
+        throw new Error('Basis: a context loader must return { context }')
+      }
+
+      const cookies = value.cookies === undefined
+        ? []
+        : Array.isArray(value.cookies) ? value.cookies : [value.cookies]
+      return { context: value.context, cookies, headers: new Headers(value.headers) }
+    })()
+    this.#contextCache.set(request, resolved)
+    return resolved
+  }
+
+  /**
+   * Merge context response metadata onto a handler or SSR response.
+   * @param response - The response produced by the route or shell.
+   * @param resolved - The request context metadata.
+   * @returns A response with app headers and cookies applied.
+   */
+  #withContextResponse(
+    response: Response,
+    resolved: ResolvedContext<AppContext>,
+  ): Response {
+    for (const [name, value] of resolved.headers) {
+      if (name.toLowerCase() === 'set-cookie') {
+        throw new Error('Basis: set response cookies through context.cookies, not context.headers')
+      }
+      response.headers.append(name, value)
+    }
+    for (const cookie of resolved.cookies) {
+      response.headers.append('Set-Cookie', serializeCookie(cookie))
+    }
+    return response
+  }
+
+  /**
    * Processes an API request.
    *
    * API templates match only under `/api`. Root paths are the application's
@@ -183,22 +357,37 @@ export class Server {
    * @returns The API response, or `null` when no template matches.
    */
   async handleAPI(uri: URI, request: Request): Promise<Response | null> {
-    const context: RouteContext = { logger: this.#logger, request }
+    const match = this.#matchAPI(uri, request.method)
+    if (!match) return null
 
-    for (const target of this.#targets(uri)) {
-      if (!target) continue
-
-      for (const [template, { handler, verbs }] of this.#apis.entries()) {
-        if (!verbs.has(request.method as HttpVerb)) continue
-
-        const params = parseTemplateURI(target, template)
-        if (!params) continue
-
-        return await handler(params, context)
-      }
+    if (!match.route.requiresContext) {
+      return match.route.handler(match.params, {
+        context: {} as AppContext,
+        db: this.#database,
+        identity: null,
+        logger: this.#logger,
+        request,
+      })
     }
 
-    return null
+    const verified = this.#identity?.get(request) ?? null
+    const identity = this.#authorization
+      ? await this.#authorization.resolve(verified)
+      : verified
+    return runAsActor({ id: identity }, async () => {
+      const resolved = await this.#resolveContext(request, identity)
+      const context: RouteContext<AppContext> = {
+        context: resolved.context,
+        db: this.#database,
+        identity,
+        logger: this.#logger,
+        request,
+      }
+      return this.#withContextResponse(
+        await match.route.handler(match.params, context),
+        resolved,
+      )
+    })
   }
 
   /**
@@ -234,7 +423,21 @@ export class Server {
             statusText: 'Method Not Allowed',
           })
         }
-        return sseResponse(params, { logger: this.#logger, request }, handler)
+        const verified = this.#identity?.get(request) ?? null
+        const identity = this.#authorization
+          ? await this.#authorization.resolve(verified)
+          : verified
+        return runAsActor({ id: identity }, async () => {
+          const resolved = await this.#resolveContext(request, identity)
+          const context = {
+            context: resolved.context,
+            db: this.#database,
+            identity,
+            logger: this.#logger,
+            request,
+          } as RouteContext
+          return this.#withContextResponse(await sseResponse(params, context, handler), resolved)
+        })
       }
     }
 
@@ -243,14 +446,40 @@ export class Server {
 
   /**
    * Handles an asset request.
+   *
+   * Vendor artifacts are the standard `/assets/vendor` subtree and are versioned
+   * by content hash; other assets retain the server's modification-time
+   * versioning.
    * @param uri - The URI to handle.
+   * @param request - The incoming request, when available, for conditional vendor requests.
    * @returns The asset response.
    */
-  async handleAsset(uri: URI): Promise<Response> {
-    if (!this.#assets) return Server.NotFound
+  async handleAsset(uri: URI, request?: Request): Promise<Response> {
+    const vendorRoute = uri.route === 'vendor' || uri.route.startsWith('vendor/')
+    const vendorRoot = this.#vendorRoot ?? path.join(this.#root, 'dist', 'vendor')
+    const vendor = vendorRoute && fs.existsSync(vendorRoot)
+    const root = vendor ? vendorRoot : this.#assets
+    if (!root || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const asset = Bun.file(path.join(this.#assets, uri.route))
-    if (await asset.exists() === false) return Server.NotFound
+    const relative = vendor ? uri.route.slice('vendor'.length).replace(/^\/+/, '') : uri.route
+    if (relative.length === 0) return Server.NotFound
+
+    const filePath = path.join(root, relative)
+    const internalRoot = internalStateRoot(root)
+    if (
+      !isWithinPath(filePath, root)
+      || isWithinPath(filePath, internalRoot)
+    ) {
+      return Server.NotFound
+    }
+
+    const active = vendor ? this.#activeVendorAsset(filePath) : null
+    if (active) return this.#serveVendor(uri, active, null, request, Bun.file(filePath).type)
+
+    const asset = await publicStaticFile(filePath, internalRoot)
+    if (!asset) return Server.NotFound
+
+    if (vendor) return this.#serveVendor(uri, null, asset, request, asset.type)
 
     const version = asset.lastModified.toString()
 
@@ -273,56 +502,78 @@ export class Server {
   }
 
   /**
-   * Handles a module request.
-   *
-   * Module proxying exists only to back the browser-globals development build;
-   * production never reaches a CDN.
-   * @param uri - The URI to handle.
-   * @returns The module response.
+   * Serve one content-versioned vendor artifact.
+   * @param uri - The vendor request URI.
+   * @param active - The active immutable snapshot, or null for file fallback.
+   * @param asset - The resolved vendor file.
+   * @param request - The incoming request, when available.
+   * @param type - The response content type.
+   * @returns The versioned asset, a redirect to the current version, or a 304.
    */
-  async handleModule(uri: URI): Promise<Response> {
-    if (!this.#development) return Server.NotFound
+  async #serveVendor(
+    uri: URI,
+    active: { contents: Uint8Array<ArrayBuffer>, hash: string } | null,
+    asset: ReturnType<typeof Bun.file> | null,
+    request: Request | undefined,
+    type: string,
+  ): Promise<Response> {
+    try {
+      const bytes = active?.contents ?? new Uint8Array(await asset?.arrayBuffer() ?? [])
+      const hash = active?.hash ?? createHash('sha256').update(bytes).digest('hex')
+      const etag = `"${hash}"`
+      const immutable = 'public, max-age=31536000, immutable'
 
-    if (!this.#modules.has(uri.route)) {
-      const response = await fetch(`https://unpkg.com/${uri.route}`)
-      if (!response.ok) return Server.NotFound
+      if (uri.query.get('v') !== hash) {
+        uri.query.set('v', hash)
+        return new Response(null, {
+          headers: { 'Cache-Control': 'no-cache', 'Location': uri.toString() },
+          status: 307,
+        })
+      }
 
-      const text = await response.text()
-      this.#modules.set(uri.route, text)
+      if (matchesETag(request?.headers.get('if-none-match') ?? null, etag)) {
+        return new Response(null, {
+          headers: { 'Cache-Control': immutable, 'ETag': etag },
+          status: 304,
+        })
+      }
+
+      return new Response(bytes, {
+        headers: { 'Cache-Control': immutable, 'Content-Type': type, 'ETag': etag },
+        status: 200,
+      })
+    } catch {
+      return Server.NotFound
     }
-
-    return new Response(this.#modules.get(uri.route), {
-      headers: {
-        'Content-Length': this.#modules.get(uri.route).length.toString(),
-        'Content-Type': 'application/javascript',
-        'Via': '@basis/server; proxying unpkg.com',
-      },
-    })
   }
 
   /**
-   * Handles a request for a compiled build output.
-   *
-   * The route serves every output the builder produces, not only entrypoints:
-   * bundler-emitted assets (images, fonts) and sourcemaps are addressed by the
-   * same `/scripts/<file>` base the bundle embeds (see `Builder`'s `publicPath`).
-   * Byte output is returned as-is, so binary assets are not corrupted.
-   * @param uri - The URI to handle.
-   * @returns The output response.
+   * Resolve the active immutable bytes for one vendor file or source map.
+   * @param filePath - Absolute path being requested.
+   * @returns The active hash and contents, or null when no active build owns it.
    */
-  async handleScripts(uri: URI): Promise<Response> {
-    if (!this.#builder) return Server.NotFound
+  #activeVendorAsset(filePath: string): { contents: Uint8Array<ArrayBuffer>, hash: string } | null {
+    for (const asset of this.#vendorBuild?.assets ?? []) {
+      if (asset.file === filePath) return { contents: asset.contents, hash: asset.hash }
+      if (asset.sourceMap?.file === filePath) {
+        return { contents: asset.sourceMap.contents, hash: asset.sourceMap.hash }
+      }
+    }
+    return null
+  }
 
-    // A failed build rejects the output promise; serve nothing rather than 500.
-    const built = await this.#builder.getOutputs().catch(() => [])
-    const output = built.find(s => s.name === uri.route)
-    if (!output) return Server.NotFound
-
-    return new Response(await output.output.arrayBuffer(), {
-      headers: { 'Content-Type': output.output.type },
-      status: 200,
-      statusText: 'OK',
-    })
+  /**
+   * Render registered component stylesheets into the document head so the first
+   * paint uses the same styles as the hydrated client.
+   * @param entries - The request's captured stylesheet registry entries.
+   * @returns One style element per captured stylesheet.
+   */
+  #styleTags(entries: readonly (readonly [string, string])[]): string {
+    return entries.map(([id, css]) => {
+      const escapedId = id.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      const safeCss = css.replace(/<\/style/gi, '<\\/style')
+      return `<style id="${escapedId}" data-injected-by="style-utility">${safeCss}</style>`
+    }).join('')
   }
 
   /**
@@ -335,39 +586,318 @@ export class Server {
    * @returns The UI response.
    */
   async handleUI(request?: Request): Promise<Response> {
-    const identity = request && this.#identity ? this.#identity.get(request) : null
+    const verified = request && this.#identity ? this.#identity.get(request) : null
+    const identity = this.#authorization ? await this.#authorization.resolve(verified) : verified
     const runtime: BasisRuntime = { ...this.runtime, identity }
 
-    /*
-     * Development delegates module bundling, watching, and hot updates to Bun's
-     * dev server. Bun only enables HMR for HTML routes it bundles, so the shell
-     * is generated and registered at {@link DEV_SHELL_ROUTE}; every UI request
-     * proxies that shell and injects the per-request runtime facts.
-     */
-    if (this.#development && this.#server) {
-      const response = await fetch(this.#devShellURL())
+    return runAsActor({ id: identity }, async () => {
+      const resolved = request
+        ? await this.#resolveContext(request, identity)
+        : { context: {} as AppContext, cookies: [], headers: new Headers() }
+      const context = resolved.context
+      const component = await this.#loadMain()
+      const head: HeadCollector = {}
+      const rendered = component
+        ? React.createElement(HeadProvider, { collector: head }, React.createElement(component, context))
+        : null
+      const application = rendered ? renderToString(rendered) : ''
+      const styleSnapshot = styleEntries()
+      const title = head.title || this.#title
       const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
       const runtimeScript = [
         '<script id="basis-runtime" type="application/json">',
         serializeBasisRuntime(runtime),
         '</script>',
       ].join('')
-      const element = `${favicon}${runtimeScript}`
-      return new HTMLRewriter()
+      const bootstrapScript = [
+        '<script id="basis-bootstrap" type="application/json">',
+        serializeBootstrap(context),
+        '</script>',
+      ].join('')
+
+      if (!this.#server) {
+        const fallback = renderToString(React.createElement(IndexHTML, {
+          favicon: false,
+          runtime,
+          scripts: [],
+          title,
+        }))
+        const html = fallback
+          .replace('<div id="root"></div>', `<div id="root">${application}</div>`)
+          .replace('</head>', `${this.#styleTags(styleSnapshot)}${runtimeScript}${bootstrapScript}</head>`)
+        return this.#withContextResponse(new Response(html, {
+          headers: { 'Content-Type': 'text/html' },
+        }), resolved)
+      }
+
+      const response = await Bun.fetch(this.#devShellURL())
+      const origin = this.#publicOrigin ?? (request ? new URL(request.url).origin : '')
+      const html = this.#vendorScripts.length > 0
+        ? this.#injectVendorScripts(await response.text(), origin)
+        : await response.text()
+      const headers = new Headers(response.headers)
+      headers.delete('content-encoding')
+      headers.delete('content-length')
+      const NativeResponse = Object.getPrototypeOf(await Bun.fetch('data:text/plain,')) as Response
+      const shell = new (NativeResponse.constructor as new (body: BodyInit, init?: ResponseInit) => Response)(html, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+      })
+      return this.#withContextResponse(new HTMLRewriter()
+        .on('title', {
+          element: element => { element.setInnerContent(title) },
+        })
         .on('head', {
-          element: target => {
-            target.append(element, { html: true })
+          element: element => {
+            element.append(
+              `${this.#styleTags(styleSnapshot)}${favicon}${runtimeScript}${bootstrapScript}`,
+              { html: true },
+            )
           },
         })
-        .transform(response)
+        .on('#root', {
+          element: element => { element.setInnerContent(application, { html: true }) },
+        })
+        .transform(shell), resolved)
+    })
+  }
+
+  /**
+   * Inject the standard vendor scripts at the generated shell marker.
+   *
+   * Bun's HTML bundler treats absolute local paths as files to resolve. Use an
+   * absolute HTTP origin so production HTML routes preserve the vendor script
+   * as an external request. Development behaves the same way.
+   * @param html - The Bun-generated shell HTML.
+   * @param origin - The request origin, or an empty string when unavailable.
+   * @returns The shell HTML with the vendor script tags in place of the marker.
+   */
+  #injectVendorScripts(html: string, origin: string): string {
+    const scripts = this.#vendorScripts
+      .map(src => {
+        const url = origin === '' ? src : `${origin}${src}`
+        return `<script src="${url.replace(/[&"]/g, char => (char === '&' ? '&amp;' : '&quot;'))}"></script>`
+      })
+      .join('')
+    return html.replace(VENDOR_MARKER, scripts)
+  }
+
+  /**
+   * Discover and build the application's client vendor bundle.
+   *
+   * Discovery walks the client graph, follows workspace source, and records bare
+   * imports that resolve into node_modules. The bundle is built before the
+   * application shell consumes it. This is a startup snapshot; adding or removing
+   * a client dependency, or changing an installed package, requires a restart.
+   * @param entrypoints - The generated browser entrypoints.
+   * @returns The client vendor specifiers.
+   */
+  async #prepareVendor(entrypoints: readonly string[]): Promise<ReadonlySet<string>> {
+    if (entrypoints.length === 0) return new Set()
+
+    /*
+     * Every server gets its own vendor workspace. Applications and test
+     * processes can share a root, and a shared entrypoint or output directory
+     * would let one startup read or overwrite another's in-flight build.
+     */
+    const outdir = path.join(this.#root, 'dist', 'vendor', this.#ssrScope)
+    this.#vendorRoot = outdir
+
+    const prepare = async (): Promise<ReadonlySet<string>> => {
+      const specifiers = await discoverVendorSpecifiers({
+        entrypoint: entrypoints[0],
+        plugins: [pluginSASS(), pluginMarkdown()],
+        root: this.#root,
+      })
+      this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers })
+      return new Set(specifiers)
     }
 
-    const html = await renderToString(React.createElement(IndexHTML, {
-      runtime,
-      scripts: this.#scriptNames(),
-      title: this.#title,
-    }))
-    return new Response(html, { headers: { 'Content-Type': 'text/html' } })
+    let failure: Error | null = null
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await prepare()
+      } catch (error) {
+        failure = error instanceof Error ? error : new Error(String(error))
+        /*
+         * Bun can report a generic "Bundle failed" under a transient startup
+         * race. Retry once; a deterministic failure still fails below.
+         */
+        if (attempt === 0 && failure.message === 'Bundle failed') {
+          await Bun.sleep(100)
+          continue
+        }
+        break
+      }
+    }
+
+    if (failure === null) failure = new Error('vendor preparation failed')
+    this.#logger.error(`client vendor discovery failed: ${failure.message}`)
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(`client vendor discovery failed: ${failure.message}`, { cause: failure })
+    }
+    this.#vendorBuild = await buildVendorBundle({ outdir, root: this.#root, specifiers: [] })
+      .catch(() => null)
+    return new Set()
+  }
+
+  /**
+   * Loads the application component from the configured main module.
+   * @returns The component, or null when no main was configured.
+   */
+  async #loadMain(): Promise<React.ComponentType<AppContext> | null> {
+    if (!this.#mainPath) return null
+
+    /*
+     * A source change can land while a build is running. Never install that
+     * build as current; loop until the build version still matches the latest
+     * observed source version.
+     */
+    while (true) {
+      const version = this.#mainVersion
+      if (this.#mainComponent && this.#mainComponentVersion === version) {
+        return this.#mainComponent
+      }
+
+      let build = this.#mainBuilds.get(version)
+      if (!build) {
+        build = this.#buildMain(version)
+        this.#mainBuilds.set(version, build)
+        void build.finally(() => {
+          if (this.#mainBuilds.get(version) === build) this.#mainBuilds.delete(version)
+        }).catch(() => undefined)
+      }
+
+      let component: React.ComponentType<AppContext>
+      try {
+        component = await build
+      } catch (error) {
+        this.#removeSSRVersion(version)
+        if (this.#mainVersion !== version) continue
+        throw error
+      }
+
+      if (this.#mainVersion !== version) {
+        this.#removeSSRVersion(version)
+        continue
+      }
+
+      this.#mainComponent = component
+      this.#mainComponentVersion = version
+      this.#cleanupSSRArtifacts(version)
+      return component
+    }
+  }
+
+  /**
+   * Compile and import one SSR application module version.
+   * @param version - The source version snapshot to compile.
+   * @returns The exported application component.
+   */
+  async #buildMain(version: number): Promise<React.ComponentType<AppContext>> {
+    if (!this.#mainPath) throw new Error('Basis: main module is not configured')
+    const outdir = path.join(this.#root, '.basis', 'ssr', this.#ssrScope, String(version))
+    fs.rmSync(outdir, { force: true, recursive: true })
+    const result = await Bun.build({
+      entrypoints: [this.#mainPath],
+      external: ['basis', 'basis/*'],
+      format: 'esm',
+      naming: 'entry.js',
+      outdir,
+      packages: 'external',
+      sourcemap: 'none',
+      target: 'bun',
+    })
+    if (!result.success) {
+      fs.rmSync(outdir, { force: true, recursive: true })
+      const details = result.logs.map(log => log.message).join('\n')
+      throw new Error(`Basis: server module build failed: ${details}`)
+    }
+
+    const module = await import(`${pathToFileURL(path.join(outdir, 'entry.js')).href}?v=${version}`) as {
+      Application?: React.ComponentType<AppContext>,
+      default?: React.ComponentType<AppContext>,
+    }
+    const component = module.Application ?? module.default
+    if (typeof component !== 'function') {
+      throw new Error(`Basis: main module "${this.#mainPath}" must export Application or a default component`)
+    }
+    return component
+  }
+
+  /**
+   * Remove one version directory after its build has finished and failed or
+   * been superseded.
+   * @param version - The source version to remove.
+   */
+  #removeSSRVersion(version: number): void {
+    fs.rmSync(path.join(this.#ssrScopeDir(), String(version)), { force: true, recursive: true })
+  }
+
+  /**
+   * Remove obsolete version directories while preserving the active version and
+   * every build still in flight.
+   * @param active - The version now installed as the application component.
+   */
+  #cleanupSSRArtifacts(active: number): void {
+    const directory = this.#ssrScopeDir()
+    if (!fs.existsSync(directory)) return
+
+    const keep = new Set<number>([active, ...this.#mainBuilds.keys()])
+    for (const entry of fs.readdirSync(directory)) {
+      if (!/^\d+$/.test(entry)) continue
+      const version = Number(entry)
+      if (keep.has(version)) continue
+      fs.rmSync(path.join(directory, entry), { force: true, recursive: true })
+    }
+  }
+
+  /** Remove every server-owned SSR artifact for this server instance. */
+  #cleanupSSRArtifactsAll(): void {
+    fs.rmSync(this.#ssrScopeDir(), { force: true, recursive: true })
+  }
+
+  /** Remove the server-owned hydration and vendor artifacts for this instance. */
+  #cleanupScopedArtifacts(): void {
+    fs.rmSync(path.join(this.#root, '.basis', 'hydrate', this.#ssrScope), { force: true, recursive: true })
+    fs.rmSync(path.join(this.#root, 'dist', 'vendor', this.#ssrScope), { force: true, recursive: true })
+  }
+
+  /**
+   * The server-owned SSR artifact directory for this server instance.
+   * @returns The absolute scope directory.
+   */
+  #ssrScopeDir(): string {
+    return path.join(this.#root, '.basis', 'ssr', this.#ssrScope)
+  }
+
+  /**
+   * Watches application source so the server-rendered component is rebuilt on
+   * the next request after a source change.
+   */
+  async #watchMain(): Promise<void> {
+    if (!this.#mainPath || this.#watcher) return
+    const { watch } = await import('chokidar')
+    const watcher = watch(this.#root, {
+      ignoreInitial: true,
+      ignored: [
+        /*
+         * Dot entries are ignored by basename; a dotted ancestor (a checkout under
+         * a hidden directory, or an app under .basis/tmp) must stay watchable.
+         */
+        /(^|[/\\])\.[^/\\]+$/,
+        /(^|[/\\])node_modules([/\\]|$)/,
+        // The server's own generated artifacts would otherwise trigger rebuild loops.
+        /(^|[/\\])\.basis[/\\](?:hydrate|ssr)([/\\]|$)/,
+      ],
+    })
+    this.#watcher = watcher
+    watcher.on('all', (_event, filename) => {
+      if (!/\.(?:ts|tsx|js|jsx)$/.test(filename)) return
+      this.#mainVersion += 1
+    })
+    await new Promise<void>(resolveReady => watcher.once('ready', () => resolveReady()))
   }
 
   /**
@@ -406,25 +936,62 @@ export class Server {
    * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
    * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
-   * @param options.development - Whether to run the development workflow.
+   * @param options.hmr - Enable live HMR; defaults to true outside production.
    * @param options.hostname - The interface to bind.
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
+   * @param options.publicOrigin - Trusted public origin for vendor scripts.
    * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
   start = ({
-    development = Bun.env.NODE_ENV !== 'production',
+    hmr,
     hostname = Bun.env.HOST ?? '127.0.0.1',
     idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
+    publicOrigin = nonEmpty(Bun.env.PUBLIC_ORIGIN) ?? undefined,
     version = Bun.env.VERSION ?? 'development',
-  }: ServerOptions = {}): Server => {
+  }: ServerOptions = {}): this => {
+    assertBasisServerCompatible()
     if (logger) this.#logger = logger
-    this.#development = development
+    this.#publicOrigin = publicOrigin ?? null
     this.#version = version
+    if (!this.#assets) {
+      const assets = path.join(this.#root, 'assets')
+      if (fs.existsSync(assets)) this.#assets = assets
+    }
+
+    const servingHmr = hmr ?? process.env.NODE_ENV !== 'production'
+    this.#vendorBuild = null
+    this.#vendorRoot = null
+    this.#vendorScripts = this.#mainPath ? ['/assets/vendor/vendor.js'] : []
+    /*
+     * The server owns a unique shell directory and hydration entry. Test
+     * processes and multiple applications commonly share one root; writing a
+     * shared hydrate entry would race its reads during Bun's HTML build.
+     */
+    const directory = devShellDirectory(JSON.stringify([
+      this.#root,
+      this.#title,
+      this.#mainPath,
+      this.#vendorScripts,
+      this.#ssrScope,
+    ]))
+    const entrypoints: string[] = []
+    if (this.#mainPath) {
+      entrypoints.push(writeHydrationEntry({
+        directory: path.join(this.#root, '.basis', 'hydrate', this.#ssrScope),
+        mainPath: this.#mainPath,
+        monitorRelease: !servingHmr,
+      }))
+    }
+    const vendorReady = entrypoints.length > 0
+      ? this.#prepareVendor(entrypoints)
+      : Promise.resolve(new Set<string>())
+    setVendorSpecifiers(vendorReady)
+
     this.#favIcon = resolveFavIcon(
       this.#favIconInput,
       this.#favIconOptions,
@@ -433,59 +1000,36 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
-    let routes: Bun.Serve.Routes<SocketData, string> | undefined
-
-    if (development) {
-      /*
-       * Development is Bun's dev server: it owns the module graph, watching,
-       * and React Fast Refresh. The shell is generated beside a computed
-       * directory and registered as an HTML route, which is the only shape Bun
-       * enables HMR for.
-       */
-      const entrypoints = this.#entrypoints.map(([, file]) => file)
-      if (entrypoints.length > 0) {
-        const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, ...entrypoints]))
-        const shell = writeDevShell({ directory, entrypoints, title: this.#title })
-        routes = { [DEV_SHELL_ROUTE]: import.meta.require(shell) } as Bun.Serve.Routes<SocketData, string>
+    let databaseOptions: ManagedDatabaseOptions = this.#databaseOptions ?? {}
+    if (this.#graph) {
+      databaseOptions = {
+        ...databaseOptions,
+        authorization: true,
+        entities: this.#graph.definitions,
       }
-
-      this.#readyError = null
-      this.#status = 'starting'
-      this.#ready = Promise.resolve()
-    } else {
-      const builder = new Builder({
-        development,
-        logger: this.#logger,
-        onRebuild: () => {
-          this.#readyError = null
-          this.#status = 'ok'
-        },
-        root: this.#root,
-        watch: false,
-      })
-
-      for (const [name, file] of this.#entrypoints) {
-        void builder.add(name, file)
-      }
-
-      this.#builder = builder
-      this.#readyError = null
-      this.#status = 'starting'
-      this.#ready = builder.initialBuild()
-        .then(() => undefined)
-        .catch((error: unknown) => {
-          const failure = error instanceof Error ? error : new Error(String(error))
-          this.#readyError = failure
-          this.#status = 'error'
-          this.#logger.error(`build failed: ${failure.message}`)
-          throw failure
-        })
-      // Avoid an unhandled rejection when a caller never awaits `ready()`.
-      void this.#ready.catch(() => undefined)
     }
+    if (this.#databaseOptions || this.#graph) {
+      this.#database = createDatabase(databaseOptions)
+      if (this.#graph) {
+        this.#authorization = new Authorization({
+          database: this.#database,
+          graph: this.#graph,
+        })
+      }
+    }
+    const databaseReady = this.#databaseReady()
+
+    const shell = writeDevShell({ directory, entrypoints, title: this.#title })
+    const routes = {
+      [DEV_SHELL_ROUTE]: import.meta.require(shell),
+    } as Bun.Serve.Routes<SocketData, string>
+
+    this.#readyError = null
+    this.#status = 'starting'
+    const watcherReady = servingHmr ? this.#watchMain() : Promise.resolve()
 
     this.#server = Bun.serve({
-      development: development ? { hmr: true } : false,
+      development: servingHmr ? { hmr: true } : false,
       fetch: this.handle,
       hostname,
       ...(idleTimeout === undefined ? {} : { idleTimeout }),
@@ -509,8 +1053,8 @@ export class Server {
     process.on('SIGINT', this.#handleSignal)
     process.on('SIGTERM', this.#handleSignal)
 
-    // Development builds lazily; prove one build before reporting healthy.
-    if (development && routes) this.#warmDevelopment()
+    // The Bun dev shell builds lazily; prove one build before reporting healthy.
+    this.#warmShell(databaseReady, watcherReady, vendorReady)
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -518,22 +1062,50 @@ export class Server {
   }
 
   /**
-   * Stops the server and its build watcher.
+   * Stops the server, its build watcher, and its database pool.
+   *
+   * Pool teardown is asynchronous; {@link shutdown} waits for it. This method
+   * keeps its synchronous contract for existing callers.
    * @returns The server.
    */
-  stop = (): Server => {
+  stop = (): this => {
     process.off('SIGINT', this.#handleSignal)
     process.off('SIGTERM', this.#handleSignal)
 
     this.#logger.info('stopping')
 
-    void this.#builder?.stop()
-    this.#builder = null
+    void this.#watcher?.close()
+    this.#watcher = null
 
     this.#server?.stop()
     this.#server = null
+    setVendorSpecifiers(null)
+    this.#vendorBuild = null
+    this.#vendorRoot = null
+
+    if (!this.#closing) {
+      const closing = this.#database.close()
+      void closing.catch((error: unknown) => {
+        const failure = error instanceof Error ? error : new Error(String(error))
+        this.#logger.error(`database close failed: ${failure.message}`)
+      })
+      this.#closing = closing
+    }
 
     return this
+  }
+
+  /**
+   * Stops the server and waits for asynchronous teardown, including the
+   * server-owned database pool.
+   * @returns A promise that settles when teardown finishes.
+   */
+  async shutdown(): Promise<void> {
+    this.stop()
+    await this.#closing
+    await Promise.allSettled([...this.#mainBuilds.values()])
+    this.#cleanupSSRArtifactsAll()
+    this.#cleanupScopedArtifacts()
   }
 
   /**
@@ -546,7 +1118,7 @@ export class Server {
    * @param identity - The shared identity capability.
    * @returns The server.
    */
-  identity(identity: Identity): Server {
+  identity(identity: Identity): this {
     this.#identity = identity
     return this
   }
@@ -561,12 +1133,79 @@ export class Server {
    * @param options - Provider seams, the session capability, and policy.
    * @returns The server.
    */
-  oauth(options: OAuthOptions): Server {
-    const flow = new OAuth(options)
+  oauth(options: OAuthOptions): this {
+    const provider = options.session.provider
+    const resolve = options.identity
+    const flow = new OAuth({
+      ...options,
+      identity: async accessToken => {
+        const resolved = await resolve(accessToken)
+        if (resolved === null || !this.#authorization) return resolved
+        const subject = typeof resolved === 'string' ? resolved : resolved.subject
+        const profile: { displayName?: string, email?: string } = {}
+        if (typeof resolved !== 'string') {
+          if (resolved.displayName !== undefined) profile.displayName = resolved.displayName
+          if (resolved.email !== undefined) profile.email = resolved.email
+        }
+        return this.#authorization.enrollIdentity(provider, subject, profile)
+      },
+    })
     this.identity(options.session)
-    this.api([HttpVerb.Get], 'oauth/login', () => flow.login())
-    this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
-    this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
+    this.#api([HttpVerb.Get], 'oauth/login', (_params, { request }) => flow.login(request), false)
+    this.#api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request), false)
+    this.#api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request), false)
+    return this
+  }
+
+  /**
+   * Configures the canonical application graph and PostgreSQL RLS capability.
+   *
+   * The graph owns roles and permissions; loading it never mutates PostgreSQL.
+   * The database is placed in restricted application-role mode. Bootstrap is
+   * explicit through {@link Authorization.bootstrap}; OAuth login never grants
+   * administration.
+   * @param graph - The application graph.
+   * @returns The server.
+   */
+  graph(graph: Graph): this {
+    this.#graph = graph
+    return this
+  }
+
+  /**
+   * Requires the deployed schema to match an approved migration artifact.
+   *
+   * Readiness runs through the trusted administrative connection at startup and
+   * fails closed without applying any migration. {@link DDL.readiness} performs
+   * the check; this method only wires it into startup/health.
+   * @param artifact - Approved immutable migration artifact.
+   * @returns The server.
+   */
+  migration(artifact: MigrationArtifact): this {
+    this.#schemaExpectation = artifact
+    return this
+  }
+
+  /**
+   * Configures the server-owned PostgreSQL capability.
+   *
+   * The server reconciles its application-scoped managed PostgreSQL service on
+   * `start`, discovers its Docker-allocated loopback port, and connects the
+   * pool before reporting healthy. The server owns the pool lifecycle; the
+   * managed database service outlives it.
+   * @param options - Optional image selection for the managed service.
+   * @returns The server.
+   */
+  database(options: DatabaseOptions = {}): this {
+    const unsupported = ['adminUrl', 'appRole', 'authorization', 'entities', 'url']
+      .filter(key => key in options)
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Server: unsupported database option(s): ${unsupported.join(', ')}. ` +
+        'Basis owns its managed PostgreSQL instance; provide the application model through Graph.',
+      )
+    }
+    this.#databaseOptions = options
     return this
   }
 
@@ -575,14 +1214,14 @@ export class Server {
    * @param filePath - The path to the entrypoint.
    * @returns The server.
    */
-  main(filePath: string): Server {
+  main(filePath: string): this {
     const absolute = path.isAbsolute(filePath)
       ? filePath
       : path.join(this.#root, filePath)
     this.#checkPath(absolute)
 
-    this.#entrypoints.push(['index.js', absolute])
-    void this.#builder?.add('index.js', absolute)
+    this.#mainPath = absolute
+    this.#mainComponent = null
     return this
   }
 
@@ -591,7 +1230,7 @@ export class Server {
    * @param absolutePath - The absolute path to the root directory.
    * @returns The server.
    */
-  root(absolutePath: string): Server {
+  root(absolutePath: string): this {
     this.#checkPath(absolutePath)
     this.#root = absolutePath
     return this
@@ -602,7 +1241,7 @@ export class Server {
    * @param title - The document title.
    * @returns The server.
    */
-  title(title: string): Server {
+  title(title: string): this {
     this.#title = title
     return this
   }
@@ -623,9 +1262,26 @@ export class Server {
   api<Params extends object = object>(
     verbs: HttpVerb[],
     template: string,
-    handler: (params: Params, context: RouteContext) => Response | Promise<Response>,
-  ): Server {
-    this.#apis.set(template, { handler, verbs: new Set(verbs) })
+    handler: (params: Params, context: RouteContext<AppContext>) => Response | Promise<Response>,
+  ): this {
+    return this.#api(verbs, template, handler)
+  }
+
+  /**
+   * Registers an API route with explicit context requirements.
+   * @param verbs - The HTTP methods to handle.
+   * @param template - The template URI to handle.
+   * @param handler - The handler for the API route.
+   * @param requiresContext - Whether the route needs the application context.
+   * @returns The server.
+   */
+  #api<Params extends object = object>(
+    verbs: HttpVerb[],
+    template: string,
+    handler: (params: Params, context: RouteContext<AppContext>) => Response | Promise<Response>,
+    requiresContext = true,
+  ): this {
+    this.#apis.set(template, { handler, requiresContext, verbs: new Set(verbs) })
     return this
   }
 
@@ -638,7 +1294,7 @@ export class Server {
    * @param handler - The SSE handler.
    * @returns The server.
    */
-  sse<Params extends object = object>(template: string, handler: SseHandler<Params>): Server {
+  sse<Params extends object = object>(template: string, handler: SseHandler<Params>): this {
     this.#sse.set(template, handler)
     return this
   }
@@ -649,7 +1305,7 @@ export class Server {
    * @param handlers - Lifecycle handlers for connected clients.
    * @returns The server.
    */
-  socket(template: string, handlers: SocketHandlers): Server {
+  socket(template: string, handlers: SocketHandlers): this {
     this.#sockets.set(template, handlers)
     return this
   }
@@ -666,7 +1322,7 @@ export class Server {
    * @param options.allow - Top-level files/folders permitted; all when omitted.
    * @returns The server.
    */
-  mount(prefix: string, folder: string, options: { allow?: readonly string[] } = {}): Server {
+  mount(prefix: string, folder: string, options: { allow?: readonly string[] } = {}): this {
     const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
     if (!fs.existsSync(absolute)) {
       throw new Error(`Mount folder "${absolute}" does not exist`)
@@ -685,7 +1341,7 @@ export class Server {
    * @param folder - The folder to set as the assets folder.
    * @returns The server.
    */
-  assets(folder: string): Server {
+  assets(folder: string): this {
     const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
     if (!fs.existsSync(absolute)) {
       throw new Error(`Assets folder "${absolute}" does not exist`)
@@ -708,7 +1364,7 @@ export class Server {
    * @param options - Icon options (`color`, `filled`, `size`, …), for an icon.
    * @returns The server.
    */
-  favicon(input: FavIconInput, options: IconOptions = {}): Server {
+  favicon(input: FavIconInput, options: IconOptions = {}): this {
     this.#favIconInput = input
     this.#favIconOptions = options
     return this
@@ -721,7 +1377,7 @@ export class Server {
    * @param icons - Icon classes, keyed by the name used in the URL.
    * @returns The server.
    */
-  icons(icons: IconRegistry): Server {
+  icons(icons: IconRegistry): this {
     Object.assign(this.#icons, icons)
     return this
   }
@@ -736,27 +1392,97 @@ export class Server {
   }
 
   /**
-   * Build the development shell once so `/api/health` reflects a real build.
-   *
-   * Development compiles lazily on the first request, so `ready()` and
-   * `/api/health` stay `starting` until one build has actually succeeded. A failed
-   * build reports `error` rather than a healthy process.
+   * Tracks the combined startup readiness of the build and database.
+   * @param readiness - The pending startup work.
+   * @returns The tracked readiness promise.
    */
-  #warmDevelopment(): void {
-    this.#ready = fetch(this.#devShellURL())
-      .then(response => {
-        if (!response.ok) throw new Error(`development build failed (${response.status})`)
+  #trackReady(readiness: Promise<void>): Promise<void> {
+    const tracked = readiness
+      .then(() => {
+        this.#readyError = null
         this.#status = 'ok'
       })
       .catch((error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
         this.#status = 'error'
-        this.#logger.error(`build failed: ${failure.message}`)
+        this.#logger.error(`startup failed: ${failure.message}`)
         throw failure
       })
     // Avoid an unhandled rejection when a caller never awaits `ready()`.
-    void this.#ready.catch(() => undefined)
+    void tracked.catch(() => undefined)
+    return tracked
+  }
+
+  /**
+   * Build the development shell once so `/api/health` reflects a real build.
+   *
+   * Development compiles lazily on the first request, so `ready()` and
+   * `/api/health` stay `starting` until one build has actually succeeded. A failed
+   * build reports `error` rather than a healthy process.
+   * @param databaseReady - The pending database startup.
+   * @param watcherReady - Resolves when the SSR source watcher is ready.
+   * @param vendorReady - Resolves when the client vendor bundle is built.
+   */
+  #warmShell(
+    databaseReady: Promise<void>,
+    watcherReady: Promise<void>,
+    vendorReady: Promise<ReadonlySet<string>>,
+  ): void {
+    const buildReady = vendorReady.then(() => Bun.fetch(this.#devShellURL())).then(async response => {
+      if (response.ok) return
+      const detail = (await response.text()).trim()
+      throw new Error(
+        `development build failed (${response.status})${detail ? `: ${detail.slice(0, 1_000)}` : ''}`,
+      )
+    })
+    const ssrReady = this.#mainPath ? this.#loadMain().then(() => undefined) : Promise.resolve()
+    this.#ready = this.#trackReady(
+      Promise.all([buildReady, databaseReady, watcherReady, ssrReady, vendorReady]).then(() => undefined),
+    )
+  }
+
+  /**
+   * Connect the database and validate any configured schema expectation.
+   * @returns A promise that resolves when the database path is ready.
+   */
+  #databaseReady(): Promise<void> {
+    if (this.#database instanceof NullDatabase) {
+      if (this.#schemaExpectation) {
+        return Promise.reject(new Error('Schema readiness requires a database'))
+      }
+      return Promise.resolve()
+    }
+    return this.#database.connect().then(async () => {
+      if (!this.#schemaExpectation) {
+        if (this.#graph) {
+          throw new Error(
+            'Graph-backed production requires an approved migration artifact; ' +
+            'install or migrate explicitly with DDL.plan -> DDL.review -> DDL.apply',
+          )
+        }
+        return
+      }
+      const artifact = this.#schemaExpectation
+      if (this.#graph) {
+        const expected = this.#graph.physicalSchema(artifact.appRole, artifact.superuser)
+        if (physicalHash(expected) !== artifact.targetHash) {
+          throw new Error(
+            'Approved migration artifact does not match the configured Graph; ' +
+            'review and apply a migration for the current Graph',
+          )
+        }
+      }
+      const admin = await openAdmin(this.#database)
+      try {
+        const result = await DDL.readiness(admin.sql, artifact)
+        if (!result.ready) {
+          throw new Error(`Schema readiness failed: ${result.discrepancies.join('; ')}`)
+        }
+      } finally {
+        await admin.close()
+      }
+    })
   }
 
   /**
@@ -834,9 +1560,7 @@ export class Server {
 
     switch (uri.type) {
       case 'api': return Server.BadRequest
-      case 'assets': return this.handleAsset(uri)
-      case 'modules': return this.handleModule(uri)
-      case 'scripts': return this.handleScripts(uri)
+      case 'assets': return this.handleAsset(uri, request)
       default: return this.handleUI(request)
     }
   }
@@ -868,6 +1592,31 @@ export class Server {
   }
 
   /**
+   * Find the API route matching a request without loading application context.
+   * @param uri - The parsed URI.
+   * @param method - The request method.
+   * @returns The matched route and params, or `null`.
+   */
+  #matchAPI(uri: URI, method: string): {
+    readonly params: Record<string, string>,
+    readonly route: APIRoute<object, AppContext>,
+  } | null {
+    for (const target of this.#targets(uri)) {
+      if (!target) continue
+
+      for (const [template, route] of this.#apis.entries()) {
+        if (!route.verbs.has(method as HttpVerb)) continue
+
+        const params = parseTemplateURI(target, template)
+        if (!params) continue
+
+        return { params, route }
+      }
+    }
+    return null
+  }
+
+  /**
    * The route targets an API URI can match.
    *
    * APIs live exclusively under `/api`; the root is the SPA surface, so an API
@@ -891,22 +1640,36 @@ export class Server {
     return uri.type === 'api' ? [uri.route] : uri.route ? [] : [uri.type]
   }
 
-  /** Handles process shutdown signals by stopping and exiting cleanly. */
+  /** Handles process shutdown signals by stopping, closing the pool, and exiting cleanly. */
   #handleSignal = (): void => {
-    this.stop()
-    process.exit(0)
+    void this.shutdown().finally(() => process.exit(0))
   }
 
-  /**
-   * The script URIs the UI should load for the current mode.
-   *
-   * Production is the only mode that renders this shell; development proxies
-   * the Bun-generated HMR shell instead.
-   * @returns The script names to include in the rendered UI.
-   */
-  #scriptNames(): string[] {
-    return this.#entrypoints.map(([name]) => name)
-  }
+}
+
+/**
+ * Serialize a request context for embedding in the SPA shell.
+ * @param value - The context value.
+ * @returns Escaped JSON.
+ */
+function serializeBootstrap(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
+/**
+ * Validate the required context result wrapper.
+ * @param value - Loader return value.
+ * @returns Whether the value is a context result.
+ */
+function isContextResult<AppContext extends object>(
+  value: unknown,
+): value is ContextResult<AppContext> {
+  return typeof value === 'object' && value !== null && 'context' in value
 }
 
 /**

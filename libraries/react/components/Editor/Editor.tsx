@@ -65,9 +65,6 @@ export abstract class Editor<
     readOnly: false,
   }
 
-  /** `onChange` is the Basis editor value contract, not a native root event. */
-  static ownedNativeProps = ['onChange']
-
   /**
    * Checks if a constructor is an Editor
    * @param ctor - The constructor to check
@@ -101,8 +98,11 @@ export abstract class Editor<
   }
 
   get attributes(): (typeof this)['attributes'] {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.onChange
+
     return {
-      ...super.attributes,
+      ...attributes,
       'aria-readonly': this.props.readOnly ? 'true' : 'false',
       'data-field': isNil(this.props.field) ? undefined : this.props.field,
       'readOnly': this.props.readOnly ? 'readOnly' : undefined,

@@ -1,3 +1,5 @@
+import { Logger } from 'basis/logger'
+import { run } from 'basis/utilities'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -18,6 +20,9 @@ const ESLINT_CONFIG_FILES = [
  */
 const basisDir = (): string => join(import.meta.dir, '..')
 
+/** Keep probe and lint process details out of the CLI's normal output. */
+const silent = new Logger({ silent: true })
+
 /**
  * Explains why the running Bun cannot run the built-in linter.
  *
@@ -35,11 +40,7 @@ export const bunLintUnsupportedReason = (): string | null => {
       join(scratch, 'package.json'),
       JSON.stringify({ name: 'basis-lint-probe', private: true, type: 'module' }),
     )
-    const probe = Bun.spawnSync([process.execPath, 'lint', '--help'], {
-      cwd: scratch,
-      stderr: 'pipe',
-      stdout: 'pipe',
-    })
+    const probe = run(process.execPath, ['lint', '--help'], { cwd: scratch, logger: silent })
     if (probe.exitCode === 0) return null
   } finally {
     rmSync(scratch, { force: true, recursive: true })
@@ -95,9 +96,14 @@ const eslintConfigPath = (): string => (
  * resolution without deferring to the consumer's script.
  * @param fix - Whether to apply the linter's fixes.
  * @param configPath - The ESLint config path to run.
+ * @param target - The path to lint, relative to the working directory.
  * @returns The child process exit code.
  */
-export const runBunLint = (fix: boolean, configPath: string = eslintConfigPath()): number => {
+export const runBunLint = (
+  fix: boolean,
+  configPath: string = eslintConfigPath(),
+  target = '.',
+): number => {
   if (!requireBunLint()) return 1
 
   const scratch = mkdtempSync(join(tmpdir(), 'basis-lint-'))
@@ -108,21 +114,17 @@ export const runBunLint = (fix: boolean, configPath: string = eslintConfigPath()
       JSON.stringify({ name: 'basis-lint', private: true, type: 'module' }),
     )
 
-    const result = Bun.spawnSync([
-      process.execPath,
+    const result = run(process.execPath, [
       'lint',
       '--cwd',
       process.cwd(),
       '--config',
       configPath,
       ...(fix ? ['--fix'] : []),
-      '.',
-    ], {
-      cwd: scratch,
-      stderr: 'inherit',
-      stdin: 'inherit',
-      stdout: 'inherit',
-    })
+      target,
+    ], { cwd: scratch, logger: silent })
+    process.stdout.write(result.stdout)
+    process.stderr.write(result.stderr)
 
     return result.exitCode
   } finally {

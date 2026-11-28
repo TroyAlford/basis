@@ -11,8 +11,10 @@
   "dependencies": {
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "react": "^19",
-    "react-dom": "^19"
+    "beautiful-mermaid": "^1.1.3",
+    "shiki": "3.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.4.0"

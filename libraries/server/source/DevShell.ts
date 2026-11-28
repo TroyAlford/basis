@@ -13,6 +13,9 @@ import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
  */
 export const DEV_SHELL_ROUTE = '/__basis_shell'
 
+/** The comment where the server injects prebuilt vendor script tags. */
+export const VENDOR_MARKER = '<!-- VENDORS -->'
+
 /** Options for rendering the development shell document. */
 export interface DevShellOptions {
   /** Directory the shell document is written to; script sources are relative to it. */
@@ -51,8 +54,10 @@ function scriptSource(directory: string, entrypoint: string): string {
  * Render the development shell document.
  *
  * Bun only enables HMR for HTML routes it bundles itself, so development serves
- * a generated document through an HTML route and lets Bun own the module graph,
- * hot updates, and React Fast Refresh. The document is {@link IndexHTML} — the
+ * a generated document through an HTML route and lets Bun own the module graph
+ * and hot updates. Development uses React Fast Refresh; production uses Basis's
+ * production class-component HMR, which keeps the production React runtime. The
+ * document is {@link IndexHTML} — the
  * same shell production renders — loaded with module script sources instead of
  * served entrypoint names, so the two shells cannot drift.
  * @param options - The entrypoints, shell directory, and document title.
@@ -64,7 +69,7 @@ function scriptSource(directory: string, entrypoint: string): string {
 export function renderDevShell({ directory, entrypoints, title }: DevShellOptions): string {
   const scripts = entrypoints.map(entrypoint => ({ module: true, src: scriptSource(directory, entrypoint) }))
   const body = renderToString(React.createElement(IndexHTML, { favicon: false, scripts, title }))
-  return `<!doctype html>\n${body}\n`
+  return `<!doctype html>\n${body.replace('<head>', `<head>${VENDOR_MARKER}`)}\n`
 }
 
 /**
@@ -79,5 +84,56 @@ export function writeDevShell(options: DevShellOptions): string {
   fs.mkdirSync(options.directory, { recursive: true })
   const file = path.join(options.directory, 'index.html')
   fs.writeFileSync(file, renderDevShell(options))
+  return file
+}
+
+/** Options for generating the browser hydration entry. */
+export interface HydrationEntryOptions {
+  /** Directory the generated entry is written to. */
+  directory: string,
+  /** Absolute path to the application module. */
+  mainPath: string,
+  /** Watch the server's authoritative release version and reload after replacement. */
+  monitorRelease?: boolean,
+}
+
+/**
+ * Write the generated browser entry that hydrates the server-rendered root.
+ * @param options - The output directory and application module.
+ * @param options.directory - Directory the generated entry is written to.
+ * @param options.mainPath - Absolute path to the application module.
+ * @param options.monitorRelease - Whether to monitor release replacement.
+ * @returns The absolute path to the generated entry.
+ */
+export function writeHydrationEntry({ directory, mainPath, monitorRelease = false }: HydrationEntryOptions): string {
+  fs.mkdirSync(directory, { recursive: true })
+  const relative = path.relative(directory, mainPath).split(path.sep).join('/')
+  const source = `import * as React from 'react'
+import { createRoot, hydrateRoot } from 'react-dom/client'
+import { attachRoot } from 'basis/react/hmr'
+import { HeadProvider${monitorRelease ? ', readBasisRuntime, startReleaseMonitor' : ''} } from 'basis/react'
+import * as Main from '${relative.startsWith('.') ? relative : `./${relative}`}'
+
+const rootElement = document.getElementById('root')
+const payload = document.getElementById('basis-bootstrap')?.textContent
+const props = payload ? JSON.parse(payload) : {}
+const application = () => {
+  const Component = Main.Application ?? Main.default
+  return React.createElement(HeadProvider, null, React.createElement(Component, props))
+}
+
+if (!rootElement) throw new Error('Basis: missing #root')
+
+const hydrating = rootElement.hasChildNodes()
+const root = hydrating ? hydrateRoot(rootElement, application()) : createRoot(rootElement)
+
+if (!hydrating) root.render(application())
+if (import.meta.hot) attachRoot(() => root.render(application()))
+${monitorRelease ? `const loadedVersion = readBasisRuntime().version
+if (loadedVersion) startReleaseMonitor({ loadedVersion })
+` : ''}
+`
+  const file = path.join(directory, 'hydrate.tsx')
+  fs.writeFileSync(file, source)
   return file
 }

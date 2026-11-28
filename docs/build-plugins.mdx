@@ -4,13 +4,13 @@ title: Build Plugins & Serve
 
 # Build Plugins & Serve
 
-`basis/serve` registers Basis's Bun dev-server loaders so an application served through `basis/server` can import SASS/LESS-style assets and Markdown/MDX modules. The install hook adds the plugin section to the consumer's `bunfig.toml` automatically.
+`basis/serve` registers Basis's Bun dev-server loaders so an application served through `basis/server` can import SASS/LESS-style assets, Markdown/MDX modules, and the production HMR transform. The install hook adds the plugin section to the consumer's `bunfig.toml` automatically.
 
 ```toml
 [serve.static]
 plugins = ["basis/serve"]
 ```
 
-The internal `@basis/bun-plugins` workspace implements the loaders, including SASS compilation, asset handling, Markdown transformation, and the development React refresh registration. It is not a consumer import.
+The internal `@basis/bun-plugins` workspace implements the loaders, including SASS compilation, asset handling, Markdown transformation, development React refresh registration, and production class-component HMR. It is not a consumer import.
 
-The plugin section is optional for an application with no SASS or Markdown sources; keeping it is harmless. The install hook is idempotent and fails loudly if it cannot safely update an existing `[serve.static]` configuration. The basis server's production build does not require the development plugin.
+The plugin section is required for applications that use `basis/server`'s source-serving shell. Development uses React Fast Refresh with the development React runtime. Production-React previews opt into HMR explicitly and pre-compile JSX against the production React runtime, registering top-level class components through `basis/react/hmr`; the preview bundle contains neither React Refresh nor `jsxDEV`. Normal production starts with HMR disabled. An in-place production update copies prototype methods, accessors, and statics onto the existing class, preserving mounted state. Components that declare runtime-private (`#`) members or instance-owned function fields cannot be updated safely in place, so React remounts that subtree and the new handlers take effect. Modules that are not class or style modules have no accept boundary and fall back to Bun's normal reload instead of retaining stale behavior. Vendor virtual modules self-accept HMR updates because their globals are fixed for the server lifetime; changing an installed vendor dependency still requires a server restart. The install hook is idempotent and fails loudly if it cannot safely update an existing `[serve.static]` configuration.

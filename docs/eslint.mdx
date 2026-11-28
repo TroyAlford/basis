@@ -4,7 +4,7 @@ title: ESLint
 
 # ESLint
 
-`basis/eslint` is the shared flat ESLint configuration. `basis lint` executes it with Bun's built-in linter, and the internal `@basis/linter-typescript` workspace implements the Basis-owned rules; consumers do not install or enumerate the plugin stack.
+`basis/eslint` is the shared flat ESLint configuration. The internal `@basis/linter-typescript` workspace implements Basis-owned rules; consumers do not install or enumerate the plugin stack.
 
 ```js
 // eslint.config.mjs
@@ -23,8 +23,14 @@ export default createConfig({
 })
 ```
 
-The policy includes repository conventions such as import ordering, JSDoc requirements, class-based React architecture, and the no-paragraph-line-breaks documentation rule. `@basis/component-architecture` is the rule that rejects function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source while leaving tests, fixtures, and generated files outside its scope.
+The policy includes repository style conventions such as import ordering, JSDoc requirements, object and interface ordering, and the no-paragraph-line-breaks documentation rule. It is a style policy: architecture and infrastructure opinions live in `basis compliance`, not in `basis/eslint`.
 
-`basis lint` applies the full policy; `basis format` applies the autofixes. `basis compliance` runs the architecture rule alone and always uses the Basis-owned configuration.
+Database-facing policy:
 
-`basis lint` requires the first stable Bun release that ships `bun lint`; stable 1.4.4 does not include it. The command stops with an upgrade instruction on a runtime without the built-in linter. Installing Basis does not enforce the runtime version by itself.
+- `@basis/transaction-sql-name` requires recognized database transaction callbacks to bind their SQL client as `sql`, with a safe rename autofix.
+- `@basis/sql-template-format` formats recognized Bun SQL tagged templates with dprint's PostgreSQL plugin. It applies uppercase keywords, two-space indentation, top-level joins, blank lines between statements, and dprint's width-aware layout, including `CREATE TABLE`, `VALUES`, `ON CONFLICT`, comments, and PL/pgSQL bodies. The formatter only applies layout fixes; it does not validate SQL or report style policy. Quoted text and JavaScript interpolations are preserved byte-for-byte.
+- `@basis/sql-template-valid` parses recognized SQL templates with `libpg-query` and reports malformed PostgreSQL. It is a warning-only lint diagnostic and does not apply a fix.
+- `@basis/sql-identifier-style` warns about unquoted identifiers that are not snake_case, such as `userId`, `DisplayName`, or `UserGroup`. Quoted identifiers are accepted because the author chose their spelling. It does not apply a fix.
+- `@basis/entity-definition-format` applies to `**/*.entities.json`, enforcing canonical entity key order and the exact canonical field vocabulary. The same validator checks entity JSON examples in the documentation tree.
+
+`basis lint` applies the style policy, reports warning-only SQL diagnostics as actionable findings, and runs the typechecker; `basis format` applies the autofixes and ignores warning-only diagnostics. `basis compliance` runs the same style/typecheck surface plus the architecture and infrastructure rules, and always uses the Basis-owned compliance configuration.

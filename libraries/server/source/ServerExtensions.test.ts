@@ -25,7 +25,7 @@ describe('sseResponse', () => {
     const closed: string[] = []
     const response = sseResponse(
       {},
-      { logger: silent, request: requestWith(controller) },
+      { context: {}, logger: silent, request: requestWith(controller) },
       (_params, _context, channel) => {
         channel.send('snapshot', { ok: true })
         channel.onClose(() => closed.push('stream-closed'))
@@ -51,7 +51,7 @@ describe('sseResponse', () => {
     const accepted = { value: 0 }
     const response = sseResponse(
       {},
-      { logger: silent, request: requestWith(new AbortController()) },
+      { context: {}, logger: silent, request: requestWith(new AbortController()) },
       (_params, _context, channel) => {
         for (let index = 0; index < 100; index += 1) {
           if (channel.send('tick', index)) accepted.value += 1
@@ -70,7 +70,7 @@ describe('sseResponse', () => {
     const closed: string[] = []
     sseResponse(
       {},
-      { logger: silent, request: requestWith(new AbortController()) },
+      { context: {}, logger: silent, request: requestWith(new AbortController()) },
       (_params, _context, channel) => {
         channel.onClose(() => closed.push('once'))
         channel.onClose(() => closed.push('twice'))

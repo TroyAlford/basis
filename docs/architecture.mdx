@@ -4,7 +4,7 @@ title: Architecture
 
 # Architecture
 
-Basis is a Bun-first monorepo distributed as a pinned Git dependency. It is one deliberately integrated implementation: the React UI, application server, configuration, logging, OAuth, testing, review policy, and repository tooling share conventions, ownership, and a coordinated release.
+Basis is a Bun-first monorepo distributed as a pinned Git dependency. It is one deliberately integrated implementation: the React UI, application server, database capability, configuration, logging, OAuth, testing, review policy, and repository tooling share conventions, ownership, and a coordinated release.
 
 The root `package.json` is the public facade. Consumers import supported surfaces (`basis/react`, `basis/server`, `basis/configuration`, `basis/logger`, `basis/oauth`, `basis/review`, `basis/testing`, `basis/cli`, and related tooling) and resolve the pinned source without reaching into workspace paths.
 
@@ -14,7 +14,7 @@ The root `package.json` is the public facade. Consumers import supported surface
 flowchart TD
     Facade["basis/* public facade"]
     UI["React UI<br/>components, editors, router, theme"]
-    Server["Basis Server<br/>HTTP, health, SSE, sockets"]
+    Server["Basis Server<br/>HTTP, health, SSE, sockets, database"]
     Core["Configuration, logging, OAuth"]
     Testing["Testing and visual snapshots"]
     Review["Review policy and tooling"]
@@ -35,7 +35,7 @@ The surfaces are not independent products with a shared marketing name. They are
 - The consumer surface resolves without Basis-monorepo path aliases or `node_modules/basis/libraries/*` imports.
 - Internal code imports public surfaces by their consumer names (`basis/react`, `basis/server`, …), resolved locally by the root `tsconfig.json` remap, and imports internal-only workspaces package-relatively. The published surface resolves through `exports` alone.
 - Runtime dependencies are declared in the root `dependencies`; host capabilities are declared as `basis.hostDependencies` metadata and validated by the install hook rather than exposed as an imperative API.
-- UI is class-based. Application components extend the Basis `Component` or `Editor` hierarchy; React function components, `React.FC`-style component types, `memo`/`forwardRef` function components, and React hooks are outside the contract. `@basis/component-architecture` enforces this through `basis lint`, `basis check`, and the focused `basis compliance` command.
+- UI is class-based. Application components extend the Basis `Component` or `Editor` hierarchy; React function components, `React.FC`-style component types, `memo`/`forwardRef` function components, and React hooks are outside the contract. `@basis/component-architecture` enforces this through the authoritative `basis compliance` command.
 
 ## Deliberate boundary
 

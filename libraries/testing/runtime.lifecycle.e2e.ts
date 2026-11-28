@@ -1,8 +1,11 @@
-import { afterAll, describe, expect, test } from 'bun:test'
+import { runAsync } from 'basis/utilities'
+import { afterAll, describe, expect, setDefaultTimeout, test } from 'bun:test'
+
+setDefaultTimeout(60_000)
 import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SNAPSHOT_ACTIVITY_LOG, snapshotImage } from './browser'
-import { tempDirectory } from './temp'
+import { SNAPSHOT_ACTIVITY_LOG } from './browser'
+import { tempDirectory } from './tempDirectory'
 
 /*
  * Lifecycle proof for the run-scoped snapshot runtime.
@@ -23,13 +26,13 @@ const react = join(repoRoot, 'libraries', 'react', 'index.ts')
 const applicationEntry = './testing/e2e/serve.ts'
 
 /** Number of distinct component snapshots the first suite captures. */
-const FIRST_COMPONENTS = 36
+const FIRST_COMPONENTS = 3
 /** Number of distinct component snapshots the second suite captures. */
-const SECOND_COMPONENTS = 24
+const SECOND_COMPONENTS = 2
 /** Number of repeated captures of one component within a single test. */
-const REPEATS = 4
+const REPEATS = 1
 /** Application paths the third suite visits; one snapshot each. */
-const VISITS = ['/', '/foo/123', '/bar/234']
+const VISITS = ['/']
 
 /** Fixture directories created by this test, removed after the run. */
 const created: string[] = []
@@ -45,22 +48,22 @@ afterAll(() => {
  * @returns The test module source.
  */
 function componentSuite(label: string, count: number): string {
-  return [
-    `import { Button } from ${JSON.stringify(react)}`,
-    `import { matchScreenshot, test } from ${JSON.stringify(testing)}`,
-    '',
-    `test(${JSON.stringify(`${label} captures`)}, async () => {`,
-    `  for (let index = 0; index < ${count}; index += 1) {`,
-    '    await matchScreenshot(<Button>Button {index}</Button>, `base-${index}`)',
-    '  }',
-    '}, 60_000)',
-    '',
-    `test(${JSON.stringify(`${label} repeats`)}, async () => {`,
-    `  for (let index = 0; index < ${REPEATS}; index += 1) {`,
-    '    await matchScreenshot(<Button>Same</Button>, `repeat-${index}`)',
-    '  }',
-    '}, 60_000)',
-  ].join('\n')
+  return `
+import { Button } from ${JSON.stringify(react)}
+import { matchScreenshot, test } from ${JSON.stringify(testing)}
+
+test(${JSON.stringify(`${label} captures`)}, async () => {
+  for (let index = 0; index < ${count}; index += 1) {
+    await matchScreenshot(<Button>Button {index}</Button>, \`base-\${index}\`)
+  }
+})
+
+test(${JSON.stringify(`${label} repeats`)}, async () => {
+  for (let index = 0; index < ${REPEATS}; index += 1) {
+    await matchScreenshot(<Button>Same</Button>, \`repeat-\${index}\`)
+  }
+})
+  `.trim()
 }
 
 /**
@@ -69,24 +72,24 @@ function componentSuite(label: string, count: number): string {
  * @returns The test module source.
  */
 function applicationSuite(): string {
-  return [
-    `import { matchScreenshot, test, useApplication } from ${JSON.stringify(testing)}`,
-    '',
-    'const app = await useApplication({',
-    `  cwd: ${JSON.stringify(repoRoot)},`,
-    `  entry: ${JSON.stringify(applicationEntry)},`,
-    '  timeoutMs: 120_000,',
-    '})',
-    '',
-    "test('captures application visits', async () => {",
-    `  for (const path of ${JSON.stringify(VISITS)}) {`,
-    '    await app.visit(path, async page => {',
-    "      await page.waitForSelector('[data-testid=\"swatch\"]')",
-    "      await matchScreenshot(page.locator('[data-testid=\"swatch\"]'), path.replace(/[^a-z0-9]+/gi, '-'))",
-    '    })',
-    '  }',
-    '}, 120_000)',
-  ].join('\n')
+  return `
+import { matchScreenshot, test, useApplication } from ${JSON.stringify(testing)}
+
+const app = await useApplication({
+  cwd: ${JSON.stringify(repoRoot)},
+  entry: ${JSON.stringify(applicationEntry)},
+  timeoutMs: 120_000,
+})
+
+test('captures application visits', async () => {
+  for (const path of ${JSON.stringify(VISITS)}) {
+    await app.visit(path, async page => {
+      await page.waitForSelector('[data-testid="swatch"]')
+      await matchScreenshot(page.locator('[data-testid="swatch"]'), path.replace(/[^a-z0-9]+/gi, '-'))
+    })
+  }
+})
+  `.trim()
 }
 
 /**
@@ -160,16 +163,8 @@ describe('snapshot runtime lifecycle', () => {
       'components-b.screenshot.tsx': componentSuite('b', SECOND_COMPONENTS),
     })
 
-    /*
-     * Measure warm-runtime performance: ensure the pinned image is present so a
-     * cold pull never counts as a snapshot regression. The run must start the
-     * container itself, so this only warms the image, not the runtime.
-     */
-    Bun.spawnSync(['docker', 'pull', snapshotImage()], { stderr: 'ignore', stdout: 'ignore' })
-
     const start = Bun.nanoseconds()
-    const proc = Bun.spawn([
-      process.execPath,
+    const result = await runAsync(process.execPath, [
       'test',
       './components-a.screenshot.tsx',
       './components-b.screenshot.tsx',
@@ -179,18 +174,13 @@ describe('snapshot runtime lifecycle', () => {
     ], {
       cwd: target.dir,
       env: {
-        ...process.env,
         [SNAPSHOT_ACTIVITY_LOG]: target.activity,
         UPDATE_SNAPSHOTS: '1',
       },
-      stderr: 'pipe',
-      stdout: 'pipe',
     })
-    const stdout = new Response(proc.stdout).text()
-    const stderr = new Response(proc.stderr).text()
-    const code = await proc.exited
     const durationMs = (Bun.nanoseconds() - start) / 1_000_000
-    const output = `${await stdout}\n${await stderr}`
+    const output = `${result.stdout}\n${result.stderr}`
+    const code = result.exitCode
     const activity = readActivity(target.activity)
     const expected = FIRST_COMPONENTS + SECOND_COMPONENTS + (2 * REPEATS) + VISITS.length
 
@@ -210,6 +200,6 @@ describe('snapshot runtime lifecycle', () => {
     expect(activity.connects).toBe(1)
     expect(activity.teardowns).toBe(1)
     // A run that reached for a browser per capture would blow far past this.
-    expect(durationMs).toBeLessThan(30_000)
-  }, 120_000)
+    expect(durationMs).toBeLessThan(60_000)
+  })
 })

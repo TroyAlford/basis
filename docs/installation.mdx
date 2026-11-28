@@ -17,17 +17,42 @@ Use a released tag rather than a branch. `--trust` records Basis in `trustedDepe
 ```ts
 import { Button, Theme } from 'basis/react'
 import { Server } from 'basis/server'
-import { Environment, run, runAsync } from 'basis/configuration'
+import { Environment } from 'basis/configuration'
+import { run, runAsync } from 'basis/utilities'
 import { Logger } from 'basis/logger'
 ```
 
-The root `package.json` is the public facade. Supported import surfaces are `basis/cli`, `basis/configuration`, `basis/eslint`, `basis/logger`, `basis/markdown`, `basis/oauth`, `basis/react`, `basis/react/icons`, `basis/review`, `basis/serve`, `basis/server`, `basis/stylelint`, `basis/testing`, `basis/testing/bun`, and `basis/tsconfig/*`. Internal workspace paths are not consumer imports; see [Reference](./reference.mdx) for the ownership rule.
+The root `package.json` is the public facade. Supported import surfaces are `basis/cli`, `basis/configuration`, `basis/eslint`, `basis/logger`, `basis/markdown`, `basis/oauth`, `basis/react`, `basis/react/icons`, `basis/docs/mermaid`, `basis/review`, `basis/serve`, `basis/server`, `basis/stylelint`, `basis/testing`, `basis/testing/bun`, `basis/utilities`, and `basis/tsconfig/*`. Internal workspace paths are not consumer imports; see [Reference](./reference.mdx) for the ownership rule.
 
 ## Bun version
 
-Basis installs on Bun 1.4.x. The type-check commands require Bun **1.4.3 or newer**. The lint, format, and compliance commands require the first stable Bun release that ships the built-in linter; stable 1.4.4 does not include it.
+Basis Server and its production HMR pipeline require **Bun 1.4.6 or newer**, or the exact approved canary runtime:
 
-The package engines record these minimums, but `bun add` does not enforce them. An older runtime installs successfully, then the affected command stops with an upgrade instruction. Run `bun upgrade` to move to a supported release.
+- npm distribution: `bun@1.4.5-canary.20261121.1`
+- `bun --version`: `1.4.6`
+- `bun --revision`: `1.4.6-canary.1+b15f51302`
+
+The install hook and `Server.start()` reject a known-incompatible runtime with an actionable error, and `basis doctor` reports the same requirement. The runtime must identify itself with matching version and revision metadata; a numeric version without an identifiable revision is not accepted, because the approved canary reports `Bun.version` as `1.4.6`. Future stable Bun releases are accepted by version when their revision identifies the same stable release; unverified prereleases are rejected even when their numeric version is newer. The separate `bun --check` type-check capability still requires Bun 1.4.3 or newer. The native lint surface likewise requires a Bun build with `bun lint`; the approved canary above has it, and stable 1.4.5 does not.
+
+Install the approved canary through mise’s npm installer rather than mise’s default aube backend. Aube omits Bun’s optional platform package and does not run its postinstall:
+
+```toml
+[settings]
+npm.package_manager = "npm"
+
+[tools."npm:bun"]
+allow_builds = true
+npm_args = "--include=optional --ignore-scripts=false"
+version = "1.4.5-canary.20261121.1"
+```
+
+```bash
+mise install
+mise exec -- bun --revision
+# 1.4.6-canary.1+b15f51302
+```
+
+The equivalent direct install is `npm install -g bun@1.4.5-canary.20261121.1`; npm must run the package postinstall so Bun’s platform binary is unpacked. Once a stable Bun release at or above 1.4.6 is verified, `bun upgrade` is the normal path. The package engine records the server minimum, but Bun does not guarantee engine enforcement, so the install hook and server gate remain authoritative. The installer validates the active runtime, not a toolchain file, so consumers may use mise or another installation method that provides a compatible Bun. `mise.toml` remains the recommended reproducible setup.
 
 ## Host capabilities
 
@@ -37,7 +62,7 @@ Non-npm host capabilities are static metadata, not runtime API. Declare only wha
 { "basis": { "hostDependencies": ["docker"] } }
 ```
 
-The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken.
+The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken. Docker is required when using the managed database.
 
 Basis-owned patches live in the package and are declared in its `patchedDependencies` map. The trusted `postinstall` hook applies them to exact `name@version` installs with `git apply`; consumers never copy patch files, add their own `patchedDependencies` entries, or provision a host browser.
 

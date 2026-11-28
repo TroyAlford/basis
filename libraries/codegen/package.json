@@ -1,0 +1,14 @@
+{
+  "name": "@basis/codegen",
+  "description": "Independent build-time emitters for canonical Basis Graph output formats.",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@basis/server": "workspace:*"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

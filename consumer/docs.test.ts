@@ -50,6 +50,37 @@ describe('checkDocs', () => {
     expect(checkDocs(root).issues.map(issue => issue.message)).toContain('missing docs/index.md(x)')
   })
 
+  test('rejects semantically invalid entity JSON examples', () => {
+    const root = fixture({
+      'docs/index.md': `
+# Home
+
+\`\`\`json
+{"entities":[{"name":"User","fields":[{"field":"email","type":"String","format":"UUID"}]}]}
+\`\`\`
+      `.trim(),
+    })
+    expect(checkDocs(root).issues.some(issue => issue.message.startsWith('entity JSON:'))).toBe(true)
+  })
+
+  test('rejects duplicate entities and unknown top-level entity properties in docs', () => {
+    for (const source of [
+      '{"entities":[{"name":"User","fields":[]},{"name":"User","fields":[]}]}',
+      '{"entities":[{"name":"User","fields":[]}],"extra":"keep"}',
+    ]) {
+      const root = fixture({
+        'docs/index.md': `
+# Home
+
+\`\`\`json
+${source}
+\`\`\`
+        `.trim(),
+      })
+      expect(checkDocs(root).issues.some(issue => issue.message.startsWith('entity JSON:'))).toBe(true)
+    }
+  })
+
   test('reports an unclosed code fence', () => {
     const root = fixture({ 'docs/index.md': '# Home\n\n```mermaid\nflowchart TD\n' })
     const issues = checkDocs(root).issues
@@ -64,14 +95,14 @@ describe('checkDocs', () => {
 
   test('reports unresolved internal links and ignores external ones', () => {
     const root = fixture({
-      'docs/index.md': [
-        '# Home',
-        '',
-        '[missing](./nope.md)',
-        '[external](https://example.com)',
-        '[anchor](#section)',
-        '[deep](./nested/)',
-      ].join('\n'),
+      'docs/index.md': `
+# Home
+
+[missing](./nope.md)
+[external](https://example.com)
+[anchor](#section)
+[deep](./nested/)
+      `.trim(),
       'docs/nested/index.md': '# Nested\n',
     })
     const messages = checkDocs(root).issues.map(issue => issue.message)

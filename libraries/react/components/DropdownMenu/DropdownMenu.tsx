@@ -48,8 +48,6 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
 
   static displayName = 'DropdownMenu'
 
-  /** `onClose` is a DropdownMenu callback, not a native root event. */
-  static ownedNativeProps = ['onClose']
   static defaultProps = {
     ...super.defaultProps,
     anchorPoint: AnchorPoint.BottomStart,
@@ -65,8 +63,11 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   private unsubscribeBlur?: () => void
 
   get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.onClose
+
     return {
-      ...super.attributes,
+      ...attributes,
       'aria-disabled': this.props.disabled ? 'true' : undefined,
       'aria-expanded': this.isOpen,
       'aria-haspopup': 'true',

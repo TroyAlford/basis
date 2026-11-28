@@ -1,0 +1,47 @@
+{
+  "original": {
+    "positions": {
+      "1": "member limit",
+      "2": "member offset",
+      "3": "deck item filter",
+      "4": "deck limit",
+      "5": "deck offset",
+      "6": "deck matched-count filter",
+      "7": "deck-entry item filter",
+      "8": "deck-entry limit",
+      "9": "deck-entry offset",
+      "10": "deck-entry matched-count filter",
+      "11": "root deck selector"
+    },
+    "values": [1, 0, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", 1, 0, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", 1, 0, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"]
+  },
+  "generated": {
+    "positions": {
+      "1": "root deck selector",
+      "2": "deck item filter",
+      "3": "deck matched-count filter",
+      "4": "member offset",
+      "5": "member limit",
+      "6": "deck offset",
+      "7": "deck limit",
+      "8": "deck-entry item filter",
+      "9": "deck-entry matched-count filter",
+      "10": "deck-entry offset",
+      "11": "deck-entry limit"
+    },
+    "values": ["cccccccc-cccc-4ccc-8ccc-cccccccccccc", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", 0, 1, 0, 1, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", 0, 1]
+  },
+  "mapping": {
+    "member limit": { "original": 1, "generated": 5 },
+    "member offset": { "original": 2, "generated": 4 },
+    "deck item filter": { "original": 3, "generated": 2 },
+    "deck limit": { "original": 4, "generated": 7 },
+    "deck offset": { "original": 5, "generated": 6 },
+    "deck matched-count filter": { "original": 6, "generated": 3 },
+    "deck-entry item filter": { "original": 7, "generated": 8 },
+    "deck-entry limit": { "original": 8, "generated": 11 },
+    "deck-entry offset": { "original": 9, "generated": 10 },
+    "deck-entry matched-count filter": { "original": 10, "generated": 9 },
+    "root deck selector": { "original": 11, "generated": 1 }
+  }
+}

@@ -1,12 +1,16 @@
-import { beforeAll, expect } from 'bun:test'
+import { beforeAll, expect, setDefaultTimeout } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from '../../../testing'
 import { describe, test, useApplication } from '../../../testing'
+import { getBrowser } from '../../../testing/browser'
+
+setDefaultTimeout(30_000)
 
 const root = join(import.meta.dir, '..', '..', '..', '..')
 
 const options = {
   cwd: root,
+  development: true,
   entry: './testing/components/serve.ts',
   timeoutMs: 120_000,
 }
@@ -16,7 +20,8 @@ describe('overlay real browser', () => {
 
   beforeAll(async () => {
     app = await useApplication(options)
-  }, 120_000)
+    await getBrowser()
+  })
 
   test('mounts native modal chrome that stays in the viewport while the page scrolls', async () => {
     await app.visit('/overlay', async page => {
@@ -44,7 +49,7 @@ describe('overlay real browser', () => {
       expect(events.filter(event => event === 'basic:dismissing')).toHaveLength(1)
       expect(events).toContain('basic:false')
     })
-  }, 60_000)
+  })
 
   test('routes native backdrop clicks through the dismissal guard without dismissing inside clicks', async () => {
     await app.visit('/overlay', async page => {
@@ -66,7 +71,7 @@ describe('overlay real browser', () => {
       await page.locator('dialog button:has-text("Cancel")').click()
       await page.waitForFunction(() => !document.querySelector('dialog'))
     })
-  }, 60_000)
+  })
 
   test('stacks a nested confirmation without deadlock and restores focus through the stack', async () => {
     await app.visit('/overlay', async page => {
@@ -97,7 +102,7 @@ describe('overlay real browser', () => {
       expect(events).toContain('nested:true')
       expect(events).toContain('parent:dismissed')
     })
-  }, 60_000)
+  })
 
   test('guards a dirty editor, retains its draft, and updates shell chrome without remounting', async () => {
     await app.visit('/overlay', async page => {
@@ -129,7 +134,7 @@ describe('overlay real browser', () => {
       const events = await page.evaluate(() => window.__overlayEvents ?? [])
       expect(events).toContain('editor:false')
     })
-  }, 60_000)
+  })
 
   test('blocks Escape and Close while a persistent action is in flight', async () => {
     await app.visit('/overlay', async page => {
@@ -150,7 +155,7 @@ describe('overlay real browser', () => {
       await page.locator('dialog button:has-text("Close")').click()
       await page.waitForFunction(() => !document.querySelector('dialog'))
     })
-  }, 60_000)
+  })
 
   test('renders notifications independently without displacing a modal dialog', async () => {
     await app.visit('/overlay', async page => {
@@ -170,5 +175,5 @@ describe('overlay real browser', () => {
       await page.keyboard.press('Escape')
       await page.waitForFunction(() => !document.querySelector('dialog'))
     })
-  }, 60_000)
+  })
 })

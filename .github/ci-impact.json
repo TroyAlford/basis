@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "maxGraphFiles": 20000,
+  "aliases": {
+    "basis/": "./consumer/",
+    "@basis/": "./libraries/"
+  },
+  "docs": {
+    "globs": [
+      "**/*.md",
+      "**/*.mdx",
+      "docs/**"
+    ]
+  },
+  "suites": {
+    "docs": {
+      "mode": "paths",
+      "testGlobs": [],
+      "sourceGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "README.md"
+      ],
+      "alwaysRunGlobs": [],
+      "ignoreGlobs": [
+        "**"
+      ],
+      "unreachableSource": "run"
+    },
+    "unit": {
+      "testGlobs": [
+        "libraries/**/*.test.ts",
+        "libraries/**/*.test.tsx",
+        "libraries/**/*.screenshot.ts",
+        "libraries/**/*.screenshot.tsx",
+        "testing/**/*.test.ts",
+        "consumer/**/*.test.ts",
+        "packages/**/*.test.ts",
+        ".github/**/*.test.ts"
+      ],
+      "testExcludeGlobs": [
+        "libraries/testing/application.lifecycle.test.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/**/*.ts",
+        "libraries/**/*.tsx",
+        "testing/**/*.ts",
+        "consumer/**/*.ts",
+        "packages/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        "mise.toml"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "skip"
+    },
+    "database": {
+      "testGlobs": [
+        "libraries/server/source/Database.e2e.ts",
+        "libraries/server/source/DatabaseSeed.e2e.ts",
+        "libraries/server/source/Migration.e2e.ts",
+        "libraries/server/source/QueryParity.e2e.ts",
+        "libraries/server/source/QueryPlanning.e2e.ts",
+        "libraries/server/source/Schema.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/server/**/*.ts",
+        "libraries/testing/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        "mise.toml"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "e2e": {
+      "testGlobs": [
+        "libraries/**/*.e2e.ts",
+        "libraries/**/*.e2e.tsx"
+      ],
+      "testExcludeGlobs": [
+        "libraries/server/source/Database.e2e.ts",
+        "libraries/server/source/DatabaseSeed.e2e.ts",
+        "libraries/server/source/Migration.e2e.ts",
+        "libraries/server/source/QueryParity.e2e.ts",
+        "libraries/server/source/QueryPlanning.e2e.ts",
+        "libraries/server/source/Schema.e2e.ts",
+        "libraries/server/source/DatabaseInstall.e2e.ts",
+        "libraries/server/source/Authorization.e2e.ts",
+        "libraries/server/source/Readiness.e2e.ts",
+        "libraries/server/source/PostgresOperations.e2e.ts",
+        "libraries/server/source/Release.e2e.ts",
+        "libraries/server/source/ReleaseRecovery.e2e.ts",
+        "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",
+        "libraries/testing/runtime.lifecycle.e2e.ts",
+        "libraries/testing/application.lifecycle.test.ts",
+        "libraries/testing/application.hmr.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/react/**/*.ts",
+        "libraries/react/**/*.tsx",
+        "libraries/testing/application.ts",
+        "libraries/testing/browser.ts",
+        "libraries/testing/matchScreenshot.ts",
+        "libraries/testing/network.ts",
+        "libraries/testing/test.ts",
+        "testing/e2e/**"
+      ],
+      "extraRoots": [
+        "testing/e2e/serve.ts",
+        "testing/e2e/main.tsx"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        "mise.toml"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "libraries/server/**"
+      ],
+      "unreachableSource": "run"
+    },
+    "lifecycle": {
+      "testGlobs": [
+        "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",
+        "libraries/server/source/ReleaseRecovery.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/server/**/*.ts",
+        "libraries/testing/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        "mise.toml"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "recovery": {
+      "testGlobs": [
+        "libraries/server/source/DatabaseInstall.e2e.ts",
+        "libraries/server/source/Authorization.e2e.ts",
+        "libraries/server/source/Readiness.e2e.ts",
+        "libraries/server/source/PostgresOperations.e2e.ts",
+        "libraries/server/source/Release.e2e.ts",
+        "libraries/testing/application.lifecycle.test.ts",
+        "libraries/testing/application.hmr.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/server/**/*.ts",
+        "libraries/testing/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        "mise.toml"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    }
+  }
+}

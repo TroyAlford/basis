@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tempDirectory } from 'basis/testing'
+import { run as runProcess } from 'basis/utilities'
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { findInstalledInstances } from '../patches/install'
 
@@ -59,10 +60,11 @@ export const REACT_TSCONFIG = JSON.stringify(
  */
 export const REACT_APP_SOURCE = `import { Button, Theme } from 'basis/react'
 
-export const component = (
-  <Theme>
+export const Application = () => (
+  <>
+    <Theme />
     <Button disabled>Hello</Button>
-  </Theme>
+  </>
 )
 `
 
@@ -92,8 +94,8 @@ process.stdout.write('runtime-ok')
 `
 
 /**
- * React fixture managed-production entrypoint. It starts `basis/server` in
- * production mode and prints the bound address for the test harness.
+ * React fixture managed entrypoint. It starts `basis/server` and prints the
+ * bound address for the test harness.
  */
 export const REACT_APP_SERVER = `import { Server } from 'basis/server'
 
@@ -101,7 +103,6 @@ const server = new Server()
   .root(import.meta.dir)
   .main('./app.tsx')
   .start({
-    development: false,
     hostname: '127.0.0.1',
     port: 0,
     version: 'consumer-version',
@@ -155,7 +156,7 @@ export const write = (path: string, contents: string): void => {
  * @param prefix Directory name prefix.
  * @returns Absolute path to the new directory.
  */
-export const makeTempDir = (prefix: string): string => mkdtempSync(join(tmpdir(), prefix))
+export const makeTempDir = (prefix: string): string => tempDirectory(prefix)
 
 /**
  * Builds a PATH containing only Bun and Git, so a fixture proves it never needs
@@ -183,21 +184,17 @@ export const makeToolPath = (workspace: string): { binDir: string, path: string 
  * @returns Captured standard output.
  */
 export const run = (command: string[], cwd: string, env: Record<string, string> = {}): string => {
-  const result = Bun.spawnSync({
-    cmd: command,
-    cwd,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
+  const [executable, ...args] = command
+  if (!executable) throw new Error('command must include an executable')
+  const result = runProcess(executable, args, { cwd, env })
 
-  const stdout = result.stdout.toString()
-  const stderr = result.stderr.toString()
-  if (!result.success) {
-    throw new Error(`command failed (${result.exitCode}): ${command.join(' ')}\n${stdout}\n${stderr}`)
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `command failed (${result.exitCode}): ${command.join(' ')}\n${result.stdout}\n${result.stderr}`,
+    )
   }
 
-  return stdout
+  return result.stdout
 }
 
 /**
@@ -212,18 +209,14 @@ export const runAllowFailure = (
   cwd: string,
   env: Record<string, string> = {},
 ): { exitCode: number, stderr: string, stdout: string } => {
-  const result = Bun.spawnSync({
-    cmd: command,
-    cwd,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
+  const [executable, ...args] = command
+  if (!executable) throw new Error('command must include an executable')
+  const result = runProcess(executable, args, { cwd, env })
 
   return {
-    exitCode: result.exitCode ?? 1,
-    stderr: result.stderr.toString(),
-    stdout: result.stdout.toString(),
+    exitCode: result.exitCode,
+    stderr: result.stderr,
+    stdout: result.stdout,
   }
 }
 

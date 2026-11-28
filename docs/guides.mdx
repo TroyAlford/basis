@@ -58,6 +58,18 @@ new Server()
 
 Run `bun serve.ts` and open the served URL. See [Server](./server/index.mdx) for assets, API routes, SSE, sockets, and lifecycle.
 
+Add the database capability when the application needs PostgreSQL:
+
+```ts
+new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .database()
+  .start()
+```
+
+Use `server.db.sql` for a direct query and `server.db.tx(async sql => ...)` for an atomic operation. See [Database & Transactions](./server/database.mdx).
+
 Add the testing preload to `bunfig.toml` and write a `.test.tsx` file:
 
 ```toml
@@ -87,4 +99,4 @@ Durable documentation lives in this `docs/` tree as `.md`/`.mdx` articles. The d
 - `basis docs build` (or `bun run docs:build`) projects the site to static HTML for GitHub Pages.
 - Use `.mdx` when a page needs interactivity: a Mermaid fence renders as a diagram, and interactive component examples stay in `libraries/docs/pages/*.docs.tsx`.
 
-Source links between articles (`[Server](./server/index.mdx)`) are resolved to served routes by both the live MDX loader and the static build. Keep canonical links relative to the source tree and let the pipeline translate them.
+Source links between articles (`[Database](./server/database.mdx)`) are resolved to served routes by both the live MDX loader and the static build. Keep canonical links relative to the source tree and let the pipeline translate them.

@@ -1,0 +1,361 @@
+---
+title: Authorization & Row-Level Security
+---
+
+# Authorization & Row-Level Security
+
+Basis owns one canonical application graph. The graph declares the ontology, the stable roles that exist, and the role/action/row permissions that PostgreSQL enforces. Loading a graph never mutates the database. `server.graph(graph)` puts `server.db` on the restricted application role, and PostgreSQL compiles the graph's permissions into real row-level-security policies.
+
+```ts
+import { Action, Graph, Server } from 'basis/server'
+
+enum Capability {
+  ManageArticle = 'manageArticle',
+  ViewArticle = 'viewArticle',
+}
+
+const graph = new Graph({
+  entities: [{
+    name: 'Article',
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'owner', type: 'Entity', target: 'User' },
+    ],
+    security: {
+      [Action.Read]: [{
+        grant: Capability.ViewArticle,
+        where: { field: 'owner', operator: '$eq', value: '$me' },
+      }],
+      [Action.Create]: { grant: Capability.ManageArticle },
+      [Action.Update]: { grant: Capability.ManageArticle },
+      [Action.Delete]: { grant: Capability.ManageArticle },
+    },
+  }],
+  grants: {
+    [Capability.ManageArticle]: { description: 'Manage articles' },
+    [Capability.ViewArticle]: { description: 'View articles' },
+  },
+  roles: {
+    editor: { name: 'Editor', grants: [Capability.ViewArticle] },
+    administrator: {
+      name: 'Administrator',
+      grants: [Capability.ManageArticle, Capability.ViewArticle],
+    },
+  },
+})
+
+const server = new Server()
+  .root(import.meta.dir)
+  .graph(graph)
+  .database()
+  .start()
+```
+
+The application root conventionally exports `graph.ts` as `export default new Graph({...})`. Keep the application graph in one module and pass it to the server. `Graph` composes the application ontology with the system `User`, `Role`, `ExternalIdentity`, and `UserRole` definitions. Application `User` inherits `Entity`'s `id`, `name`, and `entity`; do not redeclare those fields. `Role` is an identified entity with a stable UUID `id`, an inherited mutable `name`, and an optional `description`.
+
+## Roles and membership
+
+The graph defines which roles exist. Public is the built-in principal that applies to anonymous and signed-in requests. Administrator is the built-in administration role. Additional roles use stable UUID keys or ordinary role declarations:
+
+```ts
+const roles = new Map([
+  ['00000000-0000-4000-8000-000000000010', { name: 'Reviewer' }],
+])
+```
+
+`UserRole` memberships are live records managed through `server.auth`; they are not graph declarations or seed memberships:
+
+```ts
+await server.auth!.bootstrap({
+  provider: 'github',
+  subject: 'operator-subject',
+  email: 'operator@example.com',
+})
+
+await server.auth!.assignRole(userId, 'editor')
+await server.auth!.removeRole(userId, 'editor')
+```
+
+Install the graph schema first through reviewed `DDL.plan → review → apply`; `bootstrap()` does not create or reconcile schema objects. It enrolls the initial identity through the server's trusted owner/admin connection and adds the initial administrator membership. Enrollment is ordinary `User`, `ExternalIdentity`, and `UserRole` work through that trusted capability; it does not depend on an installed PostgreSQL enrollment function. It is an explicit trusted operator action: never call it from an ordinary request handler, and never grant administration on first OAuth login automatically.
+
+Automatic creation of a new `User` requires exactly one concrete `User` descendant. A graph may declare multiple concrete User subtypes for application-managed accounts; existing provider bindings still resolve, but a new automatic signup raises an explicit ambiguity error instead of choosing by declaration order. Enrollment supplies the canonical root name and the optional `User.email` value only; OAuth receives those profile values from the provider `identity` callback. It does not synthesize application-owned fields. If the selected User or one of its concrete subtypes has a required field that the enrollment call does not provide, PostgreSQL rejects creation and leaves no partial identity behind.
+
+## Capabilities, roles, and security
+
+The graph declares reusable **capabilities** in `grants`; a capability is a named positive permission, not a role attachment:
+
+```ts
+grants: {
+  [Capability.ViewCampaigns]: { description: 'View campaigns' },
+  [Capability.ManageCampaigns]: { description: 'Manage campaigns' },
+}
+```
+
+Roles group capabilities. A user receives capabilities through verified `UserRole` membership in those roles; multiple roles may confer the same capability:
+
+```ts
+roles: {
+  advisor: { name: 'Advisor', grants: [Capability.ViewCampaigns] },
+  administrator: {
+    name: 'Administrator',
+    grants: [Capability.ViewCampaigns, Capability.ManageCampaigns],
+  },
+}
+```
+
+Each entity and named relationship owns an action-keyed `security` declaration. An action value is either explicit `Security.Public` or one or more alternative rules combined with OR. Each rule may declare exactly one of `grant` or `role` and/or a non-empty `where`. A where-only rule is a public-conditional rule: it authorizes matching rows without an artificial global capability or role. `Security.Public` remains the only unconditional public form.
+
+```ts
+security: {
+  [Action.Read]: [
+    { grant: Capability.ManageCampaigns },
+    {
+      grant: Capability.ViewCampaigns,
+      where: { field: 'owner', operator: '$eq', value: '$me' },
+    },
+  ],
+  [Action.Update]: { grant: Capability.ManageCampaigns },
+  [Action.Delete]: { grant: Capability.ManageCampaigns },
+  // Create omitted means denied.
+}
+```
+
+- Missing action means denied, for reads and writes.
+- Public access is explicit only: `[Action.Read]: Security.Public`; it never implies another action.
+- Actor presence is opt-in and explicit: `{ where: '$me != null' }` authorizes any authenticated actor and denies anonymous requests. `{ where: '$me = null' }` is the complement. There is no Authenticated role, sentinel, implicit grant, or default authenticated read; omitting a security declaration still denies everyone.
+- A `{ role: 'someRole' }` rule requires that Graph role; `{ grant: Capability.X }` requires any role that confers the capability.
+- Rules are positive alternatives. No negative grant or precedence exists.
+- Every `create`, `update`, and `delete` additionally requires `read` for the same row. A create must satisfy read on the proposed resulting row; it cannot be created only to become visible after a later membership insert.
+- One security declaration owns an entity hierarchy. If an entity declares `security`, none of its ancestors or descendants may declare one, even for disjoint actions; Graph construction fails with both owner names. A single declaration inherits unchanged to all physical descendants. Siblings may each declare security when no ancestor does.
+
+The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. `manage` is an administration qualifier and cannot carry a row predicate. Predicates use the same `Filter`/`Predicate`/`QueryNormalizer` vocabulary as entity queries. Graph changes require a new graph and schema plan; there is no runtime grant registry duplicating the graph.
+
+System-owned administration metadata can be secured through the top-level `security` map keyed by its canonical owner. For example, administration operations require `manage` on `Role`, `UserRole`, and `ExternalIdentity`:
+
+```ts
+security: {
+  Role: { [Action.Manage]: { role: 'admin' } },
+  UserRole: { [Action.Manage]: { role: 'admin' } },
+  ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+}
+```
+
+This uses the same action rules and compiler; it is not a separate authorization authority.
+
+Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Default deny applies to tables without a matching action declaration. Create rules are evaluated against the proposed row values, may traverse references to existing rows, and may test collection membership for the verified actor through a Graph-managed privileged Boolean helper. A rule is enforced at the concrete entity insert and therefore also applies to descendant-only direct SQL; MTI ancestor rows inserted earlier in the same native transaction remain available for reference traversal. The same INSERT policy applies to Graph-native mutations and restricted direct SQL.
+
+Policy predicates use the same canonical path resolution and descendant eligibility as ordinary queries. A rule may traverse a descendant-only reference, such as `document.workspace.members $contains (user = $me)` where `workspace` is declared only on `PrivateDocument`; the discriminator guard applies to the referenced `Document` occurrence, not to the policy row. Missing fields and collections are structurally inapplicable in policy predicates, including under `NOT`, and a public sibling cannot satisfy a private descendant branch merely because its physical column is absent. Graph renders the applicable physical reference and collection variants and evaluates them through the existing `SECURITY DEFINER` policy helpers and RLS policies; it does not add a second authorization evaluator or expose the helper as a row-reading capability. Collection count paths (`$total` and `$matched`) are intentionally not policy-safe; use collection membership or emptiness predicates instead.
+
+The Graph mutation verbs (`db.create`, `db.edit`, `db.delete`, `db.upsert`) run on the same restricted application pool with the request's `actor.id`. The agreed two-gate rule applies: every create, update, and delete additionally requires `read` on the affected or resulting row, while PostgreSQL's action-specific policies determine whether the write itself is allowed. `edit` and `delete` select through the canonical filter compiler, then PostgreSQL re-checks every write and returns only the rows the actor may actually mutate. Counts therefore exclude unauthorized matches without disclosing that they exist. A create denied by the read or create policy fails as an authorization error; uniqueness, reference, check, and inheritance violations fail as constraint errors. Mixed `db.tx` callbacks keep the same actor across native SQL and mutation verbs.
+
+## Relationship membership predicates
+
+Graph roles are global role memberships. A resource-specific membership is ordinary Graph relationship data, not another global role. Declare the relationship and grant access through its collection navigation:
+
+```ts
+enum WorkspaceCapability {
+  Edit = 'editWorkspace',
+}
+
+enum MembershipRole {
+  Owner = 'Owner',
+  Viewer = 'Viewer',
+}
+
+const graph = new Graph({
+  entities: [
+    {
+      name: 'Workspace',
+      fields: [],
+      security: {
+        [Action.Read]: {
+          where: 'members $contains (id = $me)',
+        },
+        [Action.Update]: {
+          grant: WorkspaceCapability.Edit,
+          where: {
+            field: 'members',
+            operator: '$contains',
+            filters: [{
+              operator: '$and',
+              filters: [
+                { field: 'id', operator: '$eq', value: '$me' },
+                {
+                  field: 'workspaceMembership.role',
+                  operator: '$eq',
+                  value: MembershipRole.Owner,
+                },
+              ],
+            }],
+          },
+        },
+      },
+    },
+    { name: 'User', fields: [] },
+  ],
+  relationships: [{
+    name: 'WorkspaceMembership',
+    between: [
+      { field: 'workspace', target: 'Workspace', inverse: 'members' },
+      { field: 'user', target: 'User', inverse: 'workspaces' },
+    ],
+    fields: [{ field: 'role', type: 'String' }],
+  }],
+  grants: {
+    [WorkspaceCapability.Edit]: { description: 'Edit a workspace' },
+  },
+  roles: {
+    owner: {
+      name: 'Workspace owner',
+      grants: [WorkspaceCapability.Edit],
+    },
+  },
+})
+```
+
+`members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required. The read rule is where-only, so membership itself is the complete row qualifier; the update rule combines an editor capability with the resource-specific Owner role.
+
+Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
+
+```ts
+[Action.Update]: {
+  grant: WorkspaceCapability.Edit,
+  where: {
+    field: 'members',
+    operator: '$contains',
+    filters: [{
+      operator: '$and',
+      filters: [
+        { field: 'id', operator: '$eq', value: '$me' },
+        {
+          field: 'workspaceMembership.role',
+          operator: '$eq',
+          value: MembershipRole.Owner,
+        },
+      ],
+    }],
+  },
+}
+```
+
+The equivalent structured predicate is:
+
+```ts
+{
+  field: 'members',
+  operator: '$contains',
+  filters: [{
+    operator: '$and',
+    filters: [
+      { field: 'id', operator: '$eq', value: '$me' },
+      { field: 'workspaceMembership.role', operator: '$eq', value: MembershipRole.Owner },
+    ],
+  }],
+}
+```
+
+Authorization predicates support existential `$contains` with one or more member requirements, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections, relationship-derived collections, and Entity-owned Collections all work. Nested descendant collections and descendant-only collection-target fields use the same canonical eligibility guards as ordinary queries, including the correct referenced occurrence and missing-field behavior. `$all`, arrays/JSON relationship properties, collection count paths, and cross-collection captures remain rejected because their authorization meaning is ambiguous or not bounded.
+
+### Polymorphic reference authorization
+
+A policy can follow a reference into an abstract target whose descendants do not all expose the same fields. The discriminator applies at the referenced occurrence, and the existing `SECURITY DEFINER` helper carries the validated predicate without adding another authorization language:
+
+```ts
+const graph = new Graph({
+  entities: [
+    { name: 'Document', fields: [{ field: 'code', type: 'String' }] },
+    { extends: 'Document', fields: [], name: 'PublicDocument' },
+    {
+      extends: 'Document',
+      fields: [{ field: 'workspace', target: 'Workspace', type: 'Entity' }],
+      name: 'PrivateDocument',
+    },
+    {
+      name: 'Workspace',
+      fields: [{
+        cardinality: 'Many',
+        field: 'members',
+        inverse: 'workspace',
+        target: 'Member',
+        type: 'Inverse',
+      }],
+    },
+    {
+      name: 'Member',
+      fields: [
+        { field: 'user', target: 'User', type: 'Entity' },
+        { field: 'workspace', inverse: 'members', target: 'Workspace', type: 'Entity' },
+      ],
+    },
+    { name: 'User', fields: [] },
+    {
+      name: 'Section',
+      fields: [
+        { field: 'title', type: 'String' },
+        { field: 'document', target: 'Document', type: 'Entity' },
+      ],
+      security: {
+        [Action.Read]: [
+          { where: "document.entity = 'PublicDocument'" },
+          { where: 'document.workspace.members $contains (user = $me)' },
+        ],
+      },
+    },
+  ],
+})
+```
+
+Public Sections match the first rule. A private Section matches only when the referenced `PrivateDocument` exposes `workspace` and that Workspace contains the current actor. A `PublicDocument` has no `workspace`; its absence is structurally inapplicable, so it cannot satisfy the private rule even under negation or a null comparison. The same path behaves identically in an ordinary Section query and in the compiled policy helper.
+
+### Entity-owned Collections
+
+An explicit Collection declared with `type: 'Collection'` is authorized through the same membership predicates. An Entity-projected Collection compares the target Entity identity. A record-projected Collection compares the relationship row's composite endpoint columns, so it never invents a surrogate record id. Relationship-owned predicates use the lower-cased relationship-name prefix and belong in the same `$contains` requirement as the identity or role, so PostgreSQL evaluates them against the same source edge. The authored `via` filter is applied before the policy's member predicate. Changing a relationship property such as a role or quantity changes access immediately; no policy rebuild is required.
+
+Collection predicates are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. Generated helper DDL chooses a dollar-quote delimiter absent from the complete function body, so authored values containing `$$`, quotes, or SQL-looking text cannot terminate the function literal; schema-time literals are escaped and runtime query values remain bound. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
+
+A resource role such as Owner, Editor, or Viewer is relationship data, not a Graph role. Applications may still enforce domain rules such as preventing removal of the last Owner in ordinary application transactions. Existing direct predicates such as `owner = $me` continue to use the unchanged policy path.
+
+## `$me` is search shorthand
+
+`$me` is available in ordinary entity searches, separate from RLS:
+
+```ts
+const mine = await context.db!.query('Article', {
+  fields: ['id', 'title'],
+  where: 'owner = $me',
+})
+```
+
+Both `owner == $me` and `{ field: 'owner', operator: '$eq', value: '$me' }` compare the stored `owner.id` with the current transaction's `actor.id`. Literal ids, `null`, and `!=` remain ordinary identity comparisons. A filter can voluntarily restrict a user even when RLS allows every row; filters never grant access. Direct SQL remains subject to RLS independently of any application search.
+
+## Request transactions
+
+The server resolves the verified canonical actor once at API dispatch. `RouteContext.identity` is that canonical id (or `null`), and `RouteContext.db` is the request-scoped database capability.
+
+```ts
+server.api([HttpVerb.Get], 'articles', async (_params, context) => {
+  return Response.json(await context.db!.query('Article', {
+    fields: ['id', 'title'],
+  }))
+})
+```
+
+Every ordinary application transaction runs through the native Bun `db.tx` path. Before caller SQL, `db.tx` sets the transaction-local `actor.id` setting with `set_config('actor.id', ..., true)`, including an explicit empty value for anonymous or non-request work. `db.query` uses the same transaction path. Nested savepoints, rollback, concurrent requests, and pooled connection reuse cannot carry the setting beyond the transaction.
+
+`actor.id` is a context setting, not a cryptographically unforgeable principal. The accepted trust boundary is the application transaction/SQL-emission layer: it must use parameterized SQL and must not expose arbitrary untrusted SQL execution. RLS protects ordinary application queries and mistakes in filtering; it does not claim to defend against malicious application-role SQL deliberately overwriting `actor.id`.
+
+## PostgreSQL privilege boundary
+
+With a graph configured, `server.db`, `RouteContext.db`, and request-scoped queries always use the restricted application role (`basis_app` by default). Managed PostgreSQL provisions that role through the owner connection, stores its random password under `.basis/database/`, and closes the privileged provisioning connection afterwards. The owner credential is never exposed through `server.db` or `RouteContext`.
+
+The administrative connection is an internal provisioning capability and is not available to ordinary handlers. The application role must be `NOSUPERUSER`, `NOBYPASSRLS`, and not the table owner. Bootstrap and schema DDL remain trusted administrative operations. RLS is enabled on the root, MTI/relationships, and security metadata; `FORCE ROW LEVEL SECURITY` is applied when provisioning runs with owner privilege.
+
+Graph authorization is guaranteed for Basis-generated operations. Raw SQL operates under the privileges of its database connection and is not automatically constrained to Basis's Graph query semantics.
+
+## Inspection and administration
+
+`server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists the expanded capability/role grants effective for a user, including explicit Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
+
+Identity resolution and enrollment use one narrow system-owned security-definer function. OAuth calls it through the restricted application path; `bootstrap()` invokes the same function through its administrative connection. Request-time enrollment does not require the owner credential. Provider subjects are never treated as canonical entity ids, and revoked bindings fail closed. The administrative connection remains reserved for explicit bootstrap and schema provisioning.
+
+The graph's roles, capabilities, entity/relationship security declarations, RLS policies, schemas, indexes, and security functions are part of the typed physical schema compiled by `Graph.physicalSchema` and planned by `DDL.plan`. See [Schema Inspection & Planning](./schema.mdx).

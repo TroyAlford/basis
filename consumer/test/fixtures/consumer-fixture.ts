@@ -1,0 +1,71 @@
+import { generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from 'basis/codegen'
+import * as serverSurface from 'basis/server'
+import { Action, Graph, Security } from 'basis/server'
+import { tempDirectory, withDatabase } from 'basis/testing'
+import { checksum } from 'basis/utilities'
+import { generateErd } from 'basis/visualization'
+import { expect, test } from 'bun:test'
+import { readFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const graph = new Graph({
+  entities: [{
+    fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],
+    name: 'ConsumerNote',
+    security: { [Action.Read]: Security.Public },
+  }],
+})
+
+test('consumer fixture extends the system User ontology', () => {
+  const application = new Graph({
+    entities: [{ extends: 'User', fields: [], name: 'ApplicationUser' }],
+  })
+  expect(application.definitions.entity('ApplicationUser')).toBeTruthy()
+  expect(application.definitions.entity('User')).toBeTruthy()
+  expect('EntityDefinitions' in serverSurface).toBe(false)
+  expect(checksum('basis')).toHaveLength(64)
+})
+
+test('consumer codegen and visualization surfaces resolve', () => {
+  expect(generateTypes(graph)).toContain('export interface ConsumerNote')
+  expect(generateJSONSchemas(graph).$defs.ConsumerNote).toBeDefined()
+  expect(generateErd(graph)).toContain('ConsumerNote')
+})
+
+test('consumer codegen emitters resolve and write independent outputs', async () => {
+  const directory = tempDirectory('basis-consumer-codegen')
+  try {
+    await Promise.all([
+      TypeScriptEmitter(graph, directory),
+      JsonSchemaEmitter(graph, directory),
+    ])
+    const types = await readFile(join(directory, 'typescript', 'index.ts'), 'utf8')
+    const schemas = JSON.parse(
+      await readFile(join(directory, 'json-schema', 'schemas.json'), 'utf8'),
+    ) as { $defs: { ConsumerNote?: unknown } }
+    expect(types).toContain('export interface ConsumerNote')
+    expect(schemas.$defs.ConsumerNote).toBeDefined()
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
+})
+
+test('consumer fixture uses provided entities', async () => {
+  const id = '00000000-0000-4000-8000-000000000001'
+  await withDatabase('consumer-fixture', null, async database => {
+    expect(await database.query('ConsumerNote', { fields: ['id', 'label'] }))
+      .toEqual([{ id, label: 'isolated' }])
+  }, {
+    graph,
+    setup: async database => {
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, 'Consumer', 'ConsumerNote')
+      `
+      await database.sql`
+        INSERT INTO "ConsumerNote" ("id", "label")
+        VALUES (${id}, 'isolated')
+      `
+    },
+  })
+})

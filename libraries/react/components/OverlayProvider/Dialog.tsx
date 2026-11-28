@@ -337,8 +337,6 @@ function openEditorDialog<C extends EditorClass>(
 export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   static displayName = 'Dialog'
 
-  /** `title`/`content` are Dialog semantics, not native root attributes. */
-  static ownedNativeProps = ['content', 'title']
   static readonly Intent = Intent
 
   /**
@@ -614,8 +612,12 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }
 
   get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.content
+    delete attributes.title
+
     return {
-      ...super.attributes,
+      ...attributes,
       'data-active': this.props.active,
       'data-intent': this.props.intent ?? Dialog.Intent.Default,
       'onKeyDown': this.#handleKeyDown,

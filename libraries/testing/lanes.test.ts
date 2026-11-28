@@ -1,7 +1,8 @@
+import { runAsync } from 'basis/utilities'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tempDirectory } from './temp'
+import { tempDirectory } from './tempDirectory'
 
 /*
  * The custom-suffix lanes are opt-in, so their behavior cannot be exercised by
@@ -29,48 +30,47 @@ interface Lane {
   /** Element expression valid in the fixture's language. */
   element: string,
   /** Extra imports the element needs. */
-  imports: string[],
+  imports: string,
   /** Fixture filename. */
   name: string,
 }
 
 const SCREENSHOT: Lane = {
   element: '<span>lane</span>',
-  imports: [],
+  imports: '',
   name: 'lane.screenshot.tsx',
 }
 
 const E2E: Lane = {
   element: "createElement('span', null, 'lane')",
-  imports: ["import { createElement } from 'react'"],
+  imports: "import { createElement } from 'react'",
   name: 'lane.e2e.ts',
 }
 
 /**
  * Build the shared fixture imports and helpers.
  * @param lane - The lane being generated.
- * @returns Fixture source lines.
+ * @returns Fixture source.
  */
-function preamble(lane: Lane): string[] {
-  return [
-    "import { afterAll, expect } from 'bun:test'",
-    "import { existsSync } from 'node:fs'",
-    "import { join } from 'node:path'",
-    "import type { Locator } from 'playwright'",
-    ...lane.imports,
-    `import { callerFile } from ${JSON.stringify(caller)}`,
-    `import { matchScreenshot, runMatchScreenshot } from ${JSON.stringify(matcher)}`,
-    `import { snapshotDirectory } from ${JSON.stringify(snapshots)}`,
-    `import { currentTestName, fullyRunFiles, test } from ${JSON.stringify(testModule)}`,
-    '',
-    'const HERE = import.meta.path',
-    "const BYTES = Buffer.from('basis-lane-capture')",
-    'const TARGET = {',
-    '  evaluate: async () => undefined,',
-    '  screenshot: async () => BYTES,',
-    '} as unknown as Locator',
-    'const baseline = (stem: string): string => join(snapshotDirectory(HERE), `${stem}.png`)',
-  ]
+function preamble(lane: Lane): string {
+  return `
+import { afterAll, expect } from 'bun:test'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import type { Locator } from 'playwright'
+${lane.imports ? `${lane.imports}\n` : ''}import { callerFile } from ${JSON.stringify(caller)}
+import { matchScreenshot, runMatchScreenshot } from ${JSON.stringify(matcher)}
+import { snapshotDirectory } from ${JSON.stringify(snapshots)}
+import { currentTestName, fullyRunFiles, test } from ${JSON.stringify(testModule)}
+
+const HERE = import.meta.path
+const BYTES = Buffer.from('basis-lane-capture')
+const TARGET = {
+  evaluate: async () => undefined,
+  screenshot: async () => BYTES,
+} as unknown as Locator
+const baseline = (stem: string): string => join(snapshotDirectory(HERE), \`\${stem}.png\`)
+  `.trim()
 }
 
 /**
@@ -79,25 +79,25 @@ function preamble(lane: Lane): string[] {
  * @returns The fixture source.
  */
 function attributionFixture(lane: Lane): string {
-  return [
-    ...preamble(lane),
-    '',
-    "test('captures a locator natively', async () => {",
-    '  expect(callerFile()).toBe(HERE)',
-    "  expect(currentTestName()).toBe('captures a locator natively')",
-    '  await matchScreenshot(TARGET)',
-    "  expect(existsSync(baseline('captures-a-locator-natively-1'))).toBe(true)",
-    '})',
-    '',
-    "test('captures an element natively', async () => {",
-    `  await runMatchScreenshot(${lane.element}, 'element', {}, { capture: async () => BYTES })`,
-    "  expect(existsSync(baseline('captures-an-element-natively-element-1'))).toBe(true)",
-    '})',
-    '',
-    'afterAll(() => {',
-    '  expect(fullyRunFiles()).toContain(HERE)',
-    '})',
-  ].join('\n')
+  return `
+${preamble(lane)}
+
+test('captures a locator natively', async () => {
+  expect(callerFile()).toBe(HERE)
+  expect(currentTestName()).toBe('captures a locator natively')
+  await matchScreenshot(TARGET)
+  expect(existsSync(baseline('captures-a-locator-natively-1'))).toBe(true)
+})
+
+test('captures an element natively', async () => {
+  await runMatchScreenshot(${lane.element}, 'element', {}, { capture: async () => BYTES })
+  expect(existsSync(baseline('captures-an-element-natively-element-1'))).toBe(true)
+})
+
+afterAll(() => {
+  expect(fullyRunFiles()).toContain(HERE)
+})
+  `.trim()
 }
 
 /**
@@ -106,13 +106,13 @@ function attributionFixture(lane: Lane): string {
  * @returns The fixture source.
  */
 function pruneFixture(lane: Lane): string {
-  return [
-    ...preamble(lane),
-    '',
-    "test('keeps the capture', async () => {",
-    '  await matchScreenshot(TARGET)',
-    '})',
-  ].join('\n')
+  return `
+${preamble(lane)}
+
+test('keeps the capture', async () => {
+  await matchScreenshot(TARGET)
+})
+  `.trim()
 }
 
 /**
@@ -121,17 +121,17 @@ function pruneFixture(lane: Lane): string {
  * @returns The fixture source.
  */
 function selectionFixture(lane: Lane): string {
-  return [
-    ...preamble(lane),
-    '',
-    "test('kept capture', async () => {",
-    '  await matchScreenshot(TARGET)',
-    '})',
-    '',
-    "test('filtered capture', async () => {",
-    '  await matchScreenshot(TARGET)',
-    '})',
-  ].join('\n')
+  return `
+${preamble(lane)}
+
+test('kept capture', async () => {
+  await matchScreenshot(TARGET)
+})
+
+test('filtered capture', async () => {
+  await matchScreenshot(TARGET)
+})
+  `.trim()
 }
 
 /**
@@ -140,17 +140,17 @@ function selectionFixture(lane: Lane): string {
  * @returns The fixture source.
  */
 function skipFixture(lane: Lane): string {
-  return [
-    ...preamble(lane),
-    '',
-    "test('kept capture', async () => {",
-    '  await matchScreenshot(TARGET)',
-    '})',
-    '',
-    "test.skip('skipped capture', async () => {",
-    '  await matchScreenshot(TARGET)',
-    '})',
-  ].join('\n')
+  return `
+${preamble(lane)}
+
+test('kept capture', async () => {
+  await matchScreenshot(TARGET)
+})
+
+test.skip('skipped capture', async () => {
+  await matchScreenshot(TARGET)
+})
+  `.trim()
 }
 
 /**
@@ -159,17 +159,17 @@ function skipFixture(lane: Lane): string {
  * @returns The fixture source.
  */
 function captureFailureFixture(lane: Lane): string {
-  return [
-    ...preamble(lane),
-    '',
-    "test('failed capture', async () => {",
-    '  const failing = {',
-    '    evaluate: async () => undefined,',
-    "    screenshot: async () => { throw new Error('capture failed') },",
-    '  } as unknown as Locator',
-    '  await matchScreenshot(failing)',
-    '})',
-  ].join('\n')
+  return `
+${preamble(lane)}
+
+test('failed capture', async () => {
+  const failing = {
+    evaluate: async () => undefined,
+    screenshot: async () => { throw new Error('capture failed') },
+  } as unknown as Locator
+  await matchScreenshot(failing)
+})
+  `.trim()
 }
 
 /**
@@ -206,17 +206,11 @@ async function run(
   args: string[],
   env: Record<string, string> = {},
 ): Promise<{ code: number, output: string }> {
-  const proc = Bun.spawn([process.execPath, 'test', ...args], {
+  const result = await runAsync(process.execPath, ['test', ...args], {
     cwd: directory,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
+    env,
   })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  return { code: await proc.exited, output: `${stdout}\n${stderr}` }
+  return { code: result.exitCode, output: `${result.stdout}\n${result.stderr}` }
 }
 
 /**

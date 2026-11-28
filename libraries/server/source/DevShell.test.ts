@@ -2,7 +2,7 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
-import { devShellDirectory, renderDevShell, writeDevShell } from './DevShell'
+import { devShellDirectory, renderDevShell, VENDOR_MARKER, writeDevShell, writeHydrationEntry } from './DevShell'
 
 const shellDir = '/tmp/basis-shell'
 
@@ -36,6 +36,17 @@ describe('renderDevShell', () => {
     expect(html).toContain('src="./entry.ts"')
   })
 
+  test('exposes a marker for server-injected vendor scripts before module entrypoints', () => {
+    const html = renderDevShell({
+      directory: shellDir,
+      entrypoints: ['/srv/app/index.tsx'],
+      title: 't',
+    })
+
+    expect(html).toContain(VENDOR_MARKER)
+    expect(html.indexOf(VENDOR_MARKER)).toBeLessThan(html.indexOf('type="module"'))
+  })
+
   test('never emits a bare filesystem separator in a URL', () => {
     const html = renderDevShell({ directory: shellDir, entrypoints: ['/srv/app/index.tsx'], title: 't' })
 
@@ -56,6 +67,45 @@ describe('writeDevShell', () => {
       expect(relative(dir, file)).toBe('index.html')
       expect(html).toContain('<title>Written</title>')
       expect(html).toContain('src="./entry.ts"')
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  })
+})
+
+describe('writeHydrationEntry', () => {
+  test('starts the release monitor only when requested', async () => {
+    const dir = tempDirectory('basis-hydration-monitor')
+
+    try {
+      const main = join(dir, 'Application.tsx')
+      await Bun.write(main, 'export const Application = null')
+      const file = writeHydrationEntry({
+        directory: join(dir, '.basis'),
+        mainPath: main,
+        monitorRelease: true,
+      })
+      const source = await Bun.file(file).text()
+
+      expect(source).toContain('readBasisRuntime, startReleaseMonitor')
+      expect(source).toContain('startReleaseMonitor({ loadedVersion })')
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  })
+
+  test('attaches the root renderer for production HMR', async () => {
+    const dir = tempDirectory('basis-hydration-entry')
+
+    try {
+      const main = join(dir, 'Application.tsx')
+      await Bun.write(main, 'export const Application = null')
+      const file = writeHydrationEntry({ directory: join(dir, '.basis'), mainPath: main })
+      const source = await Bun.file(file).text()
+
+      expect(source).toContain("import { attachRoot } from 'basis/react/hmr'")
+      expect(source).toContain('if (import.meta.hot) attachRoot(() => root.render(application()))')
+      expect(source).toContain('hydrateRoot(rootElement, application())')
     } finally {
       await rm(dir, { force: true, recursive: true })
     }

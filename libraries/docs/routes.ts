@@ -15,7 +15,12 @@ import LoggingDoc from '../../docs/logging.mdx'
 import OAuthDoc from '../../docs/oauth.mdx'
 import ReferenceDoc from '../../docs/reference.mdx'
 import ReviewDoc from '../../docs/review.mdx'
+import AuthoringDoc from '../../docs/server/authoring.mdx'
+import AuthorizationDoc from '../../docs/server/authorization.mdx'
+import DatabaseDoc from '../../docs/server/database.mdx'
 import ServerDoc from '../../docs/server/index.mdx'
+import QueryLanguageDoc from '../../docs/server/query-language.mdx'
+import SchemaDoc from '../../docs/server/schema.mdx'
 import TestingDoc from '../../docs/testing.md'
 import TypeScriptDoc from '../../docs/typescript.mdx'
 import UtilitiesDoc from '../../docs/utilities.mdx'
@@ -169,6 +174,41 @@ export const routes = [
     parent: 'section:server',
     path: '/server',
     title: 'Server',
+  }),
+  docs({
+    component: DatabaseDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/database',
+    title: 'Database & Transactions',
+  }),
+  docs({
+    component: AuthorizationDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/authorization',
+    title: 'Authorization & Row-Level Security',
+  }),
+  docs({
+    component: AuthoringDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/authoring',
+    title: 'Typed Authoring & Generated Products',
+  }),
+  docs({
+    component: SchemaDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/schema',
+    title: 'Schema Inspection & Planning',
+  }),
+  docs({
+    component: QueryLanguageDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/query-language',
+    title: 'Query Language',
   }),
   docs({
     component: ConfigurationDoc,

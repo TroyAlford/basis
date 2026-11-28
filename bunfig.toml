@@ -9,7 +9,6 @@ preload = [
 plugins = ["./libraries/bun-plugins/serve.ts"]
 
 [test]
-coverage = true
 coverageReporter = ["lcov"]
 coverageSkipTestFiles = true
 preload = [

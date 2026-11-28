@@ -249,11 +249,15 @@ export const DARK_THEME = {
 export class Theme extends Component<Props> {
   static displayName = 'Theme'
 
-  /** `color` is the Theme palette, not a native `color` attribute. */
-  static ownedNativeProps = ['color']
   static defaultProps: Component<Props>['props'] = {
     ...Component.defaultProps,
     ...DEFAULT_THEME,
+  }
+
+  override get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.color
+    return attributes
   }
 
   componentDidMount(): void { this.injectStyles() }
@@ -264,7 +268,10 @@ export class Theme extends Component<Props> {
     style(`basis:theme:${themeName}`, themeStyles(this.props))
   }
 
-  override render = (): React.ReactNode => null
+  override render = (): React.ReactNode => {
+    this.injectStyles()
+    return null
+  }
 }
 
 // Derived from the defaults so a new theme category is picked up automatically.
@@ -400,27 +407,27 @@ export function themeStyles(props: Props = {}): string {
   if (name) {
     const theme = merge<Props>(DEFAULT_THEME, props)
     const color = theme.color ?? DEFAULT_THEME.color
-    return [
-      `:root [data-theme="${props.name}"] {`,
-      `  color-scheme: ${colorSchemeFor(color.background ?? DEFAULT_THEME.color.background)};`,
-      `  ${themeVariables(theme).join('\n  ')}`,
-      '}',
-    ].join('\n')
+    return `
+:root [data-theme="${props.name}"] {
+  color-scheme: ${colorSchemeFor(color.background ?? DEFAULT_THEME.color.background)};
+  ${themeVariables(theme).join('\n  ')}
+}
+    `.trim()
   }
 
   const light = merge<Props>(DEFAULT_THEME, props)
   const dark = { ...DARK_THEME.color, ...explicitColorOverrides(props) }
 
-  return [
-    ':root {',
-    `  color-scheme: ${colorSchemeFor(light.color?.background ?? DEFAULT_THEME.color.background)};`,
-    `  ${themeVariables(light).join('\n  ')}`,
-    '}',
-    '@media (prefers-color-scheme: dark) {',
-    '  :root {',
-    '    color-scheme: dark;',
-    `    ${colorVariables(dark).join('\n    ')}`,
-    '  }',
-    '}',
-  ].join('\n')
+  return `
+:root {
+  color-scheme: ${colorSchemeFor(light.color?.background ?? DEFAULT_THEME.color.background)};
+  ${themeVariables(light).join('\n  ')}
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    ${colorVariables(dark).join('\n    ')}
+  }
+}
+  `.trim()
 }

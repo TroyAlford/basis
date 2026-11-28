@@ -2,6 +2,7 @@
 import eslint from '@eslint/js'
 import type { ESLint, Linter } from 'eslint'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
+import * as jsoncParser from 'jsonc-eslint-parser'
 import { IGNORE_PATTERNS } from './ignores'
 import { plugins } from './plugins'
 import { TYPESCRIPT_FILES, TYPESCRIPT_RULES } from './rules/typescript'
@@ -22,6 +23,13 @@ interface PluginOptions {
 const plugin = (options: PluginOptions): Linter.Config => {
   const { files, rules } = options
   const config: Linter.Config = {
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+    },
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
     plugins: {
       ...plugins,
     },
@@ -73,6 +81,14 @@ const TYPESCRIPT_CONFIG: Linter.Config = {
   rules: { ...TYPESCRIPT_RULES, ...TYPESCRIPT_POLICY } as unknown as Linter.Config['rules'],
 }
 
+/** Disable every plugin rule for JSON documents except the entity rule. */
+const JSON_RULES = Object.fromEntries(
+  Object.entries(plugins).flatMap(([namespace, value]) => (
+    Object.keys((value as { rules?: Record<string, unknown> }).rules ?? {})
+      .map(rule => [`${namespace}/${rule}`, 'off'])
+  )),
+)
+
 export default [
   { ignores: IGNORE_PATTERNS },
   eslint.configs.recommended,
@@ -80,7 +96,6 @@ export default [
   TYPESCRIPT_CONFIG,
   plugin({
     rules: {
-      '@basis/component-architecture': 'error',
       '@basis/eol-last': ['error', 'always'],
       '@basis/function-paren-newline': ['error', 'multiline-arguments'],
       '@basis/import-extensions': 'error',
@@ -109,6 +124,10 @@ export default [
       }],
       '@basis/sort-keys': 'error',
       '@basis/sort-string-enum': 'error',
+      '@basis/sql-identifier-style': 'warn',
+      '@basis/sql-template-format': 'error',
+      '@basis/sql-template-valid': 'warn',
+      '@basis/transaction-sql-name': 'error',
       '@import-newlines/enforce': ['error', { items: Infinity, semi: false }],
       '@stylistic/array-bracket-newline': ['error', 'consistent'],
       '@stylistic/array-bracket-spacing': ['error', 'never'],
@@ -277,6 +296,21 @@ export default [
     },
   }),
   plugin({
+    files: [
+      '**/graph.ts',
+      '**/graph.tsx',
+      '**/graph.js',
+      '**/graph.mjs',
+      '**/emitters/**/*.ts',
+      '**/emitters/**/*.tsx',
+      '**/emitters/**/*.js',
+      '**/emitters/**/*.mjs',
+    ],
+    rules: {
+      '@basis/no-default-export': 'off',
+    },
+  }),
+  plugin({
     files: ['*.test.ts', '*.test.tsx'],
     rules: {
       'dot-notation': 'off',
@@ -294,4 +328,13 @@ export default [
       '@stylistic/max-len': 'off',
     },
   }),
+  {
+    files: ['**/*.entities.json'],
+    languageOptions: { parser: jsoncParser },
+    plugins,
+    rules: {
+      ...JSON_RULES,
+      '@basis/entity-definition-format': 'error',
+    },
+  },
 ] as ESLint.ConfigData

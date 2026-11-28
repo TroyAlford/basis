@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto'
+import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { get } from 'node:http'
-import { resolve as resolvePath } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
 import type { Page } from 'playwright'
 import type { Viewport } from './browser'
 import { withPage } from './browser'
@@ -10,12 +12,20 @@ import { installNetwork } from './network'
 export interface StartApplicationOptions {
   /** Working directory for the server process. Defaults to `process.cwd()`. */
   cwd?: string,
+  /** Run the development server so Bun owns HMR. Defaults to `false`. */
+  development?: boolean,
   /** Path to the server entry module, relative to `cwd`. */
   entry: string,
   /** Extra environment for the server process. */
   env?: Record<string, string>,
   /** HTTP path polled for readiness. Defaults to `/api/health`. */
   readyPath?: string,
+  /**
+   * Decide whether a probed HTTP status means the application is ready.
+   * Defaults to any 2xx or 3xx response. Error-state fixtures can accept a
+   * known 5xx readiness response without bypassing the fixture lifecycle.
+   */
+  readyStatus?: (status: number) => boolean,
   /** Readiness timeout in milliseconds. Defaults to `30000`. */
   timeoutMs?: number,
 }
@@ -33,8 +43,8 @@ export type VisitCallback<T> = (page: Page) => Promise<T> | T
 
 /** A running application under test. */
 export interface ApplicationHandle {
-  /** Stop the application; idempotent. */
-  stop: () => Promise<void>,
+  /** Stop the application and return its child exit code; idempotent. */
+  stop: () => Promise<number>,
   /** The base URL of the running application. */
   url: string,
   /**
@@ -49,19 +59,80 @@ export interface ApplicationHandle {
   },
 }
 
+/** A reserved loopback port that must be released when its server stops. */
+export interface PortReservation {
+  /** The reserved port. */
+  port: number,
+  /** Release the reservation. */
+  release: () => void,
+}
+
+/** Directory containing cross-process port reservations for this test host. */
+const portLocks = join(process.cwd(), '.basis', 'test-ports')
+
 /**
- * Reserve a free loopback port by binding to port 0 and releasing it.
- * @returns The reserved port.
+ * Whether a lock belongs to a process that has already exited.
+ * @param file - The lock file.
+ * @returns Whether the lock is stale.
  */
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({
-    fetch: () => new Response(null, { status: 204 }),
-    hostname: '127.0.0.1',
-    port: 0,
-  })
-  const { port } = probe
-  probe.stop(true)
-  return port
+function stalePortLock(file: string): boolean {
+  let pid: number
+  try {
+    pid = Number(readFileSync(file, 'utf8'))
+  } catch {
+    return true
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return true
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
+}
+
+/**
+ * Reserve a free loopback port across test processes.
+ * @returns The port and its release callback.
+ */
+export function reservePort(): PortReservation {
+  mkdirSync(portLocks, { recursive: true })
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const probe = Bun.serve({
+      fetch: () => new Response(null, { status: 204 }),
+      hostname: '127.0.0.1',
+      port: 0,
+    })
+    const { port } = probe
+    probe.stop(true)
+    const lock = join(portLocks, `${port}.lock`)
+    try {
+      const descriptor = openSync(lock, 'wx')
+      writeFileSync(descriptor, String(process.pid))
+      closeSync(descriptor)
+      return {
+        port,
+        release: () => {
+          try {
+            unlinkSync(lock)
+          } catch {
+            // Another owner may already have removed a stale lock.
+          }
+        },
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST') throw error
+      if (stalePortLock(lock)) {
+        try {
+          unlinkSync(lock)
+        } catch {
+          // A concurrent process won the stale-lock cleanup race.
+        }
+      }
+    }
+  }
+  throw new Error('unable to reserve a free loopback port')
 }
 
 /**
@@ -85,15 +156,21 @@ function httpStatus(url: string): Promise<number> {
  * @param url - URL to poll.
  * @param timeoutMs - Readiness timeout.
  * @param output - Captured process output, included in the failure message.
+ * @param ready - Predicate for an acceptable readiness status.
  */
-async function waitForReady(url: string, timeoutMs: number, output: () => string): Promise<void> {
+async function waitForReady(
+  url: string,
+  timeoutMs: number,
+  output: () => string,
+  ready: (status: number) => boolean,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
   let lastError = 'no response'
 
   while (Date.now() < deadline) {
     try {
       const status = await httpStatus(url)
-      if (status >= 200 && status < 400) return
+      if (ready(status)) return
       lastError = `HTTP ${status}`
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error)
@@ -121,15 +198,46 @@ async function waitForReady(url: string, timeoutMs: number, output: () => string
 export async function startApplication(
   options: StartApplicationOptions,
 ): Promise<ApplicationHandle> {
-  const { cwd = process.cwd(), entry, env = {}, readyPath = '/api/health', timeoutMs = 30_000 } = options
-  const port = await freePort()
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await startApplicationOnce(options)
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      if (!message.includes('exited before ready')) throw error
+      await Bun.sleep(50)
+    }
+  }
+  throw lastError
+}
+
+/**
+ * Boot one application attempt.
+ * @param options - Startup options.
+ * @returns A handle with the base URL, an idempotent stop, and `visit`.
+ */
+async function startApplicationOnce(
+  options: StartApplicationOptions,
+): Promise<ApplicationHandle> {
+  const {
+    cwd = process.cwd(),
+    development = false,
+    entry,
+    env = {},
+    readyPath = '/api/health',
+    readyStatus = status => status >= 200 && status < 400,
+    timeoutMs = 30_000,
+  } = options
+  const reservation = reservePort()
+  const { port } = reservation
   const proc = Bun.spawn([process.execPath, entry], {
     cwd,
     env: {
       ...process.env,
       ...env,
       HOST: '127.0.0.1',
-      NODE_ENV: env.NODE_ENV ?? 'production',
+      NODE_ENV: env.NODE_ENV ?? (development ? 'development' : 'production'),
       PORT: String(port),
     },
     stderr: 'pipe',
@@ -145,22 +253,60 @@ export async function startApplication(
   void drain(proc.stderr)
 
   const url = `http://127.0.0.1:${port}`
-  let stopped = false
-  const stop = async (): Promise<void> => {
-    if (stopped) return
-    stopped = true
+  let exitCode: number | null = null
+  let exit: Promise<number> | null = null
+  const exited = proc.exited.then(code => {
+    exitCode = code
+    return code
+  })
+  const stop = async (): Promise<number> => {
+    if (exit) return exit
     proc.kill()
-    await proc.exited
+    exit = exited
+    const code = await exit
+    reservation.release()
+    return code
   }
 
   try {
-    await waitForReady(`${url}${readyPath}`, timeoutMs, () => output)
+    const ready = waitForReady(`${url}${readyPath}`, timeoutMs, () => output, readyStatus)
+    void ready.catch(() => undefined)
+    await Promise.race([
+      ready,
+      exited.then(code => {
+        throw new Error(
+          `startApplication: ${url} exited before ready (code ${code})` +
+            (output.trim() ? `\n--- server output ---\n${output.trim()}` : ''),
+        )
+      }),
+    ])
+    /*
+     * A different process can win the free port after the probe releases it.
+     * If this child lost that race it exits immediately; retry with a new port
+     * instead of handing the caller a dead URL.
+     */
+    await Bun.sleep(20)
+    if (exitCode !== null) {
+      throw new Error(
+        `startApplication: ${url} exited before ready (code ${exitCode})` +
+          (output.trim() ? `\n--- server output ---\n${output.trim()}` : ''),
+      )
+    }
   } catch (error) {
     await stop()
     throw error
   }
 
-  const visit = async <T>(
+  return { stop, url, visit: createVisit(url) }
+}
+
+/**
+ * Build the deterministic page visitor for one running application.
+ * @param url - Base application URL.
+ * @returns The visit function.
+ */
+function createVisit(url: string): ApplicationHandle['visit'] {
+  return async <T>(
     path: string,
     optionsOrFn: VisitOptions | VisitCallback<T>,
     maybeFn?: VisitCallback<T>,
@@ -175,33 +321,64 @@ export async function startApplication(
       return await callback(page)
     }, { viewport: visitOptions.viewport })
   }
+}
 
-  return { stop, url, visit }
+/** The normalized identity of one application fixture. */
+interface ApplicationIdentity {
+  /** Resolved application working directory. */
+  readonly cwd: string,
+  /** Effective server development mode. */
+  readonly development: boolean,
+  /** Resolved application entry. */
+  readonly entry: string,
+  /** Effective child environment. */
+  readonly env: Readonly<Record<string, string>>,
+}
+
+/**
+ * Build the normalized identity for one application.
+ * @param options - Startup options.
+ * @param cwd - Resolved working directory.
+ * @param entry - Resolved entry.
+ * @returns The normalized identity.
+ */
+function applicationIdentity(
+  options: StartApplicationOptions,
+  cwd: string,
+  entry: string,
+): ApplicationIdentity {
+  return {
+    cwd,
+    development: options.development ?? false,
+    entry,
+    env: options.env ?? {},
+  }
+}
+
+/**
+ * Hash one normalized application identity.
+ * @param identity - Normalized identity.
+ * @returns A stable key.
+ */
+function applicationIdentityKey(identity: ApplicationIdentity): string {
+  return createHash('sha256').update(JSON.stringify(identity)).digest('hex')
 }
 
 /*
- * Run-scoped fixture.
+ * Run-scoped application fixture.
  *
- * `startApplication` is the low-level primitive: every call boots a server.
- * `useApplication` is the supported test entry point. It memoises one handle per
- * (cwd, entry) for the whole Bun test process — the registry lives on
- * `globalThis`, which survives Bun's per-file module registry — so the first
- * caller boots and every later caller, concurrent or not, awaits the same
- * promise. Teardown is registered once by the testing preload
- * (`libraries/testing/bun.ts`), so no test file needs `afterAll` or `finally`.
- *
- * Isolation contract: the browser side stays deterministic (`visit` opens a
- * fresh context with stubbed network and a per-visit `init`), but server-side
- * state is shared across the run. A test that needs a clean server must boot its
- * own through {@link startApplication}.
+ * `startApplication` is the low-level primitive. `useApplication` memoises one
+ * handle per application identity for the whole Bun test process; the testing
+ * preload stops every handle at teardown, including after failures and
+ * `SIGINT`/`SIGTERM`. No application server outlives the run.
  */
 
 /** The `globalThis` property that holds the process-wide application registry. */
 const REGISTRY_PROPERTY = '__basisTestingApplications'
 
-/** The process-wide run-scoped application registry. */
+/** The process-local application registry. */
 interface ApplicationRegistry {
-  /** Handles being booted or already running, keyed by resolved working directory and entry. */
+  /** Handles being booted or already running, keyed by application identity. */
   handles: Map<string, Promise<ApplicationHandle>>,
   /** Whether teardown has run; guards the idempotent stop and post-stop boots. */
   stopped: boolean,
@@ -222,21 +399,18 @@ function registry(): ApplicationRegistry {
 }
 
 /**
- * Boot the application once for the whole test run, or return the handle the
- * first caller booted.
+ * Boot one application for this test run.
  *
- * Use this in tests instead of {@link startApplication}: every file in the run
- * shares one server, which the testing preload stops once when the run ends.
- * {@link startApplication} remains available when a test needs a dedicated
- * server of its own.
+ * Every test file in the run shares the process-local handle; the testing
+ * preload stops it at teardown, including after failures and `SIGINT`/`SIGTERM`.
  *
- * The identity is the **resolved** `(cwd, entry)`, so `entry: './serve.ts'`,
- * `cwd: '.', entry: 'serve.ts'`, and an absolute entry all address one app.
+ * The identity is the **resolved** `(cwd, entry)` plus the environment and
+ * development mode, so equivalent entry spellings address one application.
  * @param options - Startup options; `cwd` and `entry` identify the application.
  * @returns The shared application handle.
- * @throws {Error} When called after the run-scoped applications have been
- *   stopped, so a post-teardown caller can never create a server the preload
- *   will not own.
+ * @throws {Error} When called after the process-local applications have been
+ *   stopped, so a post-teardown caller cannot create a server the preload will
+ *   not own.
  */
 export async function useApplication(
   options: StartApplicationOptions,
@@ -244,16 +418,36 @@ export async function useApplication(
   const { handles, stopped } = registry()
   if (stopped) {
     throw new Error(
-      'useApplication cannot boot after the run-scoped applications were stopped',
+      'useApplication cannot boot after the process-local applications were stopped',
     )
   }
 
   const cwd = resolvePath(options.cwd ?? process.cwd())
-  const key = `${cwd}\u0000${resolvePath(cwd, options.entry)}`
+  const entry = resolvePath(cwd, options.entry)
+  const identity = applicationIdentity(options, cwd, entry)
+  const key = applicationIdentityKey(identity)
   const existing = handles.get(key)
   if (existing) return await existing
 
-  const booting = startApplication(options)
+  const booting = startApplication({
+    ...options,
+    cwd,
+    development: identity.development,
+    entry,
+  }).then(handle => {
+    const stop = handle.stop
+    handle.stop = async () => {
+      const code = await stop()
+      /*
+       * A stopped handle must not satisfy a later useApplication call. Test
+       * files commonly share one application identity and can stop it before
+       * another file asks for it in the same process.
+       */
+      if (handles.get(key) === booting) handles.delete(key)
+      return code
+    }
+    return handle
+  })
   handles.set(key, booting)
 
   try {
@@ -265,21 +459,15 @@ export async function useApplication(
 }
 
 /**
- * Stop every run-scoped application. Idempotent, so a normal end-of-run
- * teardown and an interruption handler cannot double-stop.
- *
- * Internal lifecycle primitive: the testing preload owns teardown, and the
- * lifecycle tests drive it directly. It is deliberately **not** re-exported from
- * `basis/testing`, so the only documented consumer path is
- * {@link useApplication}. Once stopped, {@link useApplication} rejects rather
- * than boot a server the preload would never own.
+ * Stop every process-local application. Idempotent, so normal end-of-run
+ * teardown and interruption handlers cannot double-stop.
  */
 export async function stopApplications(): Promise<void> {
-  const { handles, stopped } = registry()
-  if (stopped) return
-  registry().stopped = true
+  const scope = registry()
+  if (scope.stopped) return
+  scope.stopped = true
 
-  const pending = [...handles.values()]
-  handles.clear()
+  const pending = [...scope.handles.values()]
+  scope.handles.clear()
   await Promise.allSettled(pending.map(handle => handle.then(app => app.stop(), () => undefined)))
 }

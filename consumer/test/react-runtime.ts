@@ -1,7 +1,7 @@
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findInstalledInstances } from '../patches/install'
-import { assert, assertDoctorOk, assertNoBasisRuntimeHacks, assertNodeFree, initReactApp, makeTempDir, makeToolPath, run } from './harness'
+import { assert, assertDoctorOk, assertNoBasisRuntimeHacks, assertNodeFree, initReactApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
 
 /** A running external consumer server. */
 interface ConsumerServer {
@@ -122,6 +122,51 @@ const main = async (): Promise<void> => {
     assertNoBasisRuntimeHacks(app)
 
     /*
+     * The documented consumer toolchain is the same mise npm configuration as
+     * the Basis repository. Install it into a disposable data directory and
+     * use the resulting runtime for the external application.
+     */
+    writeFileSync(join(app, 'mise.toml'), readFileSync(join(repoRoot, 'mise.toml'), 'utf8'))
+    const mise = Bun.which('mise')
+    if (mise === null) throw new Error('mise is required for the consumer toolchain proof')
+    const miseEnv = {
+      ...process.env,
+      MISE_DATA_DIR: join(workspace, 'mise-data'),
+      MISE_YES: '1',
+    }
+    run([mise, 'trust'], app, miseEnv)
+    run([mise, 'install'], app, miseEnv)
+    assert(run([mise, 'exec', '--', 'bun', '--version'], app, miseEnv).trim() === '1.4.6', 'mise installed Bun 1.4.6')
+    assert(
+      run([mise, 'exec', '--', 'bun', '--revision'], app, miseEnv).trim() === '1.4.6-canary.1+b15f51302',
+      'mise installed the approved Bun revision',
+    )
+    assert(
+      run([mise, 'exec', '--', 'bun', 'src/runtime.tsx'], app, miseEnv).includes('runtime-ok'),
+      'external consumer executes under the documented toolchain',
+    )
+
+    /*
+     * The external server gate must reject a known-incompatible stable runtime
+     * with the required version and installation guidance.
+     */
+    run([mise, 'install', 'bun@1.4.5'], app, miseEnv)
+    assert(
+      run([mise, 'exec', 'bun@1.4.5', '--', 'bun', '--version'], app, miseEnv).trim() === '1.4.5',
+      'the incompatible runtime fixture is Bun 1.4.5',
+    )
+    const incompatible = runAllowFailure([mise, 'exec', 'bun@1.4.5', '--', 'bun', 'src/server.ts'], app, miseEnv)
+    assert(incompatible.exitCode !== 0, 'incompatible Bun fails the external server')
+    assert(
+      `${incompatible.stdout}${incompatible.stderr}`.includes('Basis Server requires Bun >= 1.4.6'),
+      'incompatible Bun reports the required server runtime',
+    )
+    assert(
+      `${incompatible.stdout}${incompatible.stderr}`.includes('bun@1.4.5-canary.20261121.1'),
+      'incompatible Bun reports the approved installation',
+    )
+
+    /*
      * One documented React contract. Because the app declares the same React
      * range as Basis, a real React consumer must deduplicate with Basis into a
      * single runtime instead of installing a copy per package.
@@ -157,12 +202,9 @@ const main = async (): Promise<void> => {
     assert(health.version === 'consumer-version', 'managed /api/health reports the release version')
 
     const html = await fetch(base).then(response => response.text())
-    assert(html.includes('/scripts/index.js'), 'managed server serves the SPA shell')
-    assert(
-      !html.includes('/modules/') && !html.includes('hmr.js'),
-      'production omits development machinery',
-    )
-    assert((await fetch(`${base}/scripts/index.js`)).status === 200, 'managed server serves the built entrypoint')
+    assert(html.includes('/_bun/'), 'managed server serves the HMR shell')
+    assert(html.includes('id="basis-bootstrap"'), 'managed server embeds the SSR bootstrap')
+    assert(html.includes('Hello'), 'managed server renders the application')
     assert(await server.stop() === 0, 'managed server shuts down cleanly')
 
     process.stdout.write(`[basis] consumer react runtime: ok (${workspace})\n`)

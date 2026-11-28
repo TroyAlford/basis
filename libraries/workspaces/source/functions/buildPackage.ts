@@ -1,4 +1,5 @@
 /* eslint-disable consistent-return, no-console */
+import { runAsync } from 'basis/utilities'
 import type { BuildConfig as BunBuildConfig } from 'bun'
 import chalk from 'chalk'
 import { resolve } from 'path'
@@ -64,14 +65,14 @@ export async function buildPackage(options: BuildOptions) {
     }
 
     console.log(`Using package build script for ${name}...`)
-    const process = Bun.spawn(['bun', 'run', 'build'], {
+    const build = await runAsync('bun', ['run', 'build'], {
       cwd: packagePath,
       env: { ...Bun.env, VERSION: version },
-      stderr: 'inherit',
-      stdout: 'inherit',
     })
+    if (build.stdout !== '') process.stdout.write(build.stdout)
+    if (build.stderr !== '') process.stderr.write(build.stderr)
 
-    const success = await process.exited === 0
+    const success = build.exitCode === 0
     if (!success) {
       throw new Error(`Package build script failed for ${name}`)
     }

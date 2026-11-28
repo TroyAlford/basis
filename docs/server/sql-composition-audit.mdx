@@ -1,0 +1,41 @@
+---
+title: SQL Composition Audit
+---
+
+# SQL Composition Audit
+
+Status: structured SQL composition implemented. The compiled-query API remains inspectable: `compileEntityQuery()` returns `{ sql, values }`.
+
+## Bun API verification
+
+Verified against the installed Bun 1.4.4 runtime and PostgreSQL:
+
+- Tagged templates support nested query fragments.
+- Fragments compose across SQL clients when nested in a tagged template.
+- `sql(identifier)` quotes dynamic identifiers; Graph metadata supplies the identifiers.
+- Values containing `$1` or `?` remain bound values.
+- `SQL.Query` is lazy and has no public API that returns its SQL text and parameter list before execution. Result metadata exposes `statement.string` only after execution.
+
+## Removed
+
+- Policy expression placeholder substitution in `Graph.inline()`.
+- `WHERE` stripping with `replace(/^WHERE…/)` in Graph policies, polymorphic compilation, and collection predicate compilation.
+- Graph policy predicates now use a literal binder directly; collection predicates retain a bare expression.
+
+## Structured composition
+
+SQL construction now uses ordered pieces:
+
+- A literal piece is a string.
+- A parameter piece is an object containing one value.
+- Nested fragments splat their pieces in place; ordinary objects and arrays are bound values.
+- Combining fragments concatenates pieces and values in source order.
+- `compilePieces` walks the pieces once and assigns `$1`, `$2`, … in final SQL order.
+
+No regex, placeholder scanner, or placeholder renumbering remains in SQL construction. The final `{ sql, values }` pair is still passed to `sql.unsafe(sql, values)`.
+
+## Verification
+
+- Unit suite: 2,123 pass, 50 skip, 0 fail.
+- Database lane: 92 pass, 0 fail.
+- Authorization and explicit-collection PostgreSQL suites: 35 pass, 0 fail.

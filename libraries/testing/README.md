@@ -17,30 +17,34 @@ It registers happy-dom, every matcher, and the shared browser lifecycle. A plain
 
 A test file's suffix selects its lane. Bun's default discovery runs only `.test` and `.spec`, so cheap model, DOM, and mounted-component tests stay in the fast command; screenshot and end-to-end lanes stay opt-in. Basis recognizes every lane for caller attribution, test registration, and snapshot pruning — it does not make an expensive lane a default test.
 
-| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ------------------ |
-| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `bun test`         |
-| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual contracts via `matchScreenshot`; no application mount                        | No                  | `test:screenshots` |
-| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`         |
+| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ----------------- |
+| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `test:unit`       |
+| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual contracts via `matchScreenshot`; no application mount                        | No                  | `test:unit`       |
+| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`        |
 
 The consumer scripts follow the same shape:
 
 ```json
 {
   "scripts": {
-    "test": "bun test",
-    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
-    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+    "test": "bun run test:unit",
+    "test:unit": "bun test --parallel <all *.test.* and *.screenshot.* files>",
+    "test:database": "bun test --concurrent --max-concurrency=8 <database e2e files>",
+    "test:e2e": "bun test <browser e2e files>",
+    "test:lifecycle": "bun test --parallel=2 --concurrent <fixture and recovery proofs>",
+    "test:runtime-lifecycle": "bun test <snapshot runtime lifecycle proof>",
+    "test:recovery": "bun test <destructive database proofs>",
+    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:runtime-lifecycle && bun run test:recovery"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. Basis CI runs four test jobs in parallel: unit/screenshots, one seeded database, browser e2e, and lifecycle. The destructive database recovery proofs remain available through `test:recovery` on demand rather than in the required feedback path. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Visual snapshots assert appearance; mounted component tests assert behavior; end-to-end journeys validate actual browser and integration boundaries.
 
-Visual snapshots capture Chromium inside Docker. Install Docker and make sure the daemon is running before `test:screenshots` or `test:e2e`; the snapshot runtime starts one pinned `mcr.microsoft.com/playwright` container and never launches a host browser.
+Visual snapshots capture Chromium inside Docker. Install Docker and make sure the daemon is running before `test:unit` or `test:e2e`; the snapshot runtime starts one pinned `mcr.microsoft.com/playwright` container and never launches a host browser.
 
 ## Temp directories
 
@@ -66,6 +70,20 @@ const { find, instance, node } = await render(<Button>Save</Button>)
 
 `render`, `Simulate`, and `waitFor` are available from `basis/testing`.
 
+## Formatted indented text
+
+`toMatchIndented` compares two blocks after removing each block's common baseline indentation. It normalizes CRLF, ignores leading and trailing blank lines, trims trailing whitespace, and preserves relative indentation and internal spacing. It is a general text comparator, not a SQL parser. The `basis/testing/bun` preload registers it:
+
+```ts
+const rendered = ['SELECT id', 'FROM widgets'].join('\n')
+expect(rendered).toMatchIndented(`
+  SELECT id
+  FROM widgets
+`)
+```
+
+Use whole-string assertions with this matcher instead of checking fragments, so the expected block stays readable while the comparison remains exact.
+
 ## Visual snapshots
 
 ```tsx
@@ -78,11 +96,11 @@ test('renders a button', async () => {
 })
 ```
 
-Visual captures live in `*.screenshot.tsx` (or `*.screenshot.ts`) and are not discovered by the default `bun test`; run `bun run test:screenshots` (or name the file explicitly) to capture or compare them. Mounted component tests that assert behavior stay in `*.test.tsx`, where the fast command discovers them.
+Visual captures live in `*.screenshot.tsx` (or `*.screenshot.ts`) and are not discovered by the default `bun test`; run `bun run test:unit` (or name the file explicitly) to capture or compare them. Mounted component tests that assert behavior stay in `*.test.tsx`, where the fast command discovers them.
 
 `matchScreenshot(subject, hint?, options?)` is a plain async function — not an `expect.extend` matcher — because Bun drives async matchers synchronously on its event loop, which makes the Playwright calls inside them dramatically slower than the same calls awaited normally. It accepts a React element, a Playwright `Page`, or a `Locator`. A React element is rendered to HTML, the component styles and the default theme are inlined, and the capture is cropped to the rendered content; a page is captured at its viewport and a locator at its element box.
 
-Element captures share one deterministically configured page — each capture replaces the document — and each capture keeps its Playwright round-trips to the minimum (wait for fonts and measure in one `evaluate`, then screenshot). Application `visit`s still open a fresh browser context per visit, so app and element captures stay isolated where it matters without paying for a new context per screenshot. Both paths share the same run-scoped runtime: **one Docker container and one browser per lane run**, started on the first capture and torn down once when the run ends. Either way it mirrors `toMatchSnapshot`:
+Element captures share one deterministically configured page — each capture replaces the document — and each capture keeps its Playwright round-trips to the minimum (wait for fonts and measure in one `evaluate`, then screenshot). Application `visit`s still open a fresh browser context per visit, so app and element captures stay isolated where it matters without paying for a new context per screenshot. Both paths share the same runtime: one run-scoped Docker container and one browser connection, opened on the first capture. The container is removed at teardown. Either way it mirrors `toMatchSnapshot`:
 
 - no snapshot exists → the capture is written and the call resolves;
 - a snapshot exists → a new capture is compared; a mismatch throws with the diff kept in memory and writes nothing to disk;
@@ -119,9 +137,9 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. `useApplication({ entry })` spawns the entry on a free loopback port and waits for readiness on `/api/health`. It is **run-scoped**: memoised per `(cwd, entry)` on `globalThis`, so every test file in the run shares one server (concurrent callers await the same boot instead of racing), and the testing preload stops it exactly once when the run ends — success, failure, thrown error, or `SIGINT`/`SIGTERM`. No test file needs `afterAll` or `finally`, and the server boots once per run rather than once per file.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. Docs captures and mounted-component journeys run in the same browser lane. `useApplication({ entry })` starts one development server per `(cwd, entry, env, development)` identity on a free loopback port, waits for `/api/health`, and shares it by every test file in the run (concurrent callers await the same boot instead of racing). The preload stops it at run teardown. `startApplication` remains the dedicated per-call primitive.
 
-`startApplication({ entry })` is the low-level primitive behind it, with the same shape but a per-call lifecycle (`stop()` is idempotent). Use it only when a test needs a dedicated server of its own.
+`startApplication({ entry })` is the low-level primitive behind it, with the same shape but a dedicated per-call lifecycle (`stop()` is idempotent). Use it only when a test needs a clean server of its own.
 
 ### Eager startup
 
@@ -146,6 +164,10 @@ Bun evaluates each preload once before the suite, so the awaited call boots the 
 
 The browser side stays deterministic: `visit(path, options?, fn)` opens a fresh context with the network policy applied, navigates to `url + path`, runs `fn`, then disposes the page. **Server-side state is shared across the run**, so a test that needs a clean server must boot its own with `startApplication`.
 
+### Run-scoped cleanup
+
+`registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. It is intended for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
+
 Network is deterministic by default — requests are blocked unless they target loopback or Google Fonts (allowed so text renders the real web type instead of a host-dependent fallback), so a snapshot cannot silently depend on an arbitrary CDN:
 
 - `stubs` fulfils specific external URLs locally (for example a CDN module);
@@ -168,8 +190,8 @@ Rasterisation is pinned by the container image, and the default comparison budge
 
 ## Browsers
 
-Snapshot capture runs Chromium inside the pinned Playwright container (`mcr.microsoft.com/playwright:v<installed playwright>-noble`). The runtime starts exactly one container per test run, connects to it once, and removes it when the run ends — locally and in CI. The container provides the browser and its operating-system libraries, so no host Chromium or `playwright install-deps` step is needed. Web fonts still load from Google Fonts over the network, as they do everywhere else.
+Snapshot capture runs Chromium inside the pinned Playwright container (`mcr.microsoft.com/playwright:v<installed playwright>-noble`). Every run uses a process-unique container and removes it at teardown. The container provides the browser and its operating-system libraries, so no host Chromium or `playwright install-deps` step is needed. Web fonts still load from Google Fonts over the network, as they do everywhere else.
 
-`basis/testing` resolves the installed Playwright version and runs the mounted Playwright package's `run-server` inside the container, publishing it to a random localhost port. It connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server. Nothing is fixed or shared across runs: the container has no name, the host port is random, and the only cross-process state is the container id the run owns. Set `BASIS_SNAPSHOT_ACTIVITY_LOG` to a path to record the runtime's lifecycle events; `libraries/testing/runtime.lifecycle.test.ts` uses it to prove one container start, one browser connection, and one teardown across several files and dozens of snapshots.
+`basis/testing` resolves the installed Playwright version and runs the mounted Playwright package's `run-server` inside the container, publishing it to a random localhost port. It connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server. The run-scoped container name includes the process id; the host port is random and the browser connection is process-local. Set `BASIS_SNAPSHOT_ACTIVITY_LOG` to a path to record lifecycle events; `libraries/testing/runtime.lifecycle.e2e.ts`, run through `test:runtime-lifecycle`, uses it to prove one ephemeral container start, one browser connection, and one teardown across several files and dozens of snapshots.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and build); `bun test` runs the fast lane, and `test:all` is the deliberate full acceptance run.

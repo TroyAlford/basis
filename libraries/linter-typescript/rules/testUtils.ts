@@ -1,4 +1,7 @@
+import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
+import { run } from 'basis/utilities'
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -36,6 +39,7 @@ export interface BunLintResult {
  * @returns The fixture output and the linter report.
  */
 export const lintWithBun = (options: BunLintOptions): BunLintResult => {
+  const silent = new Logger({ silent: true })
   const {
     code,
     filename = 'fixture.ts',
@@ -44,7 +48,7 @@ export const lintWithBun = (options: BunLintOptions): BunLintResult => {
     ruleName,
     rulePath,
   } = options
-  const root = options.root ?? tempDirectory('bun-lint', join(process.cwd(), 'tmp'))
+  const root = options.root ?? tempDirectory(`bun-lint-${randomUUID()}`)
   const fixture = join(root, filename)
   const config = join(root, 'eslint.config.mjs')
   const extension = filename.slice(filename.lastIndexOf('.') + 1)
@@ -73,12 +77,13 @@ export const lintWithBun = (options: BunLintOptions): BunLintResult => {
     '',
   ].join('\n'))
 
-  const result = Bun.spawnSync({
-    cmd: [process.execPath, 'lint', '--config', config, ...(fix ? ['--fix'] : []), fixture],
-    cwd: root,
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
+  const result = run(process.execPath, [
+    'lint',
+    '--config',
+    config,
+    ...(fix ? ['--fix'] : []),
+    fixture,
+  ], { cwd: root, logger: silent })
   const output = readFileSync(fixture, 'utf8')
 
   return {

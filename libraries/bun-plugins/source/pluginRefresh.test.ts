@@ -4,26 +4,26 @@ import { classNames, pluginRefresh, transformModule } from './pluginRefresh'
 
 describe('classNames', () => {
   test('finds top-level class declarations, exported or not', () => {
-    const source = [
-      "import * as React from 'react'",
-      'class Local extends React.Component {}',
-      'export class Exported extends React.Component {}',
-      'export default class Defaulted extends React.Component {}',
-    ].join('\n')
+    const source = `
+import * as React from 'react'
+class Local extends React.Component {}
+export class Exported extends React.Component {}
+export default class Defaulted extends React.Component {}
+    `.trim()
 
     expect(classNames(source)).toEqual(['Local', 'Exported', 'Defaulted'])
   })
 
   test('ignores nested classes and class expressions that are not module bindings', () => {
-    const source = [
-      'class Outer extends React.Component {',
-      '  static Divider = class MenuDivider {}',
-      '  method() {',
-      '    class Inner {}',
-      '    return Inner',
-      '  }',
-      '}',
-    ].join('\n')
+    const source = `
+class Outer extends React.Component {
+  static Divider = class MenuDivider {}
+  method() {
+    class Inner {}
+    return Inner
+  }
+}
+    `.trim()
 
     expect(classNames(source)).toEqual(['Outer'])
   })
@@ -39,6 +39,7 @@ describe('transformModule', () => {
 
     expect(result?.contents).toContain('import { register } from "react-refresh/runtime"')
     expect(result?.contents).toContain('register(Button, "Button.tsx:Button")')
+    expect(result?.contents).toContain('if (!Object.hasOwn(Button, "displayName")) Button.displayName = "Button"')
     expect(result?.contents).toContain('import.meta.hot.accept()')
     expect(result?.loader).toBe('tsx')
   })

@@ -59,9 +59,6 @@ export const PrefixSuffix: Mixin<IPrefixSuffix> = {
   /** Default props for elements with prefix/suffix content. */
   defaultProps: {},
 
-  /** `prefix` is a Basis content prop applied to the inner element, not the root. */
-  ownedNativeProps: ['prefix'],
-
   /** This mixin is mutative and should be applied last. */
   post: true,
 }

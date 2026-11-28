@@ -10,6 +10,9 @@
       "basis/*": [
         "./consumer/*.ts"
       ],
+      "basis/docs/mermaid": [
+        "./consumer/docs-mermaid.ts"
+      ],
       "basis/react/icons": [
         "./consumer/react-icons.ts"
       ],

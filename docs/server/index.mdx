@@ -4,29 +4,29 @@ title: Server
 
 # Server
 
-`basis/server` provides the Bun application server used by Basis apps. One `Server` runs either a development server with Bun HMR or a deterministic production server that builds once and serves the SPA and assets.
+`basis/server` provides the Bun application server used by Basis apps. One `Server` always runs live from source through Bun and renders the application on the server before hydrating it in the browser. Development and explicit previews use Bun HMR; normal production uses Bun's production serving mode without HMR.
 
 ```ts
 import { Server } from 'basis/server'
 
 const server = new Server()
   .root(import.meta.dir)
+  .context(async request => ({ context: await loadApplicationContext(request) }))
   .main('./Application.tsx')
   .start({
-    development: Bun.env.NODE_ENV !== 'production',
     hostname: Bun.env.HOST ?? '127.0.0.1',
     port: Number(Bun.env.PORT ?? 80),
     version: Bun.env.VERSION ?? 'development',
   })
 ```
 
-`root` resolves relative entrypoints and assets, `main` registers the browser entrypoint, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for the build watcher and owned capabilities.
+`root` resolves relative entrypoints and assets, `context` loads request-scoped application data, `main` registers the application component, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for owned capabilities such as the database pool. `main` modules must export `Application` or a default React component; Basis renders it on the server, injects the request context as bootstrap data, and hydrates it in the browser.
 
 ## Lifecycle
 
-Development delegates to Bun's dev server, which owns the module graph, file watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the bundle and assets, and handles `SIGINT`/`SIGTERM` through graceful shutdown.
+Bun's server owns the module graph and file watching. Development uses React Fast Refresh with the development React runtime. Preview can opt into HMR explicitly with `start({ hmr: true })` while using production React; `basis/serve` then compiles JSX against the production React runtime, registers top-level class components under stable ids, and keeps mounted instances across supported replacements. The production transform classifies ownership by resolved filesystem path, so first-party workspace packages resolved through `node_modules` symlinks and Basis framework source are transformed while genuine installed dependencies remain excluded. Normal production starts with `hmr: false` and serves cached browser modules without an HMR connection. Components with runtime-private (`#`) members cannot transfer their private brand, so React remounts that subtree instead. Basis watches application source for the server-rendered component and rebuilds the live SSR module after a change, so a subsequent request sees the updated `main` component or imported dependency without restarting the server. Versioned SSR artifacts are coalesced and cleaned after supersession; shutdown removes the server-owned artifact scope. The same source path handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
-`/api/health` is the readiness API. It stays `503 starting` until the initial build is ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
+`/api/health` is the readiness API. It stays `503 starting` until the browser shell, the configured SSR application module, and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 
 ## API routes
 
@@ -40,11 +40,63 @@ new Server()
   })
 ```
 
-API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, and the server logger.
+API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, the server logger, and the typed application context under `context.context`.
+
+## Request context
+
+`context(loader)` defines the application data a request carries. The loader runs once per request; its result is passed to API handlers and to the automatically server-rendered `main` component.
+
+```ts
+type AppContext = {
+  campaign: Campaign
+  preferences: Preferences
+  user: User | null
+}
+
+new Server<AppContext>()
+  .context(async request => ({ context: await loadApplicationContext(request) }))
+  .main('./Application.tsx')
+  .api([HttpVerb.Get], 'campaign', (_params, { context }) => {
+    return Response.json(context.campaign)
+  })
+```
+
+The loader receives the request, verified identity, database, logger, and parsed request cookies. It returns the application context in a required `{ context, headers?, cookies? }` wrapper. `headers` is for non-cookie headers; cookies use the typed `Cookies` surface and are serialized into `Set-Cookie` for SSR, API, and SSE responses.
+
+Basis resolves the verified identity first, then runs the loader and the SSR render inside the same actor scope used by API handlers, so RLS applies consistently. Keep server-only capabilities such as `db`, `identity`, and the logger on the standard `RouteContext`; the application context is the shape embedded into the SSR bootstrap and hydrated in the browser.
 
 ## Static files
 
-`assets(folder)` serves a fixed asset directory. `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. Both reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
+A standard `<root>/assets` directory is served automatically. `assets(folder)` overrides that root, and `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. All three reject missing files, traversal, and the served root's own Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content. A `.basis` directory above the served root is just a parent; an application installed under a `.basis` temp tree remains servable.
+
+## Vendor assets
+
+Basis Server discovers the application's client vendor dependencies automatically at startup. It follows workspace source, collects bare imports that resolve into `node_modules`, builds them into a server-owned startup snapshot under `dist/vendor`, and serves that bundle at the standard `/assets/vendor/vendor.js` path. Adding or removing a client dependency, or changing an installed package, requires a server restart so the vendor bundle and global map stay aligned. The shell loads the vendor bundle before the application, and the standard serve plugin resolves the application's matching imports to the vendor globals. No consumer configuration is required.
+
+A request without the current `v` query redirects to the content hash; a matching version is immutable and revalidates with an ETag; a stale version redirects to the current hash rather than serving different bytes under the old URL. Vendor chunks are minified with linked source maps, and the maps are served under the same content-versioned `/assets/vendor` contract.
+
+Vendor proxies self-accept HMR updates because the vendor artifact and global map are fixed for the server lifetime. Application modules still receive their preview HMR updates through those proxies. Changing the installed vendor graph requires the restart described above; self-accepting a proxy never hot-reloads vendor code or silently serves a newer vendor artifact under an older global map.
+
+When a TLS-terminating reverse proxy fronts Basis, configure the public scheme and host used for executable vendor URLs with `start({ publicOrigin: 'https://app.example' })` or `PUBLIC_ORIGIN`. This prevents request-derived proxy metadata from producing mixed-content script URLs.
+
+`buildVendor({ entries })` remains available for explicit chunks. `discoverVendorSpecifiers` and `buildVendorBundle` expose the automatic discovery and bundle steps:
+
+```ts
+import { Server } from 'basis/server'
+
+new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .start({ port: 8080 })
+```
+
+The server builds the vendor bundle during startup. If a consumer needs a custom chunk layout, `buildVendor` can still produce deterministic named chunks with exact module-to-global mappings.
+
+## Development, preview, and production updates
+
+Development and explicit previews use Bun's live compilation and HMR. Supported class-component edits preserve mounted state; instance-owned functions and runtime-private members follow the documented remount fallback, and unsupported module updates fall back to Bun's normal reload. Normal production runs with HMR disabled and uses Bun's cached production output. Installed vendor dependency changes require a server restart so the vendor artifact and global map stay aligned.
+
+Production deployment is a separate lifecycle from class HMR. Command Center publishes a new release and restarts the application; production replacement does not preserve mounted React instances across releases. Production documents carry the server's authoritative release version and poll `/api/health` for changes. Each health request has a bounded timeout; failed, stalled, or not-ready responses retry with bounded backoff. After a server replacement, the browser waits for readiness and performs exactly one document reload when the ready server reports a different version. Same-version interruptions reconnect without reloading.
 
 ## Live transports
 
@@ -64,11 +116,15 @@ server.socket('room/:id', {
 })
 ```
 
-`mount` rejects traversal and Basis-owned `.basis` state, including symlink targets. SSE buffers are bounded, so a client that stops reading drops frames rather than growing memory without limit.
+`mount` rejects traversal and the mount's own `.basis` state, including symlink targets. SSE buffers are bounded, so a client that stops reading drops frames rather than growing memory without limit.
 
 ## Logging and runtime context
 
 `Server` owns a standard Basis logger and writes lifecycle output through it. Read it with `server.logger`, or inject a custom logger through `start({ logger })`. Runtime facts (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) are embedded into the SPA shell; `server.runtime` exposes the same facts to the host.
+
+## Page titles
+
+`basis/react` exports `Head` and `HeadProvider`. During SSR, `Head` collects the title synchronously for the shell. In the browser, title updates happen after commit, not during React's render phase. Server output escapes the title exactly once.
 
 ## Favicon and icons
 
@@ -77,3 +133,11 @@ Every server serves `/assets/favicon`. Configure a file, `Bun.file`, or an icon 
 ## Embedding
 
 `server.handle(request)` dispatches one request through the same routes used by a bound server, for hosts that mount Basis inside another fetch handler. SSE responses opt out of the HTTP idle timeout automatically.
+
+## Database and authorization
+
+`server.graph(graph)` composes the canonical graph and installs compiled PostgreSQL row-level security. See [Authorization & Row-Level Security](./authorization.mdx) for bootstrap, grants, request actor binding, and the restricted-role boundary.
+
+`Graph.physicalSchema` plus `DDL.introspect`/`DDL.plan` provide the canonical read-only schema inspection and planning surface. See [Schema Inspection & Planning](./schema.mdx).
+
+`server.database()` configures the zero-config managed PostgreSQL capability. See [Database & Transactions](./database.mdx) for pool lifecycle, `db.sql`, transactions, health, and managed storage, and [Query Language](./query-language.mdx) for the canonical predicate and grammar contract.

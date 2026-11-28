@@ -1,8 +1,11 @@
 #!/usr/bin/env bun
+import { Logger } from 'basis/logger'
+import { run } from 'basis/utilities'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { bunCheckUnsupportedReason } from './bun-version'
+import { basisServerUnsupportedReason, bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
+import { emit } from './emit'
 import { bunLintUnsupportedReason, runBunLint } from './lint'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
@@ -46,12 +49,19 @@ const REQUIRED_EXPORTS = [
   './tsconfig/react.json',
 ]
 
-/**
- * Writes a line to stdout, keeping the CLI free of direct console usage.
- * @param line The text to emit.
- */
-const write = (line: string): void => {
-  process.stdout.write(`${line}\n`)
+/** The Basis CLI's structured logger. */
+const logger = new Logger({ colors: false })
+
+/** The closed CLI command vocabulary. */
+enum Command {
+  Compliance = 'compliance',
+  Database = 'db',
+  Docs = 'docs',
+  Doctor = 'doctor',
+  Emit = 'emit',
+  Format = 'format',
+  Lint = 'lint',
+  Typecheck = 'typecheck',
 }
 
 /**
@@ -84,20 +94,31 @@ const resolveBin = (packageName: string, binName: string): string => {
 }
 
 /**
+ * Write one captured subprocess response to the caller's streams.
+ * @param result - Captured command result.
+ * @param result.exitCode - Child exit code.
+ * @param result.stderr - Captured standard error.
+ * @param result.stdout - Captured standard output.
+ * @returns The child exit code.
+ */
+const writeResult = (
+  result: { readonly exitCode: number, readonly stderr: string, readonly stdout: string },
+): number => {
+  if (result.stdout !== '') process.stdout.write(result.stdout)
+  if (result.stderr !== '') process.stderr.write(result.stderr)
+  return result.exitCode
+}
+
+/**
  * Runs a dependency binary through Bun itself, so no Node shebang is required.
  * @param packageName The dependency package name.
  * @param binName The binary name to run.
  * @param args Arguments for the binary.
  * @returns The child process exit code.
  */
-const runBin = (packageName: string, binName: string, args: string[]): number => {
-  const result = Bun.spawnSync([process.execPath, resolveBin(packageName, binName), ...args], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
+const runBin = (packageName: string, binName: string, args: string[]): number => writeResult(
+  run(process.execPath, [resolveBin(packageName, binName), ...args]),
+)
 
 /**
  * Runs the Basis CSS policy over every `*.styles.ts` file.
@@ -117,18 +138,10 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
  * @param fix Whether to rewrite documents with the fixes the policy supports.
  * @returns The child process exit code.
  */
-const runMarkdown = (fix: boolean): number => {
-  const result = Bun.spawnSync([
-    process.execPath,
-    join(basisDir(), 'libraries', 'linter-markdown', 'bin.ts'),
-    ...(fix ? ['--fix'] : []),
-  ], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
+const runMarkdown = (fix: boolean): number => writeResult(run(
+  process.execPath,
+  [join(basisDir(), 'libraries', 'linter-markdown', 'bin.ts'), ...(fix ? ['--fix'] : [])],
+))
 
 /**
  * Runs every Basis lint surface with the same engine, so `lint` reports and
@@ -147,12 +160,12 @@ const runLint = (fix: boolean): number => {
 }
 
 /**
- * Runs the focused, report-only Basis architecture policy.
+ * Runs the authoritative, report-only Basis paradigm policy.
  *
  * Compliance always uses the Basis-owned configuration so the check is
  * available and identical even when a consumer repository carries its own
- * ESLint config. It applies the same `@basis/component-architecture` rule
- * `basis lint` and `basis check` run, with no formatting rules.
+ * ESLint config. It applies the architecture and infrastructure rules without
+ * duplicating the style policy, which `basis lint` already ran.
  * @returns The child process exit code.
  */
 const runCompliance = (): number => runBunLint(false, join(basisDir(), 'eslint.compliance.config.mjs'))
@@ -164,7 +177,7 @@ const runCompliance = (): number => runBunLint(false, join(basisDir(), 'eslint.c
 const requireBunCheck = (): boolean => {
   const reason = bunCheckUnsupportedReason()
   if (reason === null) return true
-  process.stderr.write(`${reason}\n`)
+  logger.error(reason)
   return false
 }
 
@@ -172,17 +185,59 @@ const requireBunCheck = (): boolean => {
  * Runs Bun's built-in TypeScript checker for the current project.
  * @returns The child process exit code.
  */
-const spawnBunCheck = (): number => Bun.spawnSync([process.execPath, '--check'], {
-  stderr: 'inherit',
-  stdin: 'inherit',
-  stdout: 'inherit',
-}).exitCode
+const spawnBunCheck = (): number => writeResult(run(
+  process.execPath,
+  ['--check'],
+))
 
 /**
  * Runs the TypeScript checker after validating the runtime.
  * @returns The child process exit code.
  */
 const runTypecheck = (): number => (requireBunCheck() ? spawnBunCheck() : 1)
+
+/**
+ * Runs the complete repository check: emit, style lint, optional paradigm
+ * compliance, and typecheck.
+ *
+ * `basis lint` and `basis compliance` are the two supported entry points.
+ * Compliance is the authoritative gate; lint omits only the paradigm rules.
+ * @param paradigm Whether to run the compliance rule set.
+ * @returns The first non-zero child process exit code, or `0`.
+ */
+const runCompleteCheck = async (paradigm: boolean): Promise<number> => {
+  if (!requireBunCheck()) return 1
+  const emitCode = await runEmit()
+  if (emitCode !== 0) return emitCode
+  const lintCode = runLint(false)
+  if (lintCode !== 0) return lintCode
+  if (paradigm) {
+    const complianceCode = runCompliance()
+    if (complianceCode !== 0) return complianceCode
+  }
+  return spawnBunCheck()
+}
+
+/**
+ * Runs the conventional application emit lifecycle.
+ * @returns Process exit code (`0` when emission succeeds or is not configured).
+ */
+const runEmit = async (): Promise<number> => {
+  try {
+    const result = await emit()
+    if (!result) {
+      logger.info('[basis] emit: no graph.ts found; skipped')
+      return 0
+    }
+    const formatCode = runBunLint(true, undefined, 'generated')
+    if (formatCode !== 0) return formatCode
+    logger.info(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
+    return 0
+  } catch (error) {
+    logger.error(`[basis] emit: ${error instanceof Error ? error.message : String(error)}`)
+    return 1
+  }
+}
 
 /**
  * Verifies the installed Basis surface and its owned patches.
@@ -194,54 +249,62 @@ const doctor = (): number => {
   const installRoot = resolveInstallRoot(root)
   let failures = 0
 
-  write(`[basis] version ${manifest.version ?? 'unknown'}`)
-  write(`[basis] consumer root ${installRoot}`)
+  logger.info(`[basis] version ${manifest.version ?? 'unknown'}`)
+  logger.info(`[basis] consumer root ${installRoot}`)
 
   const unsupportedBun = bunCheckUnsupportedReason()
   if (unsupportedBun === null) {
-    write(`[basis] bun ${Bun.version} typecheck ok`)
+    logger.info(`[basis] bun ${Bun.version} typecheck ok`)
   } else {
     failures += 1
-    write(unsupportedBun)
+    logger.info(unsupportedBun)
+  }
+
+  const unsupportedServerBun = basisServerUnsupportedReason()
+  if (unsupportedServerBun === null) {
+    logger.info(`[basis] bun ${Bun.version} server ok`)
+  } else {
+    failures += 1
+    logger.info(unsupportedServerBun)
   }
 
   const unsupportedLint = bunLintUnsupportedReason()
   if (unsupportedLint === null) {
-    write(`[basis] bun ${Bun.version} lint ok`)
+    logger.info(`[basis] bun ${Bun.version} lint ok`)
   } else {
     failures += 1
-    write(unsupportedLint)
+    logger.info(unsupportedLint)
   }
 
   for (const subpath of REQUIRED_EXPORTS) {
     const target = manifest.exports?.[subpath]
     const ok = target !== undefined && existsSync(join(root, target))
     if (!ok) failures += 1
-    write(`[basis] export ${subpath} ${ok ? 'ok' : 'missing'}`)
+    logger.info(`[basis] export ${subpath} ${ok ? 'ok' : 'missing'}`)
   }
 
   try {
     const result = applyBasisPatches({ basisDir: root, rootDir: installRoot, write: false })
-    write(`[basis] owned patches ${result.applied.length + result.retired.length + result.skipped.length}`)
+    logger.info(`[basis] owned patches ${result.applied.length + result.retired.length + result.skipped.length}`)
 
-    for (const key of result.skipped) write(`[basis] patch ${key} applied`)
+    for (const key of result.skipped) logger.info(`[basis] patch ${key} applied`)
     for (const key of result.applied) {
       failures += 1
-      write(`[basis] patch ${key} pending (run \`bun install\`)`)
+      logger.info(`[basis] patch ${key} pending (run \`bun install\`)`)
     }
     for (const key of result.retired) {
       failures += 1
-      write(`[basis] patch ${key} retired but still installed (run \`bun install\`)`)
+      logger.info(`[basis] patch ${key} retired but still installed (run \`bun install\`)`)
     }
   } catch (error) {
     failures += 1
-    write(`[basis] patch ${error instanceof Error ? error.message : String(error)}`)
+    logger.info(`[basis] patch ${error instanceof Error ? error.message : String(error)}`)
   }
 
   const consumerManifest = readJson<BasisManifest>(join(installRoot, 'package.json'))
   if (!(consumerManifest.trustedDependencies ?? []).includes('basis')) {
     failures += 1
-    write('[basis] trustedDependencies is missing "basis"; lifecycle hook will not run')
+    logger.info('[basis] trustedDependencies is missing "basis"; lifecycle hook will not run')
   }
 
   const consumerPatches = Object.keys(consumerManifest.patchedDependencies ?? {})
@@ -249,10 +312,10 @@ const doctor = (): number => {
   const copied = consumerPatches.filter(key => ownedPatches.includes(key))
   if (copied.length > 0) {
     failures += 1
-    write(`[basis] legacy copied patches: ${copied.join(', ')}`)
+    logger.info(`[basis] legacy copied patches: ${copied.join(', ')}`)
   }
 
-  write(failures === 0 ? '[basis] doctor: ok' : `[basis] doctor: ${failures} problem(s)`)
+  logger.info(failures === 0 ? '[basis] doctor: ok' : `[basis] doctor: ${failures} problem(s)`)
   return failures === 0 ? 0 : 1
 }
 
@@ -260,30 +323,35 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write([
-    'usage: basis <compliance|docs build [--out <dir>] [--base <path>]',
-    '|docs check|doctor|format|lint|typecheck|check>',
+  logger.info([
+    'usage: basis <compliance|db <plan|release|backup|restore|upgrade|rollback>',
+    '|docs build [--out <dir>] [--base <path>]|docs check|doctor|emit|format|lint|typecheck>',
   ].join(''))
 }
 
 /**
  * Dispatches the requested CLI command.
  */
-const main = (): void => {
-  const [command, ...args] = process.argv.slice(2)
+const main = async (): Promise<void> => {
+  const [rawCommand, ...args] = process.argv.slice(2)
+  const command = Object.values(Command).find(candidate => candidate === rawCommand)
 
-  if (command === 'doctor') process.exit(doctor())
-  if (command === 'lint') process.exit(runLint(false))
-  if (command === 'format') process.exit(runLint(true))
-  if (command === 'compliance') process.exit(runCompliance())
-  if (command === 'typecheck') process.exit(runTypecheck())
-  if (command === 'check') {
-    if (!requireBunCheck()) process.exit(1)
-    const lintCode = runLint(false)
-    process.exit(lintCode === 0 ? spawnBunCheck() : lintCode)
+  if (command === Command.Doctor) process.exit(doctor())
+  if (command === Command.Emit) process.exit(await runEmit())
+  if (command === Command.Lint) process.exit(await runCompleteCheck(false))
+  if (command === Command.Format) process.exit(runLint(true))
+  if (command === Command.Compliance) process.exit(await runCompleteCheck(true))
+  if (command === Command.Typecheck) {
+    const emitCode = await runEmit()
+    process.exit(emitCode === 0 ? runTypecheck() : emitCode)
   }
 
-  if (command === 'docs') {
+  if (command === Command.Database) {
+    const { runDatabase } = await import('./database')
+    process.exit(await runDatabase(args))
+  }
+
+  if (command === Command.Docs) {
     const [subcommand, ...rest] = args
     if (subcommand === 'build') {
       void runDocsBuild(rest).then(code => process.exit(code))
@@ -296,4 +364,4 @@ const main = (): void => {
   process.exit(1)
 }
 
-if (import.meta.main) main()
+if (import.meta.main) void main()

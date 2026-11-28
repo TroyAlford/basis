@@ -1,31 +1,37 @@
 import { afterAll } from 'bun:test'
 import { stopApplications } from './application'
-import { closeRuntime } from './browser'
+import { closeRuntime, getBrowser } from './browser'
 import { pruneSnapshots } from './cleanup'
-import { cleanupTempDirectories, isolateTempDirectories } from './temp'
+import { cleanupRun } from './lifecycle'
+import { cleanupTempDirectories, isolateTempDirectories } from './tempDirectory'
 
 import './happydom'
 import '../react/testing/bun/register'
 
 /*
  * Isolate the process temp directory before the suite runs, so every test — and
- * every dependency or spawned child — writes inside one run-scoped root that is
- * removed when the run ends.
+ * every dependency or spawned child — writes inside `./.basis/tmp`, which the
+ * run removes when it ends.
  */
 isolateTempDirectories()
 
+/* Warm the run-scoped browser during preload when an integration lane opts in. */
+if (Bun.env.BASIS_SNAPSHOT_PRELOAD === '1') void getBrowser().catch(() => undefined)
+
 afterAll(() => { pruneSnapshots() })
+afterAll(cleanupRun)
 afterAll(stopApplications)
 afterAll(closeRuntime)
 afterAll(cleanupTempDirectories)
 
 /**
  * Stop run-scoped application servers and the snapshot runtime, remove the
- * run-scoped temp root, then exit, when the run is interrupted.
+ * project temp root and its managed Docker resources, then exit, when the run
+ * is interrupted.
  * @param code - The exit code to report after teardown.
  */
 const onSignal = (code: number): void => {
-  void Promise.allSettled([stopApplications(), closeRuntime()])
+  void Promise.allSettled([cleanupRun(), stopApplications(), closeRuntime()])
     .finally(() => {
       cleanupTempDirectories()
       process.exit(code)

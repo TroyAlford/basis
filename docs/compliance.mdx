@@ -1,64 +1,62 @@
 ---
-title: Component compliance
+title: Compliance
 ---
 
-# Component compliance
+# Compliance
 
-Basis UI is class-based. Every application component must directly or indirectly extend the `Component` or `Editor` hierarchy from `basis/react`. React function components, `React.FC` / `React.FunctionComponent`, `memo` and `forwardRef` function components, and React hooks are outside the contract. The Basis root `Component` is the deliberate boundary onto `React.Component`. A few low-level framework primitives whose children cannot satisfy the `Component` prop contract — currently `Await` for promise children and `Route` for render-function children — carry explicit, justified inline exceptions; application code does not extend React's base class directly.
-
-The rule follows syntax, imports, scope bindings, and JSX references. It rejects a function when it is exported as a PascalCase component that renders JSX or when it is used as a JSX component type. It does not ban functions that merely return React content, so pure helpers and ordinary domain functions remain valid.
-
-## One policy, two entry points
-
-`basis/eslint` enables `@basis/component-architecture`, so `basis lint` and `basis check` enforce the architecture alongside the rest of the Basis policy. `basis compliance` runs the same rule implementation in a focused, report-only configuration for repositories that want an architectural gate without the formatting and lint suite.
+`basis compliance` is Basis's authoritative paradigm gate. It runs the same style policy and typecheck as `basis lint`, then adds every Basis architecture and infrastructure opinion. It bans alternatives rather than reporting a preference.
 
 ```bash
 bunx basis compliance
 ```
 
-The rule has no autofix. Converting a function component into a class is a design change, and an automated rewrite would be unsafe. Diagnostics name the prohibited pattern and the supported replacement.
+`basis lint` is the lightweight entry point: formatting, style, and typecheck only. `basis format` applies the style autofixes. There is no separate `basis check`; run `basis compliance` for the full gate or `basis lint` for the fast one, not both.
+
+## One policy, one engine
+
+Compliance extends the existing compliance surface. It does not introduce another command tree, configuration hierarchy, or lint engine. `basis/eslint` remains the style policy; the compliance configuration adds the paradigm rules and always uses the Basis-owned configuration, even when a consumer carries its own ESLint config.
+
+Compliance covers:
+
+| Rule                                          | Prohibits                                                                                                                                                                                                                         | Canonical replacement                                                                           |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `@basis/component-architecture`               | React function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source                                                                                                                 | Classes extending the Basis `Component` or `Editor` hierarchy                                   |
+| `@basis/no-direct-process-spawn`              | `Bun.spawn`, `Bun.spawnSync`, Node `child_process` spawn/exec variants, and common wrappers that duplicate one-shot process execution                                                                                             | `run`, `runAsync` from `basis/utilities`                                                        |
+| `@basis/no-custom-test-server`                | Direct `Bun.serve`, `http.createServer`, manual server subprocess setup, Basis `Server` construction in application test lanes, and managed database provisioners (`createDatabase`, `ManagedDatabase`, `ManagedPostgresService`) | `useApplication` for application journeys; `withDatabase` for database and authorization proofs |
+| `@basis/no-direct-application-navigation`     | `page.goto`, `page.reload`, `page.goBack`, and `page.goForward` in browser-backed tests                                                                                                                                           | `useApplication(...).visit(path, fn)`                                                           |
+| `@basis/no-custom-database-fixture`           | Consumer-owned PostgreSQL containers, test DB provisioning, and homemade database fixtures                                                                                                                                        | `withDatabase`                                                                                  |
+| `@basis/no-committed-test-database-write`     | Durable/committed-write helpers such as `withDurableDatabase` and `withCommittedDatabase` in tests                                                                                                                                | `withDatabase`; every test transaction auto-rolls back                                          |
+| `@basis/no-test-database-isolation-framework` | Custom schemas, independent test databases, and alternative per-test database managers                                                                                                                                            | `withDatabase` and the single run-scoped Basis fixture                                          |
+| `@basis/no-direct-browser-lifecycle`          | `chromium.launch`, `firefox.launch`, `chromium.connect`, Playwright run-server, and manual browser/context ownership                                                                                                              | Basis-managed browser via `useApplication().visit()`                                            |
+| `@basis/no-alternative-test-renderer`         | `@testing-library/react`, `react-test-renderer`, Enzyme, and equivalent custom mounted-render utilities                                                                                                                           | `render`, `Simulate`, `waitFor` from `basis/testing`                                            |
+| `@basis/no-alternative-screenshots`           | `page.screenshot()`, `locator.screenshot()`, custom PNG/baseline comparators, and Playwright screenshot assertions                                                                                                                | `matchScreenshot`                                                                               |
+| `@basis/no-custom-test-lifecycle`             | Manual start/stop orchestration for shared app, browser, and DB fixtures                                                                                                                                                          | `basis/testing/bun`                                                                             |
+| `@basis/no-custom-test-temp-root`             | Manual run-wide temporary-directory setup/cleanup                                                                                                                                                                                 | Basis-managed temporary root and `tempDirectory`                                                |
+| `@basis/no-direct-testing-internals`          | Imports of Basis's private testing implementation files                                                                                                                                                                           | Public `basis/testing` and `basis/testing/bun` exports                                          |
+
+## Resolution, not text matching
+
+The infrastructure rules resolve imports and simple aliases. Named imports, aliased named imports, namespace imports, destructuring (including `require` and `await import`), and statically known member expressions are all covered. A local helper named `spawn` is not flagged; a `spawn` imported from `node:child_process` is.
+
+A bounded runner is not an application fixture. `runAsync` from `basis/utilities` is allowed by `no-direct-process-spawn`, but using it to launch an application server still triggers `no-custom-test-server`. A manual launcher written with `Bun.spawn` triggers both rules, and the application-fixture diagnostic names `useApplication`. Constructing a Basis `Server` in an application test lane triggers the same rule, and constructing a managed database names `withDatabase` instead.
 
 ## Scope
 
-Application component source is in scope. The rule deliberately excludes:
+Application source receives the architecture, process, and testing-internals rules. The testing and infrastructure rules additionally apply to the repository's established test lanes: `*.test.*`, `*.spec.*`, `*.e2e.*`, `*.screenshot.*`, and the `test`, `tests`, `testing`, `__tests__`, `fixtures`, and `__fixtures__` directories. Rules are attached to source files, not restated as naming-convention exceptions. The explicit `test:recovery` proofs that own managed install, release, cutover, and recovery services are exact-file scoped exceptions under `no-custom-test-server`; they exist to exercise the managed-service boundary and cannot use the shared fixture transaction.
 
-- `*.test.*`, `*.spec.*`, `*.screenshot.*`, and `*.e2e.*` files, because React testing mechanics legitimately use function components and hooks;
-- `testing`, `test`, `tests`, `__tests__`, `fixtures`, and `__fixtures__` directories for the same reason;
-- dependencies, generated output, caches, and test artifacts (`node_modules`, `dist`, `build`, `coverage`, `.cache`, `test-results`).
+`@basis/component-architecture` deliberately leaves test, fixture, generated, and dependency files outside its application-source scope.
 
-The same scope applies to `basis lint`, `basis check`, and `basis compliance`, because all three run the same rule.
+## Self-application
 
-## Migration and escape hatches
+Basis follows its own rules. The only exemptions are the canonical implementations of the replacement mechanisms themselves and the small set of Basis tests whose subject is the test lifecycle surface. Those paths are listed explicitly in `libraries/linter-typescript/compliance.ts`; a consumer cannot opt out by naming a file `*.lifecycle.*` or putting it in a `testing` directory.
 
-Adopt the Basis config explicitly in a consumer repository:
+## Escape hatches
 
-```js
-// eslint.config.mjs
-import { createConfig } from 'basis/eslint'
-
-export default createConfig()
-```
-
-A repository that must temporarily exempt a path can turn the rule off for that path in its own config:
-
-```js
-import { createConfig } from 'basis/eslint'
-
-export default createConfig({
-  overrides: [
-    {
-      files: ['src/legacy/**'],
-      rules: { '@basis/component-architecture': 'off' },
-    },
-  ],
-})
-```
-
-For a single deliberate boundary, use an inline disable with a reason:
+Compliance always applies the Basis-owned configuration, so a repository config that turns a rule off does not weaken the command. For a single deliberate boundary, use an inline disable with a reason:
 
 ```ts
-// eslint-disable-next-line @basis/component-architecture -- Deliberate React boundary for this bridge.
-export class Bridge extends React.Component {}
+// eslint-disable-next-line @basis/no-direct-process-spawn -- This probes the host runtime before Basis is available.
+Bun.spawnSync([process.execPath, '--version'])
 ```
 
-`basis compliance` always applies the Basis-owned configuration, so a repository config that disables the rule does not weaken that command. Inline disables still work because they name the same rule. Use either escape hatch deliberately and remove it when the migration completes.
+Use the escape hatch deliberately and remove it when the boundary no longer applies. Prefer the canonical Basis mechanism whenever it can express the behavior.

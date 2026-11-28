@@ -21,7 +21,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { run } from '../libraries/configuration/run'
+import { run } from '../libraries/utilities'
 import { Logger } from '../libraries/utilities'
 
 /** Error prefix shared by host-dependency failures. */
