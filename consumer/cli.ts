@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Logger } from 'basis/logger'
-import { run } from 'basis/utilities'
+import { runAsync } from 'basis/utilities'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { basisServerUnsupportedReason, bunCheckUnsupportedReason } from './bun-version'
@@ -110,35 +110,28 @@ const writeResult = (
 }
 
 /**
- * Runs a dependency binary through Bun itself, so no Node shebang is required.
- * @param packageName The dependency package name.
- * @param binName The binary name to run.
- * @param args Arguments for the binary.
- * @returns The child process exit code.
- */
-const runBin = (packageName: string, binName: string, args: string[]): number => writeResult(
-  run(process.execPath, [resolveBin(packageName, binName), ...args]),
-)
-
-/**
  * Runs the Basis CSS policy over every `*.styles.ts` file.
  * @param fix Whether to let Stylelint apply the fixes it supports.
  * @returns The child process exit code.
  */
-const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', [
-  '**/*.styles.ts',
-  '--allow-empty-input',
-  '--config',
-  join(basisDir(), 'stylelint.config.mjs'),
-  ...(fix ? ['--fix'] : []),
-])
+const runStylelint = async (fix: boolean): Promise<number> => writeResult(await runAsync(
+  process.execPath,
+  [
+    resolveBin('stylelint', 'stylelint'),
+    '**/*.styles.ts',
+    '--allow-empty-input',
+    '--config',
+    join(basisDir(), 'stylelint.config.mjs'),
+    ...(fix ? ['--fix'] : []),
+  ],
+))
 
 /**
  * Runs the Basis Markdown/MDX policy through the plugin's CLI entrypoint.
  * @param fix Whether to rewrite documents with the fixes the policy supports.
  * @returns The child process exit code.
  */
-const runMarkdown = (fix: boolean): number => writeResult(run(
+const runMarkdown = async (fix: boolean): Promise<number> => writeResult(await runAsync(
   process.execPath,
   [join(basisDir(), 'libraries', 'linter-markdown', 'bin.ts'), ...(fix ? ['--fix'] : [])],
 ))
@@ -149,14 +142,13 @@ const runMarkdown = (fix: boolean): number => writeResult(run(
  * @param fix Whether to apply the autofixes each surface supports.
  * @returns The first non-zero child process exit code, or `0`.
  */
-const runLint = (fix: boolean): number => {
-  const eslintCode = runBunLint(fix)
-  if (eslintCode !== 0) return eslintCode
-
-  const stylelintCode = runStylelint(fix)
-  if (stylelintCode !== 0) return stylelintCode
-
-  return runMarkdown(fix)
+const runLint = async (fix: boolean): Promise<number> => {
+  const codes = await Promise.all([
+    runBunLint(fix),
+    runStylelint(fix),
+    runMarkdown(fix),
+  ])
+  return codes.find(code => code !== 0) ?? 0
 }
 
 /**
@@ -168,7 +160,7 @@ const runLint = (fix: boolean): number => {
  * duplicating the style policy, which `basis lint` already ran.
  * @returns The child process exit code.
  */
-const runCompliance = (): number => runBunLint(false, join(basisDir(), 'eslint.compliance.config.mjs'))
+const runCompliance = async (): Promise<number> => runBunLint(false, join(basisDir(), 'eslint.compliance.config.mjs'))
 
 /**
  * Reports whether the running Bun can type check through `bun --check`.
@@ -185,7 +177,7 @@ const requireBunCheck = (): boolean => {
  * Runs Bun's built-in TypeScript checker for the current project.
  * @returns The child process exit code.
  */
-const spawnBunCheck = (): number => writeResult(run(
+const spawnBunCheck = async (): Promise<number> => writeResult(await runAsync(
   process.execPath,
   ['--check'],
 ))
@@ -194,7 +186,7 @@ const spawnBunCheck = (): number => writeResult(run(
  * Runs the TypeScript checker after validating the runtime.
  * @returns The child process exit code.
  */
-const runTypecheck = (): number => (requireBunCheck() ? spawnBunCheck() : 1)
+const runTypecheck = async (): Promise<number> => (requireBunCheck() ? spawnBunCheck() : 1)
 
 /**
  * Runs the complete repository check: emit, style lint, optional paradigm
@@ -207,30 +199,48 @@ const runTypecheck = (): number => (requireBunCheck() ? spawnBunCheck() : 1)
  */
 const runCompleteCheck = async (paradigm: boolean): Promise<number> => {
   if (!requireBunCheck()) return 1
-  const emitCode = await runEmit()
+  const emitCode = await runEmit(false)
   if (emitCode !== 0) return emitCode
-  const lintCode = runLint(false)
-  if (lintCode !== 0) return lintCode
-  if (paradigm) {
-    const complianceCode = runCompliance()
-    if (complianceCode !== 0) return complianceCode
-  }
-  return spawnBunCheck()
+  const checks = [runLint(false), spawnBunCheck()]
+  if (paradigm) checks.push(runCompliance())
+  const codes = await Promise.all(checks)
+  return codes.find(code => code !== 0) ?? 0
+}
+
+/** Dependencies for the conventional emit lifecycle. */
+export interface EmitHooks {
+  /** Emit the application Graph to its output root. */
+  emit: typeof emit,
+  /** Format the generated output when the caller requested fixes. */
+  format: typeof runBunLint,
+}
+
+/** The production emit dependencies. */
+const defaultEmitHooks: EmitHooks = {
+  emit,
+  format: (fix, configPath, target) => runBunLint(fix, configPath, target),
 }
 
 /**
  * Runs the conventional application emit lifecycle.
+ * @param fix - Whether to format the generated output as part of the run.
+ * @param hooks - Emit and formatting dependencies.
  * @returns Process exit code (`0` when emission succeeds or is not configured).
  */
-const runEmit = async (): Promise<number> => {
+export const runEmit = async (
+  fix = false,
+  hooks: EmitHooks = defaultEmitHooks,
+): Promise<number> => {
   try {
-    const result = await emit()
+    const result = await hooks.emit()
     if (!result) {
       logger.info('[basis] emit: no graph.ts found; skipped')
       return 0
     }
-    const formatCode = runBunLint(true, undefined, 'generated')
-    if (formatCode !== 0) return formatCode
+    if (fix) {
+      const formatCode = await hooks.format(true, undefined, 'generated')
+      if (formatCode !== 0) return formatCode
+    }
     logger.info(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
     return 0
   } catch (error) {
@@ -337,13 +347,16 @@ const main = async (): Promise<void> => {
   const command = Object.values(Command).find(candidate => candidate === rawCommand)
 
   if (command === Command.Doctor) process.exit(doctor())
-  if (command === Command.Emit) process.exit(await runEmit())
+  if (command === Command.Emit) process.exit(await runEmit(false))
   if (command === Command.Lint) process.exit(await runCompleteCheck(false))
-  if (command === Command.Format) process.exit(runLint(true))
+  if (command === Command.Format) {
+    const emitCode = await runEmit(true)
+    process.exit(emitCode === 0 ? await runLint(true) : emitCode)
+  }
   if (command === Command.Compliance) process.exit(await runCompleteCheck(true))
   if (command === Command.Typecheck) {
-    const emitCode = await runEmit()
-    process.exit(emitCode === 0 ? runTypecheck() : emitCode)
+    const emitCode = await runEmit(false)
+    process.exit(emitCode === 0 ? await runTypecheck() : emitCode)
   }
 
   if (command === Command.Database) {

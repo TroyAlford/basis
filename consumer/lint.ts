@@ -1,5 +1,5 @@
 import { Logger } from 'basis/logger'
-import { run } from 'basis/utilities'
+import { run, runAsync } from 'basis/utilities'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -99,11 +99,11 @@ const eslintConfigPath = (): string => (
  * @param target - The path to lint, relative to the working directory.
  * @returns The child process exit code.
  */
-export const runBunLint = (
+export const runBunLint = async (
   fix: boolean,
   configPath: string = eslintConfigPath(),
   target = '.',
-): number => {
+): Promise<number> => {
   if (!requireBunLint()) return 1
 
   const scratch = mkdtempSync(join(tmpdir(), 'basis-lint-'))
@@ -114,7 +114,7 @@ export const runBunLint = (
       JSON.stringify({ name: 'basis-lint', private: true, type: 'module' }),
     )
 
-    const result = run(process.execPath, [
+    const result = await runAsync(process.execPath, [
       'lint',
       '--cwd',
       process.cwd(),
