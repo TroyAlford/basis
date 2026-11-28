@@ -63,6 +63,18 @@ describe('Basis CSS policy over *.styles.ts fixtures', () => {
     expect(warnings.map(warning => warning.rule)).toContain(noStateClasses)
   })
 
+  test('preserves literal </style> content when autofixing', async () => {
+    const body = `
+      .foo.component {
+        content: '</style><script>not markup</script>';
+      }
+    `
+
+    const outcome = await lintStyles(body, { config: createConfig(), fix: true })
+    expect(outcome.fixed).toContain("content: '</style><script>not markup</script>';")
+    expect(outcome.fixed).not.toContain('\\3c')
+  })
+
   test('reports and autofixes declaration ordering', async () => {
     const body = `
       .foo.component {
