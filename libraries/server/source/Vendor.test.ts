@@ -185,6 +185,7 @@ describe('vendor assets', () => {
   test('wires the discovered vendor bundle into a Server application automatically', async () => {
     const application = await useApplication({
       cwd: repoRoot,
+      development: true,
       entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
       timeoutMs: 120_000,
     })
