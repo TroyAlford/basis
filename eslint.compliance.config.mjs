@@ -1,6 +1,6 @@
 import { resolve, sep } from 'node:path'
 import process from 'node:process'
-import { createComplianceConfig } from './libraries/eslint-plugin/compliance'
+import { createComplianceConfig } from './libraries/linter-typescript/compliance'
 
 /*
  * Basis follows its own compliance policy. These are the only repository-local

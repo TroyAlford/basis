@@ -1,7 +1,7 @@
 import { createConfig } from './consumer/eslint'
 
 export default [
-  { ignores: ['**/.basis/**'] },
+  { ignores: ['**/.basis/**', 'libraries/linter-css/syntax/**', 'tmp/**'] },
   ...createConfig(),
   /*
    * Internal SQL formatter and lint helpers are documented by their signatures;
@@ -9,8 +9,8 @@ export default [
    */
   {
     files: [
-      'libraries/eslint-plugin/rules/sql/**',
-      'libraries/eslint-plugin/rules/sql*.ts',
+      'libraries/linter-typescript/rules/sql/**',
+      'libraries/linter-typescript/rules/sql*.ts',
     ],
     rules: {
       'jsdoc/require-param': 'off',

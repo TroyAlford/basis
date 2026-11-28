@@ -6,7 +6,7 @@ import { tempDirectory } from 'basis/testing'
 import { runAsync } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { GeneratedSchemas } from '../index'
 import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
 
@@ -80,14 +80,19 @@ function compileEntity(schemas: GeneratedSchemas, entity: string) {
  * @returns The process exit code and captured diagnostics.
  */
 async function typecheck(file: string): Promise<{ readonly exitCode: number, readonly output: string }> {
-  const result = await runAsync(process.execPath, [
-    './node_modules/@typescript/native/bin/tsc',
-    '--ignoreConfig',
-    '--noEmit',
-    '--skipLibCheck',
-    '--strict',
-    file,
-  ], { cwd: process.cwd(), logger: silent })
+  const directory = dirname(file)
+  await writeFile(join(directory, 'tsconfig.json'), JSON.stringify({
+    compilerOptions: {
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      noEmit: true,
+      skipLibCheck: true,
+      strict: true,
+      target: 'ESNext',
+    },
+    include: ['*.ts'],
+  }, null, 2))
+  const result = await runAsync(process.execPath, ['--check'], { cwd: directory, logger: silent })
   return { exitCode: result.exitCode, output: result.stderr || result.stdout }
 }
 

@@ -27,7 +27,7 @@ export class CssLintingDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>What it parses</h2>
-          <p>Styles are read through <code>postcss-styled-syntax</code>, a maintained template-literal custom syntax. It understands the <code>css</code> tagged templates in TypeScript, nested CSS, and template interpolations inside selectors and values. This is why the policy can reason about declarations and selectors instead of matching text.</p>
+          <p>Styles are read through Basis's template-literal custom syntax, adapted from <code>postcss-styled-syntax</code> (MIT). It understands the <code>css</code> tagged templates in TypeScript, nested CSS, and template interpolations inside selectors and values. This is why the policy can reason about declarations and selectors instead of matching text.</p>
         </section>
         <section>
           <h2>What it enforces</h2>

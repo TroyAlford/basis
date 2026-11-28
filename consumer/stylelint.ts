@@ -1,8 +1,8 @@
 /* eslint-disable @basis/no-default-export */
-import { createConfig } from '../libraries/stylelint-plugin'
+import { createConfig } from '../libraries/linter-css'
 
-export { createConfig } from '../libraries/stylelint-plugin'
-export type { CreateConfigOptions } from '../libraries/stylelint-plugin'
+export { createConfig } from '../libraries/linter-css'
+export type { CreateConfigOptions } from '../libraries/linter-css'
 
 /**
  * Consumer-facing entrypoint for the Basis CSS lint surface.

@@ -1,6 +1,6 @@
 # Consuming Basis
 
-Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no npm/JSR publish step and no consumer build step.
+Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no package-registry publish step and no consumer build step.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
@@ -45,7 +45,7 @@ bunx basis typecheck
 
 `basis lint` uses the Basis style policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. `basis compliance` runs the same style and typecheck surface plus the authoritative architecture and infrastructure rules. Choose `lint` or `compliance` for a repository gate, not both. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), [Compliance](../docs/compliance.mdx), and [TypeScript](../docs/typescript.mdx).
 
-`basis typecheck`, `basis lint`, and `basis compliance` run Bun's built-in TypeScript checker; the checker requires Bun 1.4.3 or newer. The full Basis Server install requires Bun 1.4.6 or the approved canary described in [Installation](../docs/installation.mdx). The install hook and `Server.start()` enforce the server requirement.
+`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer. `basis lint` and `basis compliance` run Bun's built-in linter; use the pinned canary or a future stable release that ships `bun lint` (stable 1.4.5 does not). The full Basis Server install requires Bun 1.4.6 or the approved canary described in [Installation](../docs/installation.mdx). The install hook and `Server.start()` enforce the server requirement. Installing Basis does not enforce the typecheck or linter minimums by itself; those commands perform their own checks.
 
 ## Server and database
 

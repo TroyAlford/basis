@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { formatEntityDocument } from '../libraries/eslint-plugin/rules/entityDefinitionFormat'
+import { formatEntityDocument } from '../libraries/linter-typescript/rules/entityDefinitionFormat'
 import { EntityDefinitions } from '../libraries/server/source/EntityDefinitions'
 import type { DocsIssue } from '../libraries/server/source/globDocs'
 import { globDocs } from '../libraries/server/source/globDocs'

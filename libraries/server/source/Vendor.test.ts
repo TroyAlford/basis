@@ -2,7 +2,7 @@ import { tempDirectory, useApplication, waitFor } from 'basis/testing'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RawSourceMap } from 'source-map-js'
 import { SourceMapConsumer } from 'source-map-js'
@@ -91,6 +91,42 @@ async function activeVendorSnapshot(base: string): Promise<ActiveVendorSnapshot>
   const bytes = await Bun.fetch(url).then(response => response.text())
   const mapBytes = await Bun.fetch(mapUrl).then(response => response.text())
   return { bytes, hash, mapBytes, mapHash, mapUrl, url }
+}
+
+/**
+ * Start a vendor-wiring application from a unique root inside the repository.
+ * @param env - Extra environment for the server process.
+ * @returns The application handle and its disposable root.
+ */
+async function isolatedVendorApplication(
+  env: Record<string, string> = {},
+): Promise<{ readonly appRoot: string, readonly application: Awaited<ReturnType<typeof useApplication>> }> {
+  const appRoot = tempDirectory('basis-vendor-app-')
+  try {
+    await cp(join(repoRoot, 'testing', 'server', 'Application.tsx'), join(appRoot, 'Application.tsx'))
+    await cp(join(repoRoot, 'testing', 'server', 'Application.styles.ts'), join(appRoot, 'Application.styles.ts'))
+    const serve = join(appRoot, 'serve.ts')
+    await writeFile(serve, `
+import { Server } from 'basis/server'
+
+new Server()
+  .root(${JSON.stringify(repoRoot)})
+  .main(${JSON.stringify(join(appRoot, 'Application.tsx'))})
+  .assets(${JSON.stringify(join(repoRoot, 'testing', 'server', 'assets'))})
+  .start()
+`.trim())
+    const application = await useApplication({
+      cwd: repoRoot,
+      development: true,
+      entry: serve,
+      env,
+      timeoutMs: 120_000,
+    })
+    return { appRoot, application }
+  } catch (error) {
+    await rm(appRoot, { force: true, recursive: true })
+    throw error
+  }
 }
 
 describe('vendor assets', () => {
@@ -183,35 +219,33 @@ describe('vendor assets', () => {
   })
 
   test('wires the discovered vendor bundle into a Server application automatically', async () => {
-    const application = await useApplication({
-      cwd: repoRoot,
-      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
-    })
+    const { application, appRoot } = await isolatedVendorApplication()
 
-    const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
-    expect(shell).toContain('<!-- VENDORS -->')
+    try {
+      const shell = await Bun.fetch(`${application.url}/__basis_shell`).then(response => response.text())
+      expect(shell).toContain('<!-- VENDORS -->')
 
-    const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
-    expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
-    expect(html).not.toContain('document.write')
+      const html = await Bun.fetch(`${application.url}/`).then(response => response.text())
+      expect(html).toMatch(/<script src="http:\/\/127\.0\.0\.1:\d+\/assets\/vendor\/vendor\.js"></)
+      expect(html).not.toContain('document.write')
 
-    const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]
-    expect(source).toBeDefined()
-    const applicationBundle = await Bun.fetch(`${application.url}${source}`).then(response => response.text())
-    expect(applicationBundle).toContain('__basisVendor')
-    expect(applicationBundle).not.toContain('react.production')
+      const source = /<script type="module"[^>]+src="([^"]+)"/.exec(html)?.[1]
+      expect(source).toBeDefined()
+      const applicationBundle = await Bun.fetch(`${application.url}${source}`).then(response => response.text())
+      expect(applicationBundle).toContain('__basisVendor')
+      expect(applicationBundle).not.toContain('react.production')
 
-    const vendor = await Bun.fetch(`${application.url}/assets/vendor/vendor.js`, { redirect: 'manual' })
-    expect(vendor.status).toBe(307)
-    expect(vendor.headers.get('location')).toContain('?v=')
-  })
+      const vendor = await Bun.fetch(`${application.url}/assets/vendor/vendor.js`, { redirect: 'manual' })
+      expect(vendor.status).toBe(307)
+      expect(vendor.headers.get('location')).toContain('?v=')
+    } finally {
+      await application.stop()
+      await rm(appRoot, { force: true, recursive: true })
+    }
+  }, 120_000)
 
   test('uses a configured trusted public origin for vendor scripts', async () => {
-    const application = await useApplication({
-      cwd: repoRoot,
-      entry: join(repoRoot, 'testing', 'server', 'serve.ts'),
-      env: { PUBLIC_ORIGIN: 'https://app.example' },
-    })
+    const { application, appRoot } = await isolatedVendorApplication({ PUBLIC_ORIGIN: 'https://app.example' })
 
     try {
       const html = await Bun.fetch(application.url).then(response => response.text())
@@ -219,8 +253,9 @@ describe('vendor assets', () => {
       expect(html).not.toContain('src="http://127.0.0.1')
     } finally {
       await application.stop()
+      await rm(appRoot, { force: true, recursive: true })
     }
-  })
+  }, 120_000)
 
   test('preserves vendor HTTP cache headers and standalone chunk identity', async () => {
     const root = tempDirectory('basis-vendor-http-')
@@ -350,7 +385,7 @@ export class Application extends Component {
         cwd: root,
         entry: './serve.ts',
         env: { VENDOR_PHASE: 'first' },
-        readyPath: '/',
+        readyPath: '/api/health',
       })
       try {
         expect(await Bun.fetch(first.url).then(response => response.text())).toContain('one')
@@ -451,7 +486,7 @@ export class Application extends Component {
         cwd: root,
         entry: './serve.ts',
         env: { VENDOR_PHASE: 'second' },
-        readyPath: '/',
+        readyPath: '/api/health',
       })
       try {
         expect(await Bun.fetch(second.url).then(response => response.text())).toContain('two')

@@ -1,0 +1,14 @@
+{
+  "name": "@basis/linter-support",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./json-schema": "./json-schema.ts",
+    "./ts-eslint": "./ts-eslint.ts"
+  },
+  "dependencies": {
+    "@eslint-community/eslint-utils": "^4.9.1"
+  }
+}

@@ -32,4 +32,6 @@ bunx basis docs build
 - `db` runs host database lifecycle operations against the managed installation. It resolves `graph.ts` and `migrations/` from the current directory; `graph.ts` may default-export the Graph or export it as `graph`. The application must be offline for `release`, `upgrade` and `rollback`; scheduling and retention remain host responsibilities.
 - `docs check` validates a docs tree; `docs build` writes the static documentation site.
 
+The lint surfaces use the pinned Bun canary's built-in linter; a future stable release must ship `bun lint` before consumers can run them on stable.
+
 The CLI is a facade over the same code and policy exported through `basis/eslint`, `basis/stylelint`, `basis/markdown`, and `basis/tsconfig/*`. It does not replace repository-specific scripts or add a second configuration system. `basis check` is no longer supported; use `basis compliance`.
