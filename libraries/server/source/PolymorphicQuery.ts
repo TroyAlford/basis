@@ -3066,6 +3066,8 @@ class QueryProjection {
     return plan.resultType === 'entity'
       && plan.ownerId !== undefined
       && plan.targetAlias !== undefined
+      && !plan.target.abstract
+      && plan.target.name !== 'Entity'
       && (spec.edgeFields.size === 0
         || (plan.collection.kind === 'explicit' && this.#edgeProjectionAllowed(plan)))
   }
@@ -3086,10 +3088,8 @@ class QueryProjection {
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     if (plan.resultType === 'record') return this.#addFlatRecordCollection(node, spec, plan)
     if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
-    if (plan.target.abstract || plan.target.name === 'Entity') return false
     const semantics = this.#collectionSemantics(spec, plan)
-    const { filter, limit, offset, orderBy } = semantics
-    if (orderBy !== undefined) return false
+    const { filter, limit, offset } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     let filterPredicate: SqlFragment | undefined
@@ -3313,8 +3313,7 @@ class QueryProjection {
       || plan.relationshipAlias === undefined
       || plan.ownerId === undefined) return false
     const semantics = this.#collectionSemantics(spec, plan)
-    const { filter: filterText, limit, offset, orderBy } = semantics
-    if (orderBy !== undefined) return false
+    const { filter: filterText, limit, offset } = semantics
     if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
     if (!Number.isInteger(offset) || offset < 0) return false
     let fields: readonly string[]
