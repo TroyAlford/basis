@@ -2792,10 +2792,6 @@ class QueryProjection {
         `${quote(alias)}.${quote('id')} = "${source.context.baseAlias}"."id"`,
       ))
       const child = this.#node(rootContext(this.#entities, alias), path)
-      child.parentIdentity = {
-        alias: source.context.baseAlias,
-        expression: `${source.context.baseAlias}.${quote('id')}`,
-      }
       this.#identity(child)
       return child
     }
@@ -2809,10 +2805,6 @@ class QueryProjection {
       `"${source.context.baseAlias}"."id"`,
     ))
     const child = this.#node(targetContext(this.#entities, target, alias, alias), path)
-    child.parentIdentity = {
-      alias: source.context.baseAlias,
-      expression: `${source.context.baseAlias}.${quote('id')}`,
-    }
     this.#identity(child)
     return child
   }
@@ -3854,9 +3846,11 @@ class QueryProjection {
       `${quote(childAlias)}.${quote('id')} IN (SELECT ${quote('id')} FROM ${targetIdsCte})`,
     )
     let filterPredicate: SqlFragment | undefined
+    let filterMatched: SqlFragment | undefined
     if (filter !== undefined) {
       try {
         filterPredicate = this.#collectionFilterPredicate(plan, key, filter)
+        filterMatched = this.#collectionFilterPredicate(plan, key, filter)
       } catch {
         /*
          * Fall back to the member adapter so ambiguous relationship fields
@@ -3902,12 +3896,28 @@ class QueryProjection {
     const rowsDefinition = (
       name: string,
       child: SqlFragment,
-      filterFragment?: SqlFragment,
+      itemFilter?: SqlFragment,
+      matchedFilter?: SqlFragment,
     ): SqlFragment => {
-      const filterAlias = quote('__batch_filter')
-      const filterProjection = filterFragment === undefined
-        ? undefined
-        : sqlFragment`, (CASE WHEN (${filterFragment}) THEN TRUE ELSE FALSE END) AS ${sqlText(filterAlias)}`
+      const partition = `${parentId}, ${quote('__child')}.${quote('id')}`
+      let itemFlag: SqlFragment | undefined
+      if (itemFilter !== undefined) {
+        itemFlag = sqlConcat([
+          sqlText(', bool_or(CASE WHEN ('),
+          itemFilter,
+          sqlText(`) THEN TRUE ELSE FALSE END) OVER (PARTITION BY ${partition}) ` +
+            `AS ${quote('__batch_filter')}`),
+        ])
+      }
+      let matchedFlag: SqlFragment | undefined
+      if (matchedFilter !== undefined) {
+        matchedFlag = sqlConcat([
+          sqlText(', bool_or(CASE WHEN ('),
+          matchedFilter,
+          sqlText(`) THEN TRUE ELSE FALSE END) OVER (PARTITION BY ${partition}) ` +
+            `AS ${quote('__batch_filter_matched')}`),
+        ])
+      }
       return sqlConcat([
         sqlText(`${name} AS MATERIALIZED (`),
         sqlText(`SELECT DISTINCT ON (${parentId}, ${quote('__child')}.${quote('id')}) ` +
@@ -3915,7 +3925,8 @@ class QueryProjection {
         edgeFields.length === 0
           ? undefined
           : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
-        filterProjection,
+        itemFlag,
+        matchedFlag,
         sqlText(' FROM '),
         sqlText(`${plan.relation} `),
         sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
@@ -3945,10 +3956,13 @@ class QueryProjection {
         collectionPredicate,
         sqlText(')'),
       ], ''),
-      rowsDefinition(rowsAllCte, allSql, filterPredicate),
+      rowsDefinition(rowsAllCte, allSql, filterPredicate, filterMatched),
       ...(filterPredicate === undefined ? [] : [sqlConcat([
         sqlText(`${rowsFilteredCte} AS MATERIALIZED (`),
         sqlText(`SELECT * FROM ${rowsAllCte} WHERE ${quote('__batch_filter')} IS TRUE)`),
+      ], ''), sqlConcat([
+        sqlText(`${quote(`batch_rows_matched_${suffix}`)} AS MATERIALIZED (`),
+        sqlText(`SELECT * FROM ${rowsAllCte} WHERE ${quote('__batch_filter_matched')} IS TRUE)`),
       ], '')]),
       sqlConcat([
         sqlText(`${countsCte} AS MATERIALIZED (`),
@@ -3957,10 +3971,10 @@ class QueryProjection {
       ], ''),
       sqlConcat([
         sqlText(`${itemsCte} AS MATERIALIZED (`),
+        sqlText(`WITH ${quote('__item_group')} AS MATERIALIZED (`),
         sqlText(`SELECT ${quote('__parent_id')}, `),
         sqlText(`COALESCE(json_agg(row_to_json(${itemAlias}) ORDER BY ${itemAlias}.${ordinalAlias}) `),
-        sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')}, `),
-        sqlText(`count(*)::int AS ${quote('__matched')} `),
+        sqlText(`FILTER (WHERE ${page}), '[]'::json) AS ${quote('__items')} `),
         sqlText('FROM ('),
         sqlText('SELECT '),
         sqlText('row_number() OVER ('),
@@ -3968,7 +3982,20 @@ class QueryProjection {
         sqlText(`AS ${quote('__ordinal')}, ${quote('__child')}.* `),
         sqlText(`FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte} AS ${quote('__child')}) `),
         sqlText(`AS ${quote('__item')} `),
-        sqlText(`GROUP BY ${quote('__parent_id')})`),
+        sqlText(`GROUP BY ${quote('__parent_id')}), `),
+        sqlText(`${quote('__matched')} AS MATERIALIZED (`),
+        sqlText(`SELECT ${quote('__parent_id')}, count(*)::int AS ${quote('__matched')} `),
+        sqlText(`FROM ${filter === undefined ? rowsAllCte : quote(`batch_rows_matched_${suffix}`)} `),
+        sqlText(`GROUP BY ${quote('__parent_id')}) `),
+        sqlText(`SELECT ${quote('__parents')}.${quote('__parent_id')}, ` +
+          `COALESCE(${quote('__item_group')}.${quote('__items')}, '[]'::json) AS ${quote('__items')}, ` +
+          `COALESCE(${quote('__matched')}.${quote('__matched')}, 0) AS ${quote('__matched')} `),
+        sqlText(`FROM (SELECT ${quote('__parent_id')} FROM ${quote('__item_group')} UNION ` +
+          `SELECT ${quote('__parent_id')} FROM ${quote('__matched')}) AS ${quote('__parents')} `),
+        sqlText(`LEFT JOIN ${quote('__item_group')} ON ${quote('__item_group')}.${quote('__parent_id')} ` +
+          `= ${quote('__parents')}.${quote('__parent_id')} `),
+        sqlText(`LEFT JOIN ${quote('__matched')} ON ${quote('__matched')}.${quote('__parent_id')} ` +
+          `= ${quote('__parents')}.${quote('__parent_id')})`),
       ], ''),
     )
     const alias = columnAlias(node.path, spec.collection.name)

@@ -307,7 +307,7 @@ describe('flat collection pagination', () => {
             'tags.label',
           ],
         },
-        (_path, collection) => collection === 'grandchildren',
+        (_path, collection) => collection === 'children',
       )
       const rows = await database.sql.unsafe<Record<string, unknown>[]>(compiled.sql, compiled.values)
       const row = compiled.hydrate(rows[0] as Record<string, unknown>) as {
@@ -356,6 +356,78 @@ describe('flat collection pagination', () => {
     })
   })
 
+  test('keeps independent edge filters on the legacy batched path', async () => {
+    await withDatabase('legacy-edge-filter', ownerUser, async database => {
+      const definition = database.entities.entity('Parent')
+      if (definition === undefined) throw new Error('Parent definition missing')
+      const compiled = compilePolymorphicQueryWithRejection(
+        database.entities,
+        definition,
+        {
+          fields: [
+            'id',
+            'children[rank = 1]{$limit:null}',
+            'children.label',
+            'children.grandchildren{$limit:null}',
+            'children.grandchildren.label',
+          ],
+          where: { id: parent },
+        },
+        (_path, collection) => collection === 'children',
+      )
+      expect(compiled.sql).toContain('batch_items_')
+      expect(compiled.sql).toContain('batch_rows_all_')
+      const rank = 1
+      const positions: number[] = []
+      compiled.values.forEach((value, index) => { if (value === rank) positions.push(index) })
+      expect(positions).toHaveLength(2)
+      const run = async (itemRank: number, matchedRank: number): Promise<Record<string, unknown>> => {
+        const values = [...compiled.values]
+        values[positions[0] as number] = itemRank
+        values[positions[1] as number] = matchedRank
+        const rows = await database.sql.unsafe<Record<string, unknown>[]>(compiled.sql, values)
+        return compiled.hydrate(rows[0] as Record<string, unknown>)
+      }
+      const item = await run(1, 2) as {
+        children: { $matched: number, $total: number, items: { id: string }[] },
+      }
+      expect(item.children.items.map(entry => entry.id)).toEqual([child(0)])
+      expect(item.children.$matched).toBe(1)
+      expect(item.children.$total).toBe(1)
+      const reverse = await run(2, 1) as typeof item
+      expect(reverse.children.items.map(entry => entry.id)).toEqual([child(0)])
+      expect(reverse.children.$matched).toBe(1)
+      expect(reverse.children.$total).toBe(1)
+    }, {
+      graph,
+      setup: async (database: DatabaseContext) => {
+        await database.create('User', { id: ownerUser, label: 'Owner', name: 'Owner' })
+        await database.create('Parent', { id: parent, label: 'Parent', name: 'Parent', owner: ownerUser })
+        await database.create('Child', { id: child(0), label: 'Child', name: 'Child', owner: ownerUser })
+        await database.create('Tag', [
+          { id: '00000000-0000-4000-8000-000000000b01', label: 'Tag 1', name: 'Tag 1' },
+          { id: '00000000-0000-4000-8000-000000000b02', label: 'Tag 2', name: 'Tag 2' },
+        ])
+        await database.create('Grandchild', {
+          id: grandchild(0),
+          label: 'Grandchild',
+          name: 'Grandchild',
+          owner: ownerUser,
+        })
+        await database.sql`
+          INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id", "rank")
+          VALUES
+            (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b01', 1),
+            (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b02', 2)
+        `
+        await database.sql`
+          INSERT INTO "ChildGrandchild" ("child.id", "grandchild.id")
+          VALUES (${child(0)}, ${grandchild(0)})
+        `
+      },
+    })
+  })
+
   test('keeps independent item and matched edge filters for one target', async () => {
     await withDatabase('flat-edge-filter', ownerUser, async database => {
       const definition = database.entities.entity('Parent')
@@ -395,11 +467,21 @@ describe('flat collection pagination', () => {
           { id: '00000000-0000-4000-8000-000000000b01', label: 'Tag 1', name: 'Tag 1' },
           { id: '00000000-0000-4000-8000-000000000b02', label: 'Tag 2', name: 'Tag 2' },
         ])
+        await database.create('Grandchild', {
+          id: grandchild(0),
+          label: 'Grandchild',
+          name: 'Grandchild',
+          owner: ownerUser,
+        })
         await database.sql`
           INSERT INTO "ParentChild" ("parent.id", "child.id", "tag.id", "rank")
           VALUES
             (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b01', 1),
             (${parent}, ${child(0)}, '00000000-0000-4000-8000-000000000b02', 2)
+        `
+        await database.sql`
+          INSERT INTO "ChildGrandchild" ("child.id", "grandchild.id")
+          VALUES (${child(0)}, ${grandchild(0)})
         `
       },
     })
