@@ -253,8 +253,6 @@ class CollectionSemantics {
   readonly filter?: string
   /** Result identity aliases. */
   readonly identity: readonly string[]
-  /** Whether member rows are already unique by identity. */
-  readonly identityUnique: boolean
   /** Effective page size. */
   readonly limit: number | null
   /** Effective page offset. */
@@ -267,7 +265,6 @@ class CollectionSemantics {
    * @param options - Resolved collection inputs.
    * @param options.filter - Requested filter expression.
    * @param options.identity - Result identity aliases.
-   * @param options.identityUnique - Whether member rows are already unique by identity.
    * @param options.limit - Effective page size.
    * @param options.offset - Effective page offset.
    * @param options.orderBy - Effective item ordering.
@@ -275,14 +272,12 @@ class CollectionSemantics {
   constructor(options: {
     readonly filter?: string,
     readonly identity: readonly string[],
-    readonly identityUnique: boolean,
     readonly limit: number | null,
     readonly offset: number,
     readonly orderBy?: OrderBy,
   }) {
     this.filter = options.filter
     this.identity = options.identity
-    this.identityUnique = options.identityUnique
     this.limit = options.limit
     this.offset = options.offset
     this.orderBy = options.orderBy
@@ -294,7 +289,7 @@ class CollectionSemantics {
    * @returns Count fragment.
    */
   count(member: SqlFragment): SqlFragment {
-    return collectionIdentityCount(member, this.identity, this.identityUnique)
+    return collectionIdentityCount(member)
   }
 
   /**
@@ -306,11 +301,9 @@ class CollectionSemantics {
   page(member: SqlFragment, orderings: readonly CollectionOrdering[]): SqlFragment {
     return collectionIdentityPage(
       member,
-      this.identity,
       orderings,
       this.limit,
       this.offset,
-      this.identityUnique,
     )
   }
 
@@ -369,8 +362,6 @@ interface CollectionMemberAdapter {
   readonly compile: (filter?: string) => CollectionMemberQuery,
   /** Output aliases forming the result identity. */
   readonly identity: readonly string[],
-  /** Whether member rows are already unique by identity. */
-  readonly identityUnique: boolean,
   /** Output aliases available for ordering. */
   readonly orderable: ReadonlySet<string>,
 }
@@ -403,19 +394,6 @@ interface AuthorizedReachableGroup {
   readonly name: string,
   /** Selected identity source. */
   readonly source: AuthorizedRestriction,
-}
-
-/** Snapshot of authorized-relation planning state for atomic fallback. */
-interface AuthorizedRelationsSnapshot {
-  readonly available: ReadonlySet<string>,
-  readonly baseUsed: ReadonlySet<string>,
-  readonly emittedBase: ReadonlySet<string>,
-  readonly excluded: ReadonlySet<string>,
-  readonly groupIndex: number,
-  readonly groups: ReadonlyMap<string, AuthorizedReachableGroup>,
-  readonly materialized: boolean,
-  readonly reachable: ReadonlyMap<string, ReadonlyMap<string, AuthorizedRestriction>>,
-  readonly relations: ReadonlyMap<string, ReadonlyMap<string, AuthorizedField | null>>,
 }
 
 /**
@@ -475,47 +453,6 @@ class AuthorizedRelations {
    */
   exclude(name: string): void {
     this.#excluded.add(name)
-  }
-
-  /**
-   * Capture planning state before a flat candidate is attempted.
-   * @returns Restorable snapshot.
-   */
-  snapshot(): AuthorizedRelationsSnapshot {
-    return {
-      available: new Set(this.#available),
-      baseUsed: new Set(this.#baseUsed),
-      emittedBase: new Set(this.#emittedBase),
-      excluded: new Set(this.#excluded),
-      groupIndex: this.#groupIndex,
-      groups: new Map([...this.#groups].map(([key, group]) => [key, { ...group }])),
-      materialized: this.#materialized,
-      reachable: new Map([...this.#reachable].map(([name, sources]) => [name, new Map(sources)])),
-      relations: new Map([...this.#relations].map(([name, fields]) => [name, new Map(fields)])),
-    }
-  }
-
-  /**
-   * Restore planning state after a rejected flat candidate.
-   * @param snapshot - State captured before the candidate.
-   */
-  restore(snapshot: AuthorizedRelationsSnapshot): void {
-    this.#available.clear()
-    for (const name of snapshot.available) this.#available.add(name)
-    this.#baseUsed.clear()
-    for (const name of snapshot.baseUsed) this.#baseUsed.add(name)
-    this.#emittedBase.clear()
-    for (const name of snapshot.emittedBase) this.#emittedBase.add(name)
-    this.#excluded.clear()
-    for (const name of snapshot.excluded) this.#excluded.add(name)
-    this.#groupIndex = snapshot.groupIndex
-    this.#groups.clear()
-    for (const [key, group] of snapshot.groups) this.#groups.set(key, { ...group })
-    this.#materialized = snapshot.materialized
-    this.#reachable.clear()
-    for (const [name, sources] of snapshot.reachable) this.#reachable.set(name, new Map(sources))
-    this.#relations.clear()
-    for (const [name, fields] of snapshot.relations) this.#relations.set(name, new Map(fields))
   }
 
   /**
@@ -1011,12 +948,6 @@ interface ProjectionShared {
   readonly definitions: SqlFragment[],
   /** Root reference identities waiting for the selected root relation. */
   readonly pendingBase: { readonly column: string, readonly name: string }[],
-  /**
-   * Test-only post-mutation rejection hook. Production compilation leaves this
-   * undefined; the rollback regression injects it to exercise the nested-flat
-   * failure branch without changing a public query option.
-   */
-  readonly rejectNestedProjection?: (path: readonly string[], collection: string) => boolean,
   /** Authorized relations and their shared CTE requirements. */
   readonly relations: AuthorizedRelations,
   /** Shared relationship-edge sources keyed by parent/source identity. */
@@ -1108,7 +1039,6 @@ class QueryProjection {
    * @param shared - Statement-wide scope shared with nested flat projections.
    * @param rootBase - Materialized identity rows for a nested item projection.
    * @param context - Root occurrence for a nested item projection.
-   * @param rejectNestedProjection - Test-only nested-flat rejection hook.
    */
   constructor(
     entities: EntityDefinitions,
@@ -1120,7 +1050,6 @@ class QueryProjection {
     shared?: ProjectionShared,
     rootBase?: string,
     context?: EntityContext,
-    rejectNestedProjection?: (path: readonly string[], collection: string) => boolean,
   ) {
     this.#entities = entities
     this.#shared = shared ?? {
@@ -1130,7 +1059,6 @@ class QueryProjection {
       definitions: [],
       pendingBase: [],
       relations: new AuthorizedRelations(entities, relationPrefix),
-      ...(rejectNestedProjection === undefined ? {} : { rejectNestedProjection }),
       sources: new Map(),
     }
     this.#relations = this.#shared.relations
@@ -1260,7 +1188,8 @@ class QueryProjection {
     }
     for (const node of nodes) {
       for (const spec of node.projectedSpecs.values()) {
-        if (!this.#canBatchCollection(node, spec) || !this.#addBatchedCollection(node, spec)) {
+        this.#validateCollectionProjection(spec)
+        if (!this.#canBatchCollection(node, spec) || !this.#addFlatCollection(node, spec)) {
           this.#addProjectedCollection(node, spec)
         }
       }
@@ -2174,7 +2103,7 @@ class QueryProjection {
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, plan.collection.name, true)
     const member = adapter.compile(filter)
-    const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
+    const count = collectionIdentityCount(member)
     return _bind => {
       void _bind
       return sqlFragment`(${count})`
@@ -2472,7 +2401,7 @@ class QueryProjection {
       ? this.#recordMember(plan, spec, true)
       : this.#entityMember(plan, spec, key, true)
     const member = adapter.compile(undefined)
-    const count = collectionIdentityCount(member, adapter.identity, adapter.identityUnique)
+    const count = collectionIdentityCount(member)
     const exists = sqlConcat(['EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const empty = sqlConcat(['NOT EXISTS (SELECT 1 FROM (', member, ') AS "__member")'])
     const scope: CountScope = {
@@ -3046,7 +2975,6 @@ class QueryProjection {
         ? undefined
         : [...spec.filters].map(value => `(${value})`).join(' $and '),
       identity: this.#collectionIdentity(plan),
-      identityUnique: true,
     })
   }
 
@@ -3059,6 +2987,56 @@ class QueryProjection {
     return plan.resultType === 'record'
       ? plan.relationship?.between.map(endpoint => endpoint.field) ?? []
       : ['id']
+  }
+
+  /**
+   * Validate relationship-owned projection before choosing physical SQL.
+   * @param spec - Requested collection projection.
+   * @throws {Error} When an ambiguous edge property is projected.
+   */
+  #validateCollectionProjection(spec: ProjectedCollectionSpec): void {
+    const collection = spec.collection
+    if (collection.kind !== 'explicit') return
+    const target = this.#entities.entity(collection.target)
+    if (target !== undefined) {
+      for (const field of spec.fields) {
+        const name = splitFieldPath(field)[0]
+        if (name === undefined) continue
+        if (target.effectiveFields.some(candidate => candidate.name === name)
+          && collection.relationship.fields.some(candidate => candidate.name === name)) {
+          throw new Error(`Ambiguous collection field "${collection.name}.${name}"`)
+        }
+      }
+    }
+    const prefix = `${lowerFirst(collection.relationship.name)}.`
+    const targetField = [...spec.fields].find(name => name.startsWith(prefix))
+    const edgeField = targetField === undefined ? [...spec.edgeFields][0] : undefined
+    if (targetField === undefined && edgeField === undefined) return
+    if (this.#edgeProjectionAllowedCollection(collection)) return
+    const name = targetField ?? `${prefix}${edgeField as string}`
+    throw new Error(
+      `Entity collection "${collection.name}" cannot project relationship-owned field ` +
+      `"${name}"; one Entity may map to multiple edges`,
+    )
+  }
+
+  /**
+   * Whether one explicit collection has an unambiguous target/edge pair.
+   * @param collection - Explicit collection navigation.
+   * @returns `true` when relationship-owned projection is safe.
+   */
+  #edgeProjectionAllowedCollection(collection: DerivedCollectionDefinition): boolean {
+    if (collection.kind !== 'explicit') return true
+    const relationship = collection.relationship
+    if (relationship.between.length === 2) return true
+    const target = collection.targetEndpoint
+    if (!target) return false
+    return relationship.constraints.some(constraint => (
+      constraint.type === Constraint.Structural
+      && constraint.fields.length === 2
+      && constraint.fields.includes(collection.ownerEndpoint.field)
+      && constraint.fields.includes(target.field)
+    ))
   }
 
   /**
@@ -3090,17 +3068,6 @@ class QueryProjection {
       && plan.targetAlias !== undefined
       && (spec.edgeFields.size === 0
         || (plan.collection.kind === 'explicit' && this.#edgeProjectionAllowed(plan)))
-  }
-
-  /**
-   * Add one collection, preferring the flattened plan and falling back only
-   * when the legacy adapter proves a shape the flat planner rejects.
-   * @param node - Projection occurrence owning the collection.
-   * @param spec - Requested collection projection.
-   * @returns Whether a batch plan was emitted.
-   */
-  #addBatchedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
-    return this.#addFlatCollection(node, spec) || this.#addLegacyBatchedCollection(node, spec)
   }
 
   /**
@@ -3145,10 +3112,6 @@ class QueryProjection {
     } catch {
       return false
     }
-    const workStart = this.#work
-    const relationsSnapshot = this.#relations.snapshot()
-    const basePendingSnapshot = [...this.#shared.pendingBase]
-    const sourcesSnapshot = new Map(this.#shared.sources)
     this.#relations.materialize([this.root.definition.name, plan.target.name])
     this.#consume(plan.work)
     const roots = this.#ensureBatchRootSelection()
@@ -3157,9 +3120,6 @@ class QueryProjection {
       ? roots
       : this.#ensureBatchParentSelection(node, roots)
     this.#flushReachable()
-    const definitionStart = this.#batchDefinitions.length
-    const cteStart = this.#shared.cte
-    const aliasStart = this.#shared.alias
     const suffix = this.#nextAlias('fb')
     const baseCte = quote(`flat_base_${suffix}`)
     const itemsCte = quote(`flat_items_${suffix}`)
@@ -3299,29 +3259,7 @@ class QueryProjection {
       selectedBase,
       targetContext(this.#entities, plan.target, childRoot, childRoot),
     )
-    let hydrateItem: (row: Record<string, unknown>) => Record<string, unknown>
-    try {
-      if (this.#shared.rejectNestedProjection?.(node.path, spec.collection.name) === true) {
-        throw new Error('Nested flat projection rejected for rollback coverage')
-      }
-      hydrateItem = child.build(fields, 0, undefined)
-    } catch {
-      /*
-       * A nested flat projection may reject a shape that the legacy planner
-       * can still prove. Roll back this base and its descendants so the
-       * fallback never sees a partially emitted CTE graph.
-       */
-      this.#batchDefinitions.splice(definitionStart)
-      this.#shared.cte = cteStart
-      this.#shared.alias = aliasStart
-      this.#work = workStart
-      this.#relations.restore(relationsSnapshot)
-      this.#shared.sources.clear()
-      for (const [name, source] of sourcesSnapshot) this.#shared.sources.set(name, source)
-      this.#shared.pendingBase.splice(0)
-      this.#shared.pendingBase.push(...basePendingSnapshot)
-      return false
-    }
+    const hydrateItem = child.build(fields, 0, undefined)
     this.#flushReachable()
     const rowColumns = sqlConcat([
       sqlText(`${quote(childRoot)}.${quote('__parent_id')}, ${quote(childRoot)}.${quote('__item_id')}, `),
@@ -3750,160 +3688,6 @@ class QueryProjection {
   }
 
   /**
-   * Add one root collection as a shared relational batch.
-   *
-   * All roots are scoped once, member rows are joined to their owning root,
-   * and the per-parent JSON envelope is assembled once. This removes the
-   * lateral member query and its repeated matched-count query for the simple
-   * shape the planner can prove here.
-   * @param node - Projection occurrence owning the collection.
-   * @param spec - Requested target fields.
-   * @returns Whether the batch plan was emitted.
-   */
-  #addLegacyBatchedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): boolean {
-    const key = collectionKey(node.path, spec.collection.name)
-    const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
-    if (plan.resultType === 'record') return false
-    if (plan.ownerId === undefined || plan.targetAlias === undefined) return false
-    this.#consume(plan.work)
-    const semantics = this.#collectionSemantics(spec, plan)
-    const { filter, limit, offset } = semantics
-    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) return false
-    if (!Number.isInteger(offset) || offset < 0) return false
-    const fields = [...new Set(['id', 'name', 'entity', ...spec.fields])]
-    const edgeFields = [...spec.edgeFields]
-    const childAlias = this.#nextAlias('b')
-    const targetIdsCte = quote(`batch_target_ids_${childAlias}`)
-    const targetIds = sqlText(
-      `${quote(childAlias)}.${quote('id')} IN (SELECT ${quote('id')} FROM ${targetIdsCte})`,
-    )
-    let filterPredicate: SqlFragment | undefined
-    let filterMatched: SqlFragment | undefined
-    if (filter !== undefined) {
-      try {
-        filterPredicate = this.#collectionFilterPredicate(plan, key, filter)
-        filterMatched = this.#collectionFilterPredicate(plan, key, filter)
-      } catch {
-        /*
-         * Fall back to the member adapter so ambiguous relationship fields
-         * still surface the canonical projection error.
-         */
-        return false
-      }
-    }
-    let childAll: CompiledPolymorphicQuery
-    try {
-      childAll = compilePolymorphicQuery(this.#entities, plan.target, {
-        aliasPrefix: `${childAlias}_`,
-        fields,
-        limit: null,
-        offset: 0,
-        rawWhere: targetIds,
-        relationPrefix: `${this.#relationPrefix}batch_`,
-        rootAlias: childAlias,
-      })
-    } catch {
-      return false
-    }
-    const allSql = compiledFragment(childAll)
-    const suffix = this.#nextAlias('bg')
-    const rootCte = quote(`batch_roots_${suffix}`)
-    const rowsAllCte = quote(`batch_rows_all_${suffix}`)
-    const rowsFilteredCte = quote(`batch_rows_filtered_${suffix}`)
-    const itemsCte = quote(`batch_items_${suffix}`)
-    const rootAlias = node.context.baseAlias
-    const parentId = plan.ownerId
-    const nested = node.path.length !== 0
-    const rootIds = this.#ensureBatchRootSelection()
-    const parentIds = nested ? this.#ensureBatchParentSelection(node, rootIds) : undefined
-    const rootSelection = sqlConcat([
-      sqlText(`SELECT ${quote('id')} FROM ${parentIds ?? rootIds}`),
-    ], '')
-    const collectionPredicate = plan.predicate === undefined
-      ? undefined
-      : sqlConcat([' AND (', plan.predicate as SqlFragment, ')'])
-    const rowsDefinition = (
-      name: string,
-      child: SqlFragment,
-      itemFilter?: SqlFragment,
-      matchedFilter?: SqlFragment,
-    ): SqlFragment => {
-      let rawFilter: SqlFragment | undefined
-      if (itemFilter !== undefined) {
-        rawFilter = sqlConcat([
-          sqlText(', (CASE WHEN ('),
-          itemFilter,
-          sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter')}, `),
-          sqlText('(CASE WHEN ('),
-          matchedFilter,
-          sqlText(`) THEN TRUE ELSE FALSE END) AS ${quote('__raw_filter_matched')}`),
-        ])
-      }
-      const source = sqlConcat([
-        sqlText(`SELECT ${parentId} AS ${quote('__parent_id')}, ` +
-          `${quote('__child')}.${quote('id')} AS ${quote('__item_id')}, ${quote('__child')}.*`),
-        edgeFields.length === 0
-          ? undefined
-          : sqlConcat([sqlText(', '), this.#edgeProjection(plan, edgeFields), sqlText(` AS ${quote('__edge')}`)], ''),
-        rawFilter,
-        sqlText(' FROM '),
-        sqlText(`${plan.relation} `),
-        sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
-        sqlConcat([sqlText('JOIN ('), child, sqlText(`) AS ${quote('__child')} `)], ''),
-        sqlText(`ON ${quote('__child')}.${quote('id')} = ${quote(plan.targetAlias)}.${quote('id')} `),
-        sqlText(`WHERE ${plan.condition}`),
-        collectionPredicate,
-      ], '')
-      return this.#dedupeRowsDefinition(name, source, itemFilter !== undefined)
-    }
-    this.#batchDefinitions.push(
-      sqlConcat([
-        sqlText(`${rootCte} AS MATERIALIZED (`),
-        rootSelection,
-        sqlText(')'),
-      ], ''),
-      sqlConcat([
-        sqlText(`${targetIdsCte} AS MATERIALIZED (`),
-        sqlText(`SELECT DISTINCT ${quote(plan.targetAlias)}.${quote('id')} AS ${quote('id')} `),
-        sqlText(`FROM ${plan.relation} `),
-        sqlText(`JOIN ${rootCte} ${quote(rootAlias)} ON TRUE `),
-        sqlText(`WHERE ${plan.condition}`),
-        collectionPredicate,
-        sqlText(')'),
-      ], ''),
-      rowsDefinition(rowsAllCte, allSql, filterPredicate, filterMatched),
-      ...(filterPredicate === undefined ? [] : [sqlConcat([
-        sqlText(`${rowsFilteredCte} AS MATERIALIZED (`),
-        sqlText(`SELECT * FROM ${rowsAllCte} WHERE ${quote('__batch_filter')} IS TRUE)`),
-      ], ''), sqlConcat([
-        sqlText(`${quote(`batch_rows_matched_${suffix}`)} AS MATERIALIZED (`),
-        sqlText(`SELECT * FROM ${rowsAllCte} WHERE ${quote('__batch_filter_matched')} IS TRUE)`),
-      ], '')]),
-    )
-    const aggregate = this.#flatAggregateDefinitions({
-      baseCte: rowsAllCte,
-      countsRowsCte: rowsAllCte,
-      itemOrder: `${quote('__child')}.${quote('id')}`,
-      itemQuery: sqlText(
-        `SELECT * FROM ${filter === undefined ? rowsAllCte : rowsFilteredCte}`,
-      ),
-      itemsCte,
-      limit,
-      matchedQuery: filter === undefined
-        ? undefined
-        : sqlText(`SELECT * FROM ${quote(`batch_rows_matched_${suffix}`)}`),
-      offset,
-      prePaged: false,
-    })
-    this.#batchDefinitions.push(...aggregate.definitions)
-    this.#projectFlatEnvelope(node, spec, {
-      hydrateItem: entry => childAll.hydrate(entry),
-      itemsCte,
-    })
-    return true
-  }
-
-  /**
    * Add one projected collection as a correlated child query.
    *
    * Entity-projected and relationship-record collections share the same
@@ -4067,7 +3851,6 @@ class QueryProjection {
     return {
       compile,
       identity: this.#collectionIdentity(plan),
-      identityUnique: true,
       orderable: new Set([...fields, ...projectedEdgeFields]),
     }
   }
@@ -4126,7 +3909,6 @@ class QueryProjection {
     return {
       compile,
       identity,
-      identityUnique: true,
       orderable: new Set(fields),
     }
   }
@@ -4137,18 +3919,7 @@ class QueryProjection {
    * @returns `true` when the owner/target pair is unique per edge.
    */
   #edgeProjectionAllowed(plan: CollectionRelationPlan): boolean {
-    const collection = plan.collection
-    if (collection.kind !== 'explicit') return true
-    const relationship = collection.relationship
-    if (relationship.between.length === 2) return true
-    const target = collection.targetEndpoint
-    if (!target) return false
-    return relationship.constraints.some(constraint => (
-      constraint.type === Constraint.Structural
-      && constraint.fields.length === 2
-      && constraint.fields.includes(collection.ownerEndpoint.field)
-      && constraint.fields.includes(target.field)
-    ))
+    return this.#edgeProjectionAllowedCollection(plan.collection)
   }
 
   /**
@@ -4477,24 +4248,6 @@ export function compilePolymorphicQuery(
   definition: EntityDefinition,
   options: PolymorphicQueryOptions,
 ): CompiledPolymorphicQuery {
-  return compilePolymorphicQueryWithRejection(entities, definition, options)
-}
-
-/**
- * Compile one entity query with an internal nested-flat rejection hook.
- * @param entities - Canonical entity definitions.
- * @param definition - Concrete entity or abstract ancestor being queried.
- * @param options - Query options.
- * @param rejectNestedProjection - Test-only post-mutation rejection hook.
- * @returns The complete SQL, ordered bindings, and row hydrator.
- * @internal
- */
-export function compilePolymorphicQueryWithRejection(
-  entities: EntityDefinitions,
-  definition: EntityDefinition,
-  options: PolymorphicQueryOptions,
-  rejectNestedProjection?: (path: readonly string[], collection: string) => boolean,
-): CompiledPolymorphicQuery {
   const projection = new QueryProjection(
     entities,
     definition,
@@ -4505,7 +4258,6 @@ export function compilePolymorphicQueryWithRejection(
     undefined,
     undefined,
     undefined,
-    rejectNestedProjection,
   )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
@@ -4794,78 +4546,38 @@ interface CollectionOrdering {
 }
 
 /**
- * Quote one alias-qualified identity tuple.
- * @param alias - Relation alias.
- * @param identity - Output aliases forming the identity.
- * @returns Comma-separated quoted columns.
- */
-function identityColumns(alias: string, identity: readonly string[]): string {
-  return identity.map(name => `${quote(alias)}.${quote(name)}`).join(', ')
-}
-
-/**
- * Count distinct result identities in one member query.
- * @param member - Member query before identity selection.
- * @param identity - Output aliases forming the identity.
- * @param unique - Whether member rows are already unique by identity.
+ * Count result identities in one member query.
+ *
+ * Every member adapter guarantees one row per result identity.
+ * @param member - Member query.
  * @returns The count fragment.
  */
-function collectionIdentityCount(
-  member: SqlFragment,
-  identity: readonly string[],
-  unique: boolean,
-): SqlFragment {
-  if (unique) {
-    return sqlConcat(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
-  }
-  return sqlConcat([
-    'SELECT count(*)::int FROM (SELECT DISTINCT ON (',
-    identityColumns('__member', identity),
-    ') * FROM (',
-    member,
-    ') AS "__member") AS "__distinct"',
-  ])
+function collectionIdentityCount(member: SqlFragment): SqlFragment {
+  return sqlConcat(['SELECT count(*)::int FROM (', member, ') AS "__member"'])
 }
 
 /**
- * Select distinct identities after filtering, then order and page them.
- * @param member - Member query before identity selection.
- * @param identity - Output aliases forming the identity.
+ * Order and page member identities.
+ *
+ * Every member adapter guarantees one row per result identity.
+ * @param member - Member query.
  * @param orderings - Requested and stable ordering.
  * @param limit - Page size, or null for unlimited.
  * @param offset - Rows to skip.
- * @param unique - Whether member rows are already unique by identity.
  * @returns The ordered and paged identity query.
  */
 function collectionIdentityPage(
   member: SqlFragment,
-  identity: readonly string[],
   orderings: readonly CollectionOrdering[],
   limit: number | null,
   offset: number,
-  unique: boolean,
 ): SqlFragment {
   const order = orderings
     .map(entry => `${quote('__member')}.${quote(entry.name)} ${entry.direction}`)
     .join(', ')
-  if (unique) {
-    const paged = sqlConcat([
-      'SELECT * FROM (', member, ') AS "__member"',
-      order === '' ? undefined : ` ORDER BY ${order}`,
-    ])
-    return sqlConcat([paged, SQL.paginate(limit, offset)])
-  }
-  const distinct = sqlConcat([
-    'SELECT DISTINCT ON (', identityColumns('__member', identity), ') * FROM (',
-    member,
-    ') AS "__member" ORDER BY ', identityColumns('__member', identity),
-  ])
-  const distinctOrder = orderings
-    .map(entry => `${quote('__distinct')}.${quote(entry.name)} ${entry.direction}`)
-    .join(', ')
   const paged = sqlConcat([
-    'SELECT * FROM (', distinct, ') AS "__distinct"',
-    distinctOrder === '' ? undefined : ` ORDER BY ${distinctOrder}`,
+    'SELECT * FROM (', member, ') AS "__member"',
+    order === '' ? undefined : ` ORDER BY ${order}`,
   ])
   return sqlConcat([paged, SQL.paginate(limit, offset)])
 }
@@ -5164,20 +4876,6 @@ function hydrateReference(
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
-}
-
-/**
- * Convert a compiled query back into an ordered SQL fragment.
- * @param compiled - Compiled query with positional values.
- * @returns SQL fragment preserving the query's value order.
- */
-function compiledFragment(compiled: CompiledPolymorphicQuery): SqlFragment {
-  const parts = compiled.sql.split(/(\$\d+)/u)
-  return sqlConcat(parts.map(part => {
-    const match = /^\$(\d+)$/u.exec(part)
-    if (match === null) return sqlText(part)
-    return sqlValue(compiled.values[Number(match[1]) - 1])
-  }), '')
 }
 
 /**
